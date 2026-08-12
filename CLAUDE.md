@@ -320,6 +320,7 @@ PyVista was also considered (VTK-based) but is heavier and harder to embed in Qt
 | Reset View | Toolbar button + View menu → `reset_view()` → re-fit | Added 2026-08-13 |
 | In-place edits (supercell/surface/add/delete) | **Camera preserved** — `set_structure(reset_view=False)` | Far plane is computed per-frame from current atom positions so no clipping |
 | Zoom | **Completely free** (VESTA-style, decided 2026-08-13) | No wall/atom limits; camera may pass through frame and atoms. Floor 1e-3 only to avoid singular view math. (Earlier wall-limited zoom was rejected as too strict.) |
+| Atom near-plane handling | **Near-distance fade** (decided 2026-08-13) | Sphere shader fades alpha in `[NEAR_FADE_END=0.25, NEAR_FADE_START=0.8]` Å view depth + two-sided lighting — zooming into atoms never shows a cross-section disk |
 | Highlight on click | Color-only (amber), **no size change** | |
 | Cell frame | Depth-tested, semi-transparent blue — occludable by atoms; drawn with `GL_DEPTH_CLAMP` so it stays fully visible when the camera is inside the cell (no near-plane cross-section) | |
 | Near plane | Fixed 0.01 | |

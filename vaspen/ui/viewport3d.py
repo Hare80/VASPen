@@ -176,6 +176,13 @@ DEFAULT_ATOM_COLOR = (0.560, 0.560, 0.560)  # gray for unknown elements
 # preference: "点击高亮时候不要放大")
 HIGHLIGHT_COLOR = (1.0, 0.85, 0.0)  # amber/yellow
 
+# Near-distance fade (view-space Angstrom): atoms closer than
+# NEAR_FADE_START begin fading and are fully transparent at NEAR_FADE_END,
+# so the camera can zoom into a structure without seeing sphere
+# cross-sections.
+NEAR_FADE_START = 0.8
+NEAR_FADE_END = 0.25
+
 # Ball-and-stick scale factors
 SPHERE_SCALE = 0.60   # atom sphere radius = covalent radius × 0.60
 EDGE_SCALE = 1.04     # dark outline sphere drawn slightly larger behind
@@ -492,9 +499,13 @@ _SPHERE_VERT = """
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 uniform mat4 uMVP;
+uniform mat4 uView;
 out vec3 vNormal;
+out float vViewDepth;
 void main() {
     vNormal = aNormal;
+    vec4 viewPos = uView * vec4(aPos, 1.0);
+    vViewDepth = -viewPos.z;  // camera looks down -z in view space
     gl_Position = uMVP * vec4(aPos, 1.0);
 }
 """
@@ -502,13 +513,21 @@ void main() {
 _SPHERE_FRAG = """
 #version 330 core
 in vec3 vNormal;
+in float vViewDepth;
 uniform vec4 uColor;
+uniform float uFadeStart;  // view depth (A) where fading begins
+uniform float uFadeEnd;    // view depth (A) where the atom is fully faded
 out vec4 fragColor;
 void main() {
     vec3 n = normalize(vNormal);
+    if (!gl_FrontFacing) n = -n;  // two-sided lighting: correct when viewed from inside
     float diff = max(dot(n, normalize(vec3(0.35, 0.55, 0.75))), 0.0);
     float shade = 0.45 + 0.60 * diff;
-    fragColor = vec4(uColor.rgb * shade, uColor.a);
+    // Near-distance fade (user decision 2026-08-13): atoms fade out as
+    // the camera approaches them, so zooming in never shows a
+    // cross-section disk through the sphere.
+    float fade = smoothstep(uFadeEnd, uFadeStart, vViewDepth);
+    fragColor = vec4(uColor.rgb * shade, uColor.a * fade);
 }
 """
 
@@ -913,8 +932,15 @@ class Viewport3D(QOpenGLWidget):
         proj, view = self._camera_matrices()
 
         # --- Atom spheres (edge pass, then body pass) ---
+        # Blending is on so the near-distance fade in the shader
+        # actually fades instead of showing the raw cross-section.
         self._sphere_prog.bind()
+        self._sphere_prog.setUniformValue("uView", _to_qmatrix(view))
+        self._sphere_prog.setUniformValue("uFadeStart", NEAR_FADE_START)
+        self._sphere_prog.setUniformValue("uFadeEnd", NEAR_FADE_END)
         self._unit_vao.bind()
+        gl.glEnable(GL_BLEND)
+        gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         for i in range(len(self._atom_pos)):
             scale = float(self._atom_radius[i])
             if i == self._selected_index:
@@ -937,6 +963,7 @@ class Viewport3D(QOpenGLWidget):
             self._sphere_prog.setUniformValue("uColor", *color)
             gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
                               GL_UNSIGNED_INT, VoidPtr(0))
+        gl.glDisable(GL_BLEND)
         self._unit_vao.release()
 
         # --- Bonds (unlit cylinders) ---
