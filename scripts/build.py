@@ -19,14 +19,17 @@ def build_pyinstaller() -> None:
     # --add-data takes "source<os.pathsep>dest" (';' on Windows, ':' on Linux).
     # Dest "vaspen/resources" mirrors the source layout so the frozen code
     # finds i18n/icons next to the package (Path(__file__).parent).
+    icon = RESOURCES / "icons" / "app.ico"
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", "VASPen",
         "--windowed",
         "--onedir",
         "--add-data", f"{RESOURCES}{os.pathsep}vaspen{os.sep}resources",
-        str(ROOT / "vaspen" / "main.py"),
     ]
+    if icon.exists():
+        cmd += ["--icon", str(icon)]
+    cmd += [str(ROOT / "vaspen" / "main.py")]
     print(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, cwd=ROOT, check=True)
     print("Build complete → dist/VASPen/")

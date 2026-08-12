@@ -30,9 +30,12 @@ def main() -> int:
     app.setOrganizationDomain("vaspen.dev")
 
     # --- Icon ---
-    icon_path = Path(__file__).parent / "resources" / "icons" / "app.svg"
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+    icons_dir = Path(__file__).parent / "resources" / "icons"
+    for name in ("app.png", "app.svg"):
+        icon_path = icons_dir / name
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
+            break
 
     # --- Logger ---
     logger = setup_logger()
