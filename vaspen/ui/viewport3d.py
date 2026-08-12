@@ -56,6 +56,7 @@ from shiboken6 import VoidPtr
 
 GL_DEPTH_TEST = 0x0B71
 GL_BLEND = 0x0BE2
+GL_DEPTH_CLAMP = 0x864F  # core in GL 3.3
 GL_SRC_ALPHA = 0x0302
 GL_ONE_MINUS_SRC_ALPHA = 0x0303
 GL_COLOR_BUFFER_BIT = 0x4000
@@ -950,15 +951,21 @@ class Viewport3D(QOpenGLWidget):
         # --- Unit cell outline (faint blue, only when periodic) ---
         # Depth-tested like normal geometry: parts of the frame behind
         # atoms are occluded by the ball-and-stick model (user
-        # preference — the frame must not float on top).
+        # preference — the frame must not float on top). GL_DEPTH_CLAMP
+        # keeps the frame fully visible even when the camera is inside
+        # the cell or past a wall: vertices behind the near plane are
+        # clamped instead of clipped, so the frame never shows a
+        # near-plane "cross-section".
         if self._cell_verts is not None and len(self._cell_verts) > 0:
             self._flat_prog.bind()
             self._cell_vao.bind()
             self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
             self._flat_prog.setUniformValue("uColor", 0.55, 0.65, 0.85, 0.35)
+            gl.glEnable(GL_DEPTH_CLAMP)
             gl.glEnable(GL_BLEND)
             gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
             gl.glDrawArrays(GL_LINES, 0, len(self._cell_verts))
+            gl.glDisable(GL_DEPTH_CLAMP)
             gl.glDisable(GL_BLEND)
             self._cell_vao.release()
 
