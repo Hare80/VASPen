@@ -356,8 +356,8 @@ Files: {}</source>
         <translation>预览：</translation>
     </message>
     <message>
-        <source>KSPACING (Å⁻¹):</source>
-        <translation>KSPACING (Å⁻¹)：</translation>
+        <source>KSPACING (2π/Å):</source>
+        <translation>KSPACING (2π/Å)：</translation>
     </message>
     <message>
         <source>Recommended: Insulators = 0.04, Metals = 0.03</source>

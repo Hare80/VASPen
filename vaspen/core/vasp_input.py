@@ -166,26 +166,31 @@ def generate_kpoints_automatic(
     k_spacing: float = 0.04,
     gamma_centered: bool = True,
 ) -> str:
-    """Generate KPOINTS content using automatic KSPACING mode.
+    """Generate KPOINTS content from a KSPACING value.
 
-    This is the recommended approach — VASP automatically
-    determines the optimal k-mesh from KSPACING and the cell.
+    Computes an explicit regular k-mesh (Gamma-centered or
+    Monkhorst-Pack) with N_i = max(1, ceil(|b_i| / KSPACING)), where
+    b_i are the normalized reciprocal lattice vectors (b_i·a_j = δ_ij,
+    rows of inv(cell)) and KSPACING follows the vaspkit convention
+    (units of 2π/Å — equivalent to VASP's KSPACING tag with the value
+    multiplied by 2π; see https://vasp.at/wiki/KSPACING).
 
     Args:
         structure_cell: 3×3 cell matrix (Angstrom).
-        k_spacing: Target k-point spacing in Å⁻¹.
+        k_spacing: Target k-point spacing (2π/Å, vaspkit convention).
                    Recommended: 0.04 (insulators), 0.03 (metals).
         gamma_centered: True for Gamma-centered, False for Monkhorst-Pack.
 
     Returns:
         KPOINTS file content as a string.
     """
+    mesh = estimate_k_mesh(np.asarray(structure_cell, dtype=float), k_spacing)
     scheme = "Gamma" if gamma_centered else "Monkhorst-Pack"
-    return f"""Automatic KSPACING mesh
+    return f"""Automatic k-point mesh (KSPACING = {k_spacing:.4f}, 2π/Å)
 0
-Auto
-{k_spacing:.4f}
 {scheme}
+{mesh[0]} {mesh[1]} {mesh[2]}
+0 0 0
 """
 
 
@@ -296,19 +301,23 @@ def estimate_k_mesh(
 ) -> tuple[int, int, int]:
     """Estimate a k-mesh (n1, n2, n3) from cell and target spacing.
 
-    Follows VASP's automatic-mesh formula:
+    Follows the vaspkit convention (KSPACING in units of 2π/Å):
         n_i = max(1, ceil(|b_i| / KSPACING))
-    where b_i are the reciprocal lattice vectors.
+    where b_i are the normalized reciprocal lattice vectors
+    (b_i·a_j = δ_ij — rows of inv(cell), no 2π factor). This is
+    equivalent to VASP's KSPACING tag formula on the wiki
+    (https://vasp.at/wiki/KSPACING: n_i = max(1, ceil(2π·|b_i| /
+    KSPACING_vasp))) with KSPACING_vasp = 2π · KSPACING_input.
 
     Args:
         cell: 3×3 real-space cell matrix (Angstrom).
-        target_spacing: Target KSPACING in Å⁻¹.
+        target_spacing: Target KSPACING (2π/Å, vaspkit convention).
 
     Returns:
         (k1, k2, k3) integer mesh.
     """
-    # Reciprocal lattice vectors
-    recip = 2 * np.pi * np.linalg.inv(cell).T
+    # Normalized reciprocal lattice vectors (b_i·a_j = δ_ij)
+    recip = np.linalg.inv(cell).T
     lengths = np.linalg.norm(recip, axis=1)
     mesh = np.maximum(1, np.ceil(lengths / target_spacing))
     return tuple(int(m) for m in mesh)

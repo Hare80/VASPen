@@ -23,16 +23,55 @@ from vaspen.core.vasp_input import (
 # k-mesh estimate
 # ----------------------------------------------------------------------
 
-def test_estimate_k_mesh_matches_vasp_formula():
-    # Si: a = 5.43 Å → |b| = 2π/5.43 ≈ 1.1569 → ceil(1.1569 / 0.04) = 29
+def test_estimate_k_mesh_vaspkit_convention():
+    # vaspkit convention (KSPACING in 2π/Å): N_i = max(1, ceil(|b_i|/K))
+    # with normalized reciprocal vectors (b_i·a_j = δ_ij).
+    # Si cubic: |b| = 1/5.43 = 0.18414 → ceil(0.18414/0.04) = 5
     cell = np.eye(3) * 5.43
-    assert estimate_k_mesh(cell, 0.04) == (29, 29, 29)
+    assert estimate_k_mesh(cell, 0.04) == (5, 5, 5)
+    # ceiling semantics: ceil(0.18414/0.05) = ceil(3.6828) = 4
+    assert estimate_k_mesh(cell, 0.05) == (4, 4, 4)
+
+
+def test_estimate_k_mesh_gaas_fcc_primitive():
+    """User example: GaAs primitive cell (FCC basis), a = 5.6537.
+    |b| = √3/a = 0.30636."""
+    a = 5.6537
+    cell = np.array([[0.0, 0.5, 0.5], [0.5, 0.0, 0.5], [0.5, 0.5, 0.0]]) * a
+    assert estimate_k_mesh(cell, 0.030) == (11, 11, 11)  # ceil(10.212)
+    assert estimate_k_mesh(cell, 0.020) == (16, 16, 16)  # ceil(15.318)
+    assert estimate_k_mesh(cell, 0.040) == (8, 8, 8)     # ceil(7.659)
+
+
+def test_estimate_k_mesh_zno_hexagonal():
+    """User example: ZnO hexagonal, a = 3.289, c = 5.307.
+    |b1| = |b2| = 1/(a·sin60°) = 0.35108, |b3| = 1/c = 0.18843."""
+    a, c = 3.289, 5.307
+    cell = np.array([
+        [a, 0.0, 0.0],
+        [-0.5 * a, a * np.sqrt(3) / 2, 0.0],
+        [0.0, 0.0, c],
+    ])
+    assert estimate_k_mesh(cell, 0.040) == (9, 9, 5)
 
 
 def test_estimate_k_mesh_floor_is_one():
     cell = np.eye(3) * 50.0  # very large cell → coarse mesh
     mesh = estimate_k_mesh(cell, 0.05)
     assert all(m >= 1 for m in mesh)
+
+
+def test_generate_kpoints_automatic_writes_explicit_mesh():
+    cell = np.eye(3) * 5.43
+    content = generate_kpoints_automatic(cell, k_spacing=0.04, gamma_centered=True)
+    lines = content.splitlines()
+    assert lines[1] == "0"
+    assert lines[2] == "Gamma"
+    assert lines[3] == "5 5 5"
+    assert lines[4] == "0 0 0"
+
+    content_mp = generate_kpoints_automatic(cell, k_spacing=0.04, gamma_centered=False)
+    assert content_mp.splitlines()[2] == "Monkhorst-Pack"
 
 
 # ----------------------------------------------------------------------
@@ -201,4 +240,5 @@ def test_generate_all_inputs_element_order_consistent(tmp_path):
     assert files["POTCAR"] == "POTCAR-O\nPOTCAR-Fe\n"
     # INCAR/KPOINTS sanity
     assert "ENCUT = 400" in files["INCAR"]
-    assert "Auto" in files["KPOINTS"]
+    assert "Gamma" in files["KPOINTS"]
+    assert "9 9 9" in files["KPOINTS"]  # cell [3,3,3], KSPACING 0.04 → ceil(8.33)

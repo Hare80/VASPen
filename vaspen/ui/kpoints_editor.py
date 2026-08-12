@@ -113,7 +113,7 @@ class KpointsEditorDialog(QDialog):
         self._kspacing_label = QLabel("0.040")
         self._kspacing_label.setMinimumWidth(50)
         slider_row.addWidget(self._kspacing_label)
-        form.addRow(self.tr("KSPACING (Å⁻¹):"), slider_row)
+        form.addRow(self.tr("KSPACING (2π/Å):"), slider_row)
 
         # Recommendation notes
         rec_text = (

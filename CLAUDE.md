@@ -365,6 +365,16 @@ The INCAR strategy uses **layered defaults by calculation type**. Implemented in
 | Manual Mesh | n1, n2, n3 | User-specified |
 | Line-mode (Band) | High-symmetry path + points per segment | 20 points/segment |
 
+**KSPACING convention (settled 2026-08-13):** vaspkit-style units of
+**2π/Å**. The automatic mode writes an explicit regular mesh (Gamma /
+Monkhorst-Pack, shift `0 0 0`) with
+`N_i = max(1, ceil(|b_i| / KSPACING))` where `b_i` are the normalized
+reciprocal lattice vectors (`b_i·a_j = δ_ij`). Equivalent to VASP's
+`KSPACING` INCAR tag (https://vasp.at/wiki/KSPACING) with
+`KSPACING_vasp = 2π × KSPACING_input`. Worked examples: Si cubic
+(0.04 → 5×5×5), GaAs FCC primitive (0.030 → 11×11×11, 0.020 →
+16×16×16), ZnO hexagonal (0.040 → 9 9 5).
+
 ### 8.3 POTCAR Recommendations
 
 | Element | Recommended Variant | Reason |
