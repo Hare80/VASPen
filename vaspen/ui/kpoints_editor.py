@@ -104,16 +104,16 @@ class KpointsEditorDialog(QDialog):
         form = QFormLayout(page)
 
         # KSPACING slider + numeric input (type any value with 0.001
-        # precision; the slider spans the useful vaspkit range 0.005-0.10)
+        # precision; slider spans 0.001-0.200, the vaspkit useful range)
         slider_row = QHBoxLayout()
         self._kspacing_slider = QSlider(Qt.Horizontal)
-        self._kspacing_slider.setRange(5, 100)  # 0.005 to 0.100 (×1000)
+        self._kspacing_slider.setRange(1, 200)  # 0.001 to 0.200 (×1000)
         self._kspacing_slider.setValue(40)      # 0.040 default
         self._kspacing_slider.valueChanged.connect(self._on_kspacing_slider)
         slider_row.addWidget(self._kspacing_slider, 1)
 
         self._kspacing_spin = QDoubleSpinBox()
-        self._kspacing_spin.setRange(0.005, 0.100)
+        self._kspacing_spin.setRange(0.001, 0.200)
         self._kspacing_spin.setDecimals(3)
         self._kspacing_spin.setSingleStep(0.001)
         self._kspacing_spin.setValue(0.040)
