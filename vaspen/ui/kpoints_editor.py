@@ -34,6 +34,7 @@ from vaspen.core.vasp_input import (
     generate_kpoints_automatic,
     generate_kpoints_manual,
     generate_kpoints_line_mode,
+    get_high_symmetry_points,
     KSPACING_RECOMMEND,
     estimate_k_mesh,
 )
@@ -126,7 +127,7 @@ class KpointsEditorDialog(QDialog):
 
         # Gamma-centered checkbox
         self._gamma_auto = QComboBox()
-        self._gamma_auto.addItems(["Gamma-centered", "Monkhorst-Pack"])
+        self._gamma_auto.addItems([self.tr("Gamma-centered"), self.tr("Monkhorst-Pack")])
         form.addRow(self.tr("Scheme:"), self._gamma_auto)
 
         self._gamma_auto.currentIndexChanged.connect(self._update_preview)
@@ -167,7 +168,7 @@ class KpointsEditorDialog(QDialog):
         form.addRow(self.tr("k-mesh:"), mesh_row)
 
         self._gamma_manual = QComboBox()
-        self._gamma_manual.addItems(["Gamma-centered", "Monkhorst-Pack"])
+        self._gamma_manual.addItems([self.tr("Gamma-centered"), self.tr("Monkhorst-Pack")])
         form.addRow(self.tr("Scheme:"), self._gamma_manual)
 
         for spin in (self._k1_spin, self._k2_spin, self._k3_spin):
@@ -268,9 +269,28 @@ class KpointsEditorDialog(QDialog):
             if not segments:
                 segments = [("G", "X")]
             npts = self._band_npoints.value()
-            content = generate_kpoints_line_mode(segments, npts)
+            content = self._line_mode_content(segments, npts)
 
         self._preview.setPlainText(content)
+
+    def _line_mode_content(self, segments: list[tuple[str, str]], npts: int) -> str:
+        """Line-mode KPOINTS preview, or a '#'-prefixed error note.
+
+        '#'-prefixed content is intentionally invalid VASP input and is
+        rejected by _on_accept.
+        """
+        if self._structure_model is None or self._structure_model.n_atoms == 0:
+            return self.tr("# Open a structure to compute the k-path coordinates.")
+        try:
+            special = get_high_symmetry_points(self._structure_model.cell)
+        except Exception:
+            special = {}
+        if not special:
+            return self.tr("# Cannot determine high-symmetry points for this cell.")
+        try:
+            return generate_kpoints_line_mode(segments, npts, special_points=special)
+        except ValueError as e:
+            return self.tr("# {}").format(e)
 
     # ------------------------------------------------------------------
     # Accept
@@ -279,6 +299,13 @@ class KpointsEditorDialog(QDialog):
     def _on_accept(self) -> None:
         self._update_preview()
         content = self._preview.toPlainText()
+        if content.startswith("#"):
+            QMessageBox.warning(
+                self,
+                self.tr("Cannot Generate KPOINTS"),
+                content.lstrip("# "),
+            )
+            return
 
         filepath, _ = QFileDialog.getSaveFileName(
             self,
@@ -288,7 +315,7 @@ class KpointsEditorDialog(QDialog):
         )
         if filepath:
             from pathlib import Path
-            Path(filepath).write_text(content)
+            Path(filepath).write_text(content, encoding="utf-8", newline="\n")
             self.accept()
 
 

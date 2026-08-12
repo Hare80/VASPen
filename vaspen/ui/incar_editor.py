@@ -297,5 +297,5 @@ class IncarEditorDialog(QDialog):
         )
         if filepath:
             from pathlib import Path
-            Path(filepath).write_text(content)
+            Path(filepath).write_text(content, encoding="utf-8", newline="\n")
             self.accept()

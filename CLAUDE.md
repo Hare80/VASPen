@@ -440,6 +440,14 @@ python -m nuitka --standalone --windows-console-mode=disable \
 4. Compile: `pyside6-lrelease vaspen/resources/i18n/*.ts`
 5. Load `.qm` at startup via `QTranslator`.
 
+**Warning (2026-08-13):** `pyside6-lupdate`'s Python extractor is broken in
+this environment (silently extracts 0 strings and marks all existing
+entries `type="vanished"`). Do NOT run it here — edit the `.ts` files by
+hand, then `pyside6-lrelease` (via `.venv/Scripts/python.exe
+.venv/Scripts/pyside6-lrelease.exe`). Also note: dynamic strings via
+`QCoreApplication.translate("FileIO", label)` are not statically
+extractable; the FileIO context is maintained by hand in the `.ts` files.
+
 ### 11.2 Language Switching (live — no restart)
 
 `MainWindow` owns the `QTranslator` and loads it in `__init__` (before UI creation).

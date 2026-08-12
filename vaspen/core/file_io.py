@@ -11,10 +11,22 @@ from pathlib import Path
 from typing import Callable
 
 from ase import Atoms
+from PySide6.QtCore import QCoreApplication
 
 # Type aliases
 Reader = Callable[[str | Path], Atoms]
 Writer = Callable[[str | Path, Atoms], None]
+
+
+def _tr(text: str) -> str:
+    """Translate a user-visible string (translation context: FileIO).
+
+    The core layer cannot use QObject.tr(); QCoreApplication.translate
+    resolves against the installed translators at call time, so file
+    dialog labels follow the active UI language.
+    """
+    return QCoreApplication.translate("FileIO", text)
+
 
 # Map extensions → display name for file dialogs
 EXTENSION_DISPLAY_NAMES: dict[str, str] = {
@@ -26,7 +38,6 @@ EXTENSION_DISPLAY_NAMES: dict[str, str] = {
     ".xsf": "XCrySDen Structure File",
     ".pdb": "Protein Data Bank",
     ".json": "ASE JSON",
-    ".cif": "CIF",
     ".cube": "Gaussian Cube",
 }
 
@@ -85,11 +96,11 @@ class FileIO:
         """
         exts = cls.supported_write_formats() if for_writing else cls.supported_read_formats()
         patterns = " ".join(f"*{e}" for e in exts)
-        filters = [f"Structure files ({patterns})"]
+        filters = [_tr("Structure files") + f" ({patterns})"]
         for ext in exts:
-            label = EXTENSION_DISPLAY_NAMES.get(ext, ext.upper())
+            label = _tr(EXTENSION_DISPLAY_NAMES.get(ext, ext.upper()))
             filters.append(f"{label} (*{ext})")
-        filters.append("All files (*)")
+        filters.append(_tr("All files") + " (*)")
         return ";;".join(filters)
 
     # ------------------------------------------------------------------

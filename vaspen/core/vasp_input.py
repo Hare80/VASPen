@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from ase.dft.kpoints import get_special_points as ase_get_special_points
 
 # ======================================================================
 # INCAR Presets — modeled after vaspkit's default recommendations
@@ -215,45 +216,82 @@ def generate_kpoints_manual(
 """
 
 
+def get_high_symmetry_points(cell) -> dict[str, np.ndarray]:
+    """High-symmetry k-point labels → fractional coordinates for a cell.
+
+    Uses spglib via ASE (labels of the conventional cell: G, X, M, R,
+    K, L, W, ...).
+
+    Args:
+        cell: 3×3 cell matrix (Angstrom), array-like or ASE Cell.
+
+    Returns:
+        Dict mapping label strings to fractional coordinate arrays.
+    """
+    return ase_get_special_points(cell)
+
+
 def generate_kpoints_line_mode(
     high_symmetry_path: list[tuple[str, str]],
     n_points_per_segment: int = 20,
-    reciprocal_cell: np.ndarray | None = None,
+    special_points: dict[str, np.ndarray] | None = None,
 ) -> str:
     """Generate KPOINTS content for band-structure calculations (Line-mode).
 
     Args:
         high_symmetry_path: List of (start_label, end_label) pairs.
             Example: [("G", "X"), ("X", "M"), ("M", "G")].
-        n_points_per_segment: Number of k-points per path segment.
-                               vaspkit default: 20.
-        reciprocal_cell: 3×3 reciprocal cell matrix. If None, k-point
-                         coordinates must be pre-computed.
+        n_points_per_segment: Number of k-points per path segment
+            (vaspkit default: 20). Each segment includes both endpoints;
+            junction points appear once per adjacent segment.
+        special_points: High-symmetry label → fractional coordinates,
+            e.g. from get_high_symmetry_points(cell).
 
     Returns:
         KPOINTS file content as a string.
-    """
-    n_segments = len(high_symmetry_path)
-    total_points = n_segments * n_points_per_segment
 
-    header = f"Band structure: " + "|".join(
+    Raises:
+        ValueError: If special_points is missing or a path label is
+            unknown for the cell.
+    """
+    if not special_points:
+        raise ValueError(
+            "Line-mode requires special_points (use get_high_symmetry_points "
+            "with the structure cell)"
+        )
+    if n_points_per_segment < 2:
+        raise ValueError("n_points_per_segment must be at least 2")
+
+    n_segments = len(high_symmetry_path)
+    header = "Band structure: " + "|".join(
         f"{a}-{b}" for a, b in high_symmetry_path
     )
 
-    # Line-mode requires explicit k-point coordinates.
-    # We provide the high-symmetry path with weights = 0 for intermediate
-    # points and 1.0 for the endpoints (for band-structure plotting).
-    #
-    # ASE/spglib can compute the actual fractional coordinates of
-    # high-symmetry points from the space group. The UI calls
-    # get_high_symmetry_path() to get those coordinates before
-    # passing them here.
-
-    return f"""{header}
-{n_points_per_segment * n_segments}
-Line-mode
-Reciprocal
-"""
+    lines: list[str] = [
+        header,
+        str(n_points_per_segment * n_segments),
+        "Line-mode",
+        "Reciprocal",
+    ]
+    for start_label, end_label in high_symmetry_path:
+        for label in (start_label, end_label):
+            if label not in special_points:
+                available = ", ".join(sorted(special_points))
+                raise ValueError(
+                    f"Unknown k-point label '{label}' for this cell. "
+                    f"Available: {available}"
+                )
+        start = np.asarray(special_points[start_label], dtype=float)
+        end = np.asarray(special_points[end_label], dtype=float)
+        for i in range(n_points_per_segment):
+            frac = i / (n_points_per_segment - 1)
+            point = start + (end - start) * frac
+            # weight 1.0 marks band-structure vertices (segment ends)
+            weight = 1.0 if i in (0, n_points_per_segment - 1) else 0.0
+            lines.append(
+                f"{point[0]:.8f} {point[1]:.8f} {point[2]:.8f} {weight:.1f}"
+            )
+    return "\n".join(lines) + "\n"
 
 
 def estimate_k_mesh(
@@ -262,8 +300,8 @@ def estimate_k_mesh(
 ) -> tuple[int, int, int]:
     """Estimate a k-mesh (n1, n2, n3) from cell and target spacing.
 
-    Follows vaspkit's formula:
-        n_i = max(1, ceil(1 / (2π · KSPACING · |b_i|)))
+    Follows VASP's automatic-mesh formula (same as vaspkit):
+        n_i = max(1, ceil(|b_i| / KSPACING))
     where b_i are the reciprocal lattice vectors.
 
     Args:
@@ -276,7 +314,7 @@ def estimate_k_mesh(
     # Reciprocal lattice vectors
     recip = 2 * np.pi * np.linalg.inv(cell).T
     lengths = np.linalg.norm(recip, axis=1)
-    mesh = np.maximum(1, np.ceil(lengths / target_spacing / (2 * np.pi)))
+    mesh = np.maximum(1, np.ceil(lengths / target_spacing))
     return tuple(int(m) for m in mesh)
 
 
@@ -456,9 +494,11 @@ def generate_all_inputs(
             gamma_centered=kp.get("gamma_centered", True),
         )
     elif kpoints_mode == "line":
+        special = get_high_symmetry_points(structure_model.atoms.get_cell()[:])
         kpoints_content = generate_kpoints_line_mode(
             high_symmetry_path=kp.get("path", [("G", "X"), ("X", "M"), ("M", "G")]),
             n_points_per_segment=kp.get("n_points", 20),
+            special_points=special,
         )
     else:
         raise ValueError(f"Unknown kpoints mode: {kpoints_mode}")

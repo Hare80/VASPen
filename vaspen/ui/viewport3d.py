@@ -560,6 +560,7 @@ class Viewport3D(QOpenGLWidget):
         self._cam_elevation = 30.0
         self._cam_up = np.array([0.0, 1.0, 0.0])  # world up for the view
         self._fit_radius = 5.0
+        self._view_fitted = False  # True once _fit_camera has run
         self._has_cell = False  # set in set_structure; controls fit view
         self._cell = np.eye(3, dtype=np.float64)
 
@@ -594,11 +595,15 @@ class Viewport3D(QOpenGLWidget):
     # Public API
     # ------------------------------------------------------------------
 
-    def set_structure(self, atoms: Atoms | None) -> None:
+    def set_structure(self, atoms: Atoms | None, reset_view: bool = True) -> None:
         """Replace the displayed structure and re-render.
 
         Args:
             atoms: ASE Atoms to display, or None to clear the view.
+            reset_view: If True, fit the camera to the structure
+                (default, used when opening files). False preserves the
+                current camera (used for in-place edits such as surface
+                cuts and supercells).
         """
         self._atoms = atoms
         self._selected_index = None
@@ -645,7 +650,8 @@ class Viewport3D(QOpenGLWidget):
 
             self._has_cell = any(pbc)
             self._cell = np.asarray(cell, dtype=np.float64)
-            self._fit_camera()
+            if reset_view or not self._view_fitted:
+                self._fit_camera()
 
         self._data_dirty = True
         self.update()
@@ -696,6 +702,7 @@ class Viewport3D(QOpenGLWidget):
         # Ortho framing: the visible half-height IS the camera distance,
         # so d = 1.35×R frames the bounding sphere with a 35% margin.
         self._cam_distance = max(self._fit_radius * 1.35, 1.0)
+        self._view_fitted = True
 
         if self._has_cell:
             c = np.asarray(self._cell[2], dtype=np.float64)

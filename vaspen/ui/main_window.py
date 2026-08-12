@@ -316,13 +316,10 @@ class MainWindow(QMainWindow):
         """Load a structure from the given path."""
         try:
             atoms = FileIO.read(filepath)
-            self._structure.replace_atoms(atoms)
-            self._structure._filepath = filepath
-            self._structure._dirty = False
+            self._structure.load_atoms(atoms, filepath)  # emits structure_loaded once
             self._config.add_recent_file(filepath)
             self._config.last_directory = str(Path(filepath).parent)
             self._update_recent_menu()
-            self._structure.structure_loaded.emit()
             self._set_status(self.tr("Loaded: {}").format(filepath))
             logger.info("Opened file: %s", filepath)
         except Exception as e:
@@ -429,7 +426,9 @@ class MainWindow(QMainWindow):
             out = Path(output_dir)
             for name, content in files.items():
                 if content:
-                    (out / name).write_text(content)
+                    # UTF-8 + LF: VASP input files must not carry the
+                    # locale encoding (GBK) or CRLF line endings
+                    (out / name).write_text(content, encoding="utf-8", newline="\n")
 
             self._set_status(self.tr("VASP input files generated in: {}").format(output_dir))
             QMessageBox.information(
@@ -456,6 +455,7 @@ class MainWindow(QMainWindow):
         dlg = SurfaceDialog(self._structure, self)
         if dlg.exec() == SurfaceDialog.Accepted and dlg.result_structure is not None:
             self._structure.replace_atoms(dlg.result_structure.atoms)
+            self._structure.reset_filepath()  # never silently overwrite the bulk file
             self._set_status(self.tr("Surface cut applied."))
 
     def _on_supercell(self) -> None:
@@ -473,8 +473,9 @@ class MainWindow(QMainWindow):
             try:
                 parts = [int(x) for x in text.split()]
                 if len(parts) != 3:
-                    raise ValueError("Need exactly 3 integers")
+                    raise ValueError(self.tr("Need exactly 3 integers"))
                 StructureBuilder.make_supercell(self._structure, tuple(parts))
+                self._structure.reset_filepath()  # derived structure → Save As
                 self._set_status(self.tr("Supercell {}×{}×{} created.").format(*parts))
             except Exception as e:
                 QMessageBox.critical(self, self.tr("Invalid Input"), str(e))
@@ -487,6 +488,9 @@ class MainWindow(QMainWindow):
         from vaspen.ui.settings_dialog import SettingsDialog
         dlg = SettingsDialog(self)
         dlg.exec()
+        # Apply any language change immediately (no restart needed);
+        # _switch_language is a no-op when the language is unchanged.
+        self._switch_language(self._config.language)
 
     # ------------------------------------------------------------------
     # Language switching
@@ -582,7 +586,7 @@ class MainWindow(QMainWindow):
             self.tr(
                 "<h2>VASPen v0.1.0</h2>"
                 "<p>A cross-platform GUI for VASP first-principles calculations.</p>"
-                "<p><b>Built with:</b> PySide6, ASE, pymatgen, VisPy</p>"
+                "<p><b>Built with:</b> PySide6, ASE, pymatgen, Qt native OpenGL</p>"
                 "<p>Default settings based on "
                 "<a href='https://vaspkit.com'>vaspkit</a> recommendations.</p>"
             ),
@@ -647,7 +651,8 @@ class MainWindow(QMainWindow):
 
     def _on_structure_modified(self) -> None:
         """Structure changed (add/remove atoms, supercell, surface cut...)."""
-        self._viewport.set_structure(self._structure.atoms)
+        # Keep the user's camera — in-place edits must not snap the view back
+        self._viewport.set_structure(self._structure.atoms, reset_view=False)
         self._update_status_bar()
 
     def _on_atom_clicked(self, index: int) -> None:

@@ -249,5 +249,5 @@ class PotcarDialog(QDialog):
                 "POTCAR files (*);;All files (*)",
             )
             if filepath:
-                Path(filepath).write_text(self._potcar_content)
+                Path(filepath).write_text(self._potcar_content, encoding="utf-8", newline="\n")
                 self.accept()

@@ -12,20 +12,40 @@
         <translation>文件(&amp;F)</translation>
     </message>
     <message>
+        <source>&amp;Recent Files</source>
+        <translation>最近文件(&amp;R)</translation>
+    </message>
+    <message>
         <source>&amp;New Structure...</source>
         <translation>新建结构(&amp;N)...</translation>
+    </message>
+    <message>
+        <source>Create a new empty structure</source>
+        <translation>创建一个新的空结构</translation>
     </message>
     <message>
         <source>&amp;Open...</source>
         <translation>打开(&amp;O)...</translation>
     </message>
     <message>
+        <source>Open a structure file</source>
+        <translation>打开结构文件</translation>
+    </message>
+    <message>
         <source>&amp;Save</source>
         <translation>保存(&amp;S)</translation>
     </message>
     <message>
+        <source>Save current structure</source>
+        <translation>保存当前结构</translation>
+    </message>
+    <message>
         <source>Save &amp;As...</source>
         <translation>另存为(&amp;A)...</translation>
+    </message>
+    <message>
+        <source>Save to a new file</source>
+        <translation>保存到新文件</translation>
     </message>
     <message>
         <source>Export as &amp;POSCAR...</source>
@@ -50,6 +70,10 @@
     <message>
         <source>&amp;Preferences...</source>
         <translation>首选项(&amp;P)...</translation>
+    </message>
+    <message>
+        <source>Configure settings</source>
+        <translation>配置设置</translation>
     </message>
     <message>
         <source>&amp;View</source>
@@ -88,6 +112,10 @@
         <translation>生成全部输入文件(&amp;A)...</translation>
     </message>
     <message>
+        <source>Generate INCAR, KPOINTS, POSCAR, POTCAR at once</source>
+        <translation>一次性生成 INCAR、KPOINTS、POSCAR、POTCAR</translation>
+    </message>
+    <message>
         <source>&amp;Tools</source>
         <translation>工具(&amp;T)</translation>
     </message>
@@ -96,8 +124,16 @@
         <translation>切晶面(&amp;U)...</translation>
     </message>
     <message>
+        <source>Cut a surface/slab from the current structure</source>
+        <translation>从当前结构切出表面/平板</translation>
+    </message>
+    <message>
         <source>&amp;Supercell...</source>
         <translation>超胞(&amp;S)...</translation>
+    </message>
+    <message>
+        <source>Create a supercell</source>
+        <translation>创建超胞</translation>
     </message>
     <message>
         <source>&amp;Help</source>
@@ -110,6 +146,10 @@
     <message>
         <source>About &amp;Qt</source>
         <translation>关于 Qt(&amp;Q)</translation>
+    </message>
+    <message>
+        <source>Main Toolbar</source>
+        <translation>主工具栏</translation>
     </message>
     <message>
         <source>Ready</source>
@@ -128,36 +168,96 @@
         <translation>新建结构</translation>
     </message>
     <message>
+        <source>Discard current changes and create a new empty structure?</source>
+        <translation>放弃当前修改并创建新的空结构？</translation>
+    </message>
+    <message>
+        <source>New structure created.</source>
+        <translation>已创建新结构。</translation>
+    </message>
+    <message>
         <source>Open Structure File</source>
         <translation>打开结构文件</translation>
+    </message>
+    <message>
+        <source>Loaded: {}</source>
+        <translation>已加载：{}</translation>
+    </message>
+    <message>
+        <source>Open Failed</source>
+        <translation>打开失败</translation>
+    </message>
+    <message>
+        <source>Could not open file:
+{}</source>
+        <translation>无法打开文件：
+{}</translation>
+    </message>
+    <message>
+        <source>Saved: {}</source>
+        <translation>已保存：{}</translation>
+    </message>
+    <message>
+        <source>Save Failed</source>
+        <translation>保存失败</translation>
     </message>
     <message>
         <source>Save Structure As</source>
         <translation>结构另存为</translation>
     </message>
     <message>
-        <source>Main Toolbar</source>
-        <translation>主工具栏</translation>
+        <source>Export as POSCAR</source>
+        <translation>导出为 POSCAR</translation>
     </message>
     <message>
-        <source>(No recent files)</source>
-        <translation>（无最近文件）</translation>
+        <source>Exported POSCAR: {}</source>
+        <translation>已导出 POSCAR：{}</translation>
     </message>
     <message>
-        <source>Clear Recent Files</source>
-        <translation>清除最近文件</translation>
+        <source>Export Failed</source>
+        <translation>导出失败</translation>
     </message>
     <message>
-        <source>Language Changed</source>
-        <translation>语言已更改</translation>
+        <source>POTCAR Library Not Configured</source>
+        <translation>未配置 POTCAR 库</translation>
     </message>
     <message>
-        <source>Please restart VASPen for the language change to take effect.</source>
-        <translation>请重启 VASPen 以使语言更改生效。</translation>
+        <source>POTCAR library path is not set. Generate without POTCAR?
+
+You can configure it in Edit → Preferences.</source>
+        <translation>未设置 POTCAR 库路径。是否不生成 POTCAR？
+
+可在 编辑 → 首选项 中配置。</translation>
+    </message>
+    <message>
+        <source>Choose Output Directory</source>
+        <translation>选择输出目录</translation>
+    </message>
+    <message>
+        <source>VASP input files generated in: {}</source>
+        <translation>VASP 输入文件已生成于：{}</translation>
     </message>
     <message>
         <source>Success</source>
         <translation>成功</translation>
+    </message>
+    <message>
+        <source>Generated files in:
+{}
+
+Files: {}</source>
+        <translation>已生成文件于：
+{}
+
+文件：{}</translation>
+    </message>
+    <message>
+        <source>Generation Failed</source>
+        <translation>生成失败</translation>
+    </message>
+    <message>
+        <source>Surface cut applied.</source>
+        <translation>已应用表面切割。</translation>
     </message>
     <message>
         <source>Supercell</source>
@@ -168,8 +268,44 @@
         <translation>输入扩展因子 (n_a n_b n_c)：</translation>
     </message>
     <message>
+        <source>Need exactly 3 integers</source>
+        <translation>需要恰好 3 个整数</translation>
+    </message>
+    <message>
+        <source>Supercell {}×{}×{} created.</source>
+        <translation>已创建 {}×{}×{} 超胞。</translation>
+    </message>
+    <message>
+        <source>Invalid Input</source>
+        <translation>无效输入</translation>
+    </message>
+    <message>
+        <source>About VASPen</source>
+        <translation>关于 VASPen</translation>
+    </message>
+    <message>
+        <source>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;A cross-platform GUI for VASP first-principles calculations.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Built with:&lt;/b&gt; PySide6, ASE, pymatgen, Qt native OpenGL&lt;/p&gt;&lt;p&gt;Default settings based on &lt;a href=&apos;https://vaspkit.com&apos;&gt;vaspkit&lt;/a&gt; recommendations.&lt;/p&gt;</source>
+        <translation>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;用于 VASP 第一性原理计算的跨平台图形界面。&lt;/p&gt;&lt;p&gt;&lt;b&gt;构建于：&lt;/b&gt; PySide6、ASE、pymatgen、Qt 原生 OpenGL&lt;/p&gt;&lt;p&gt;默认设置基于 &lt;a href=&apos;https://vaspkit.com&apos;&gt;vaspkit&lt;/a&gt; 推荐值。&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>(No recent files)</source>
+        <translation>（无最近文件）</translation>
+    </message>
+    <message>
+        <source>Clear Recent Files</source>
+        <translation>清除最近文件</translation>
+    </message>
+    <message>
         <source>Atom {}: {} at ({:.3f}, {:.3f}, {:.3f}) Å</source>
         <translation>原子 {}: {} 位于 ({:.3f}, {:.3f}, {:.3f}) Å</translation>
+    </message>
+    <message>
+        <source>Atoms: {}  |  {}</source>
+        <translation>原子数：{}  |  {}</translation>
+    </message>
+    <message>
+        <source>a={:.2f} b={:.2f} c={:.2f}  α={:.1f}° β={:.1f}° γ={:.1f}°</source>
+        <translation>a={:.2f} b={:.2f} c={:.2f}  α={:.1f}° β={:.1f}° γ={:.1f}°</translation>
     </message>
 </context>
 <context>
@@ -183,6 +319,150 @@
 (File → Open, or drag-and-drop)</source>
         <translation>打开结构文件开始
 （文件 → 打开，或拖放文件到此处）</translation>
+    </message>
+</context>
+<context>
+    <name>KpointsEditorDialog</name>
+    <message>
+        <source>Generate KPOINTS</source>
+        <translation>生成 KPOINTS</translation>
+    </message>
+    <message>
+        <source>KPOINTS Mode:</source>
+        <translation>KPOINTS 模式：</translation>
+    </message>
+    <message>
+        <source>Automatic (KSPACING) — recommended</source>
+        <translation>自动 (KSPACING) — 推荐</translation>
+    </message>
+    <message>
+        <source>Manual Mesh (n1 × n2 × n3)</source>
+        <translation>手动网格 (n1 × n2 × n3)</translation>
+    </message>
+    <message>
+        <source>Line-mode (Band Structure)</source>
+        <translation>线模式（能带结构）</translation>
+    </message>
+    <message>
+        <source>Preview:</source>
+        <translation>预览：</translation>
+    </message>
+    <message>
+        <source>KSPACING (Å⁻¹):</source>
+        <translation>KSPACING (Å⁻¹)：</translation>
+    </message>
+    <message>
+        <source>Recommended: Insulators = 0.04, Metals = 0.03</source>
+        <translation>推荐：绝缘体 = 0.04，金属 = 0.03</translation>
+    </message>
+    <message>
+        <source>Fine = 0.02, Coarse = 0.05</source>
+        <translation>精细 = 0.02，粗略 = 0.05</translation>
+    </message>
+    <message>
+        <source>Scheme:</source>
+        <translation>方案：</translation>
+    </message>
+    <message>
+        <source>Gamma-centered</source>
+        <translation>Gamma 中心</translation>
+    </message>
+    <message>
+        <source>Monkhorst-Pack</source>
+        <translation>Monkhorst-Pack</translation>
+    </message>
+    <message>
+        <source>k-mesh:</source>
+        <translation>k 网格：</translation>
+    </message>
+    <message>
+        <source>k-path:</source>
+        <translation>k 路径：</translation>
+    </message>
+    <message>
+        <source>High-symmetry k-path, e.g. G-X|X-W|W-L|L-G|G-K</source>
+        <translation>高对称 k 路径，例如 G-X|X-W|W-L|L-G|G-K</translation>
+    </message>
+    <message>
+        <source>Format: &lt;start&gt;-&lt;end&gt;|&lt;start&gt;-&lt;end&gt;|...
+Labels: G=Gamma, X, M, R, K, L, W, etc.</source>
+        <translation>格式：&lt;起点&gt;-&lt;终点&gt;|&lt;起点&gt;-&lt;终点&gt;|...
+标签：G=Gamma、X、M、R、K、L、W 等。</translation>
+    </message>
+    <message>
+        <source>Points per segment:</source>
+        <translation>每段点数：</translation>
+    </message>
+    <message>
+        <source>Estimated mesh: {} × {} × {}</source>
+        <translation>预计网格：{} × {} × {}</translation>
+    </message>
+    <message>
+        <source>Save KPOINTS</source>
+        <translation>保存 KPOINTS</translation>
+    </message>
+    <message>
+        <source>Cannot Generate KPOINTS</source>
+        <translation>无法生成 KPOINTS</translation>
+    </message>
+    <message>
+        <source># Open a structure to compute the k-path coordinates.</source>
+        <translation># 请先打开结构以计算 k 路径坐标。</translation>
+    </message>
+    <message>
+        <source># Cannot determine high-symmetry points for this cell.</source>
+        <translation># 无法确定此晶胞的高对称点。</translation>
+    </message>
+    <message>
+        <source># {}</source>
+        <translation># {}</translation>
+    </message>
+</context>
+<context>
+    <name>FileIO</name>
+    <message>
+        <source>Structure files</source>
+        <translation>结构文件</translation>
+    </message>
+    <message>
+        <source>All files</source>
+        <translation>所有文件</translation>
+    </message>
+    <message>
+        <source>CIF — Crystallographic Information File</source>
+        <translation>CIF — 晶体学信息文件</translation>
+    </message>
+    <message>
+        <source>XYZ — Extended XYZ</source>
+        <translation>XYZ — 扩展 XYZ</translation>
+    </message>
+    <message>
+        <source>POSCAR / CONTCAR (VASP)</source>
+        <translation>POSCAR / CONTCAR (VASP)</translation>
+    </message>
+    <message>
+        <source>POSCAR (VASP)</source>
+        <translation>POSCAR (VASP)</translation>
+    </message>
+    <message>
+        <source>CONTCAR (VASP)</source>
+        <translation>CONTCAR (VASP)</translation>
+    </message>
+    <message>
+        <source>XCrySDen Structure File</source>
+        <translation>XCrySDen 结构文件</translation>
+    </message>
+    <message>
+        <source>Protein Data Bank</source>
+        <translation>蛋白质数据库</translation>
+    </message>
+    <message>
+        <source>ASE JSON</source>
+        <translation>ASE JSON</translation>
+    </message>
+    <message>
+        <source>Gaussian Cube</source>
+        <translation>Gaussian Cube</translation>
     </message>
 </context>
 </TS>

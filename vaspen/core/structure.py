@@ -88,6 +88,20 @@ class StructureModel(QObject):
         self._selected_index = None
         self.structure_loaded.emit()
 
+    def load_atoms(self, atoms: Atoms, filepath: str | Path | None = None) -> None:
+        """Replace contents with the given Atoms and mark as loaded.
+
+        Emits structure_loaded (not structure_modified) so observers
+        rebuild the scene exactly once. Used by the UI when loading
+        through FileIO.
+        """
+        self._atoms = atoms
+        if filepath is not None:
+            self._filepath = str(Path(filepath))
+        self._dirty = False
+        self._selected_index = None
+        self.structure_loaded.emit()
+
     def save(self, filepath: str | Path | None = None, fmt: str | None = None) -> None:
         """Save the current structure to a file.
 
@@ -188,6 +202,14 @@ class StructureModel(QObject):
         self._dirty = True
         self._selected_index = None
         self.structure_modified.emit()
+
+    def reset_filepath(self) -> None:
+        """Detach from the loaded file so the next Save forces Save As.
+
+        Call after deriving a new structure (surface cut, supercell) so
+        the original file is never silently overwritten.
+        """
+        self._filepath = None
 
     def set_cell(self, cell: np.ndarray) -> None:
         """Set the unit cell (3x3 matrix)."""
