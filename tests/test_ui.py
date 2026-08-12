@@ -129,6 +129,29 @@ def test_reset_view_action_restores_default_camera(window, monkeypatch):
     assert abs(view._cam_elevation) < 1e-6
 
 
+def test_free_zoom_passes_through_cell_wall(window, monkeypatch):
+    """Regression: zoom is completely free (user decision 2026-08-13) —
+    the previous wall-limited floor clamped the camera at the cell wall."""
+    from PySide6.QtCore import QPoint
+
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]],
+                  cell=[10, 10, 10], pbc=True)
+    monkeypatch.setattr(fi.FileIO, "read", classmethod(lambda cls, p: atoms))
+    window._open_file("fake.xyz")
+    view = window._viewport
+
+    class FakeWheel:
+        def angleDelta(self):
+            return QPoint(0, 120 * 40)  # 40 zoom-in ticks
+
+        def accept(self):
+            pass
+
+    view.wheelEvent(FakeWheel())
+    # 0.9^40 ≈ 0.015 — far below any cell-wall limit (was ~10 for this cell)
+    assert view._cam_distance < 0.05
+
+
 def test_undo_action_enabled_after_edit(window, monkeypatch):
     atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
     monkeypatch.setattr(

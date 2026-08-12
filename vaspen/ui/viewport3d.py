@@ -1044,71 +1044,13 @@ class Viewport3D(QOpenGLWidget):
         if delta == 0:
             return
         factor = 0.9 ** (delta / 120.0)
-        # Deep zoom with a direction-aware floor (VESTA-style): the
-        # camera may approach the structure closely but never crosses
-        # the cell wall (periodic) or an atom surface (molecules), so
-        # the frame never partially disappears and the view never
-        # passes through atoms.
-        self._cam_distance = max(
-            min(self._cam_distance * factor, 500.0),
-            self._zoom_limit(),
-        )
+        # Free zoom (VESTA-style — user decision 2026-08-13): no wall
+        # or atom limits; the camera may pass through the cell frame
+        # and atoms. The tiny floor only keeps the eye distinct from
+        # the target point (the view math is singular at distance 0).
+        self._cam_distance = max(self._cam_distance * factor, 1e-3)
         self.update()
         event.accept()
-
-    def _zoom_limit(self) -> float:
-        """Minimum camera distance along the current view direction.
-
-        Periodic structures: the front cell wall (center is inside the
-        box) minus a small margin — the camera stops just outside the
-        cell, so the frame stays fully visible and atoms are never
-        entered. Molecules (no cell): the nearest atom surface
-        intersecting the view ray, with a bounding-sphere fallback.
-        """
-        az = math.radians(self._cam_azimuth)
-        el = math.radians(self._cam_elevation)
-        d = np.array([
-            math.cos(el) * math.sin(az),
-            math.sin(el),
-            math.cos(el) * math.cos(az),
-        ])
-        center = self._cam_center
-        floor = 0.05
-
-        if self._has_cell:
-            a, b, c = self._cell
-            corners = np.array([
-                [0, 0, 0], a, b, c, a + b, a + c, b + c, a + b + c,
-            ], dtype=np.float64)
-            box_min = corners.min(axis=0)
-            box_max = corners.max(axis=0)
-            if np.all((center >= box_min) & (center <= box_max)):
-                # Distance from center to the front wall along d.
-                t_front = float("inf")
-                for k in range(3):
-                    if abs(d[k]) < 1e-9:
-                        continue
-                    t1 = (box_min[k] - center[k]) / d[k]
-                    t2 = (box_max[k] - center[k]) / d[k]
-                    t_front = min(t_front, max(t1, t2))
-                return max(t_front - 0.02, floor)
-
-        # Molecule: nearest atom surface intersecting the view ray
-        # (the camera approaches from outside, so the LARGEST hit
-        # distance is the first surface it would touch).
-        limit = floor
-        for i in range(len(self._atom_pos)):
-            o = self._atom_pos[i] - center
-            t = float(o @ d)
-            lat2 = float(o @ o) - t * t
-            r = float(self._atom_radius[i])
-            if lat2 < r * r:
-                hit = t + math.sqrt(r * r - lat2)
-                if hit > limit:
-                    limit = hit
-        if limit == floor and len(self._atom_pos) > 0:
-            limit = self._fit_radius * 0.3  # no atom on the ray — keep a sane floor
-        return limit + 0.02
 
     # ------------------------------------------------------------------
     # Picking — ID-color framebuffer readback

@@ -311,6 +311,20 @@ The replacement is **hand-written OpenGL 3.3 on QOpenGLWidget** (Qt official cla
 
 PyVista was also considered (VTK-based) but is heavier and harder to embed in Qt.
 
+### 7.3.1 Camera & interaction policy (settled decisions — do not re-litigate)
+
+| Decision | Value | Notes |
+|----------|-------|-------|
+| Projection | **Orthographic** (default) | Perspective rejected by user ("看着有点歪") |
+| Default view on open | c-axis top-down fit (VESTA convention: b up, a left); molecules get 45°/30° isometric | `_fit_camera()` |
+| Reset View | Toolbar button + View menu → `reset_view()` → re-fit | Added 2026-08-13 |
+| In-place edits (supercell/surface/add/delete) | **Camera preserved** — `set_structure(reset_view=False)` | Far plane is computed per-frame from current atom positions so no clipping |
+| Zoom | **Completely free** (VESTA-style, decided 2026-08-13) | No wall/atom limits; camera may pass through frame and atoms. Floor 1e-3 only to avoid singular view math. (Earlier wall-limited zoom was rejected as too strict.) |
+| Highlight on click | Color-only (amber), **no size change** | |
+| Cell frame | Depth-tested, semi-transparent blue — occludable by atoms | |
+| Near plane | Fixed 0.01 | |
+| Picking | ID-color FBO readback; pick pass draws edge-scale spheres so rim clicks hit | |
+
 ### 7.4 Why QSettings for configuration?
 
 `QSettings` is Qt's built-in persistent key-value store. It automatically picks the right backend (Windows registry, Linux `~/.config/`, macOS plist). No extra dependency needed.
