@@ -146,6 +146,20 @@ def test_resolve_potcar_dir_prefers_potpaw_name(tmp_path):
     assert resolve_potcar_dir(tmp_path, "PBE").name == "potpaw_PBE.54"
 
 
+def test_resolve_potcar_dir_falls_back_to_newer_release(tmp_path):
+    """A library that only ships .64 still works for PBE/LDA."""
+    (tmp_path / "potpaw_PBE.64").mkdir()
+    (tmp_path / "potpaw_LDA.64").mkdir()
+    assert resolve_potcar_dir(tmp_path, "PBE").name == "potpaw_PBE.64"
+    assert resolve_potcar_dir(tmp_path, "LDA").name == "potpaw_LDA.64"
+
+
+def test_generate_potcar_error_lists_available_dirs(tmp_path):
+    (tmp_path / "potpaw_PBE.64").mkdir()
+    with pytest.raises(FileNotFoundError, match="potpaw_PBE.64"):
+        generate_potcar(["Fe"], tmp_path, "PW91")
+
+
 def test_available_variants_discovers_wiki_variants(tmp_path):
     lib = tmp_path / "potpaw_PBE.54"
     for name in ("Ga", "Ga_d", "Ga_h", "Fe", "H.5", "junk"):

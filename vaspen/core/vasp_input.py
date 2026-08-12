@@ -325,12 +325,14 @@ def estimate_k_mesh(
 POTCAR_DEFAULT_FUNCTIONAL = "PBE"
 
 # Functional → candidate version-directory names (VASP distribution
-# names, per the wiki). The first existing directory is used; the bare
-# short names are fallbacks for libraries without the potpaw_ prefix.
+# names, per the wiki). The first existing directory is used, so a
+# library that only ships a newer release (e.g. only .64) still works;
+# the bare short names are fallbacks for libraries without the
+# potpaw_ prefix.
 POTCAR_FUNCTIONAL_VERSIONS: dict[str, list[str]] = {
-    "PBE": ["potpaw_PBE.54", "PBE.54"],
+    "PBE": ["potpaw_PBE.54", "potpaw_PBE.64", "PBE.54", "PBE.64"],
     "PBE_new": ["potpaw_PBE.64", "PBE.64"],   # wiki: latest, recommended
-    "LDA": ["potpaw_LDA.54", "LDA.54"],
+    "LDA": ["potpaw_LDA.54", "potpaw_LDA.64", "LDA.54", "LDA.64"],
     "PW91": ["potpaw_GGA", "PW91.54", "GGA"],  # potpaw_GGA = PW91 (2006)
 }
 
@@ -466,8 +468,16 @@ def generate_potcar(
     potcar_dir = resolve_potcar_dir(library, functional)
 
     if not potcar_dir.exists():
+        available = ""
+        if library.exists():
+            found = sorted(
+                d.name for d in library.iterdir() if d.is_dir()
+            )
+            if found:
+                available = f"\nFound in the library root: {', '.join(found)}"
         raise FileNotFoundError(
-            f"POTCAR library not found at: {potcar_dir}\n"
+            f"POTCAR library for functional '{functional}' not found.\n"
+            f"Tried: {potcar_dir}{available}\n"
             f"Please configure the pseudopotential library path in Settings."
         )
 
