@@ -36,6 +36,41 @@ def _load_app_icon(icons_dir: Path) -> QIcon:
     return icon
 
 
+def _apply_windows_identity(app: QApplication, icons_dir: Path) -> None:
+    """Give the taskbar button the VASPen icon in dev mode.
+
+    Qt's setWindowIcon alone does not replace the python.exe icon on
+    the taskbar; set the HICON on the main window's HWND directly via
+    WM_SETICON (the frozen exe gets its icon from the embedded .ico).
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "VASPen.0.1"
+        )
+        ico_path = icons_dir / "app.ico"
+        if not ico_path.exists():
+            return
+
+        def _set_hwnd_icon(window) -> None:
+            hwnd = int(window.winId())
+            h_icon_big = ctypes.windll.user32.LoadImageW(
+                0, str(ico_path), 1, 32, 32, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+            h_icon_small = ctypes.windll.user32.LoadImageW(
+                0, str(ico_path), 1, 16, 16, 0x10)
+            if h_icon_big:
+                ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, h_icon_big)  # WM_SETICON, ICON_BIG
+            if h_icon_small:
+                ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, h_icon_small)  # ICON_SMALL
+
+        for widget in app.topLevelWidgets():
+            _set_hwnd_icon(widget)
+    except Exception:
+        pass
+
+
 def main() -> int:
     """Application entry point.
 
@@ -53,16 +88,6 @@ def main() -> int:
     icons_dir = Path(__file__).parent / "resources" / "icons"
     app.setWindowIcon(_load_app_icon(icons_dir))
 
-    # --- Windows taskbar identity (dev mode otherwise shows python.exe) ---
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                "VASPen.0.1"
-            )
-        except Exception:
-            pass
-
     # --- Logger ---
     logger = setup_logger()
 
@@ -71,6 +96,10 @@ def main() -> int:
     lang = config.language
     window = MainWindow()
     window.show()
+
+    # --- Windows taskbar icon (dev mode otherwise shows python.exe) ---
+    if sys.platform == "win32":
+        _apply_windows_identity(app, icons_dir)
 
     # Open a file passed on the command line (e.g. double-click file association)
     if len(sys.argv) > 1:
