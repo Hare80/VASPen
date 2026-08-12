@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -102,17 +103,23 @@ class KpointsEditorDialog(QDialog):
         page = QWidget()
         form = QFormLayout(page)
 
-        # KSPACING slider
+        # KSPACING slider + numeric input (type any value with 0.001
+        # precision; the slider spans the useful vaspkit range 0.005-0.10)
         slider_row = QHBoxLayout()
         self._kspacing_slider = QSlider(Qt.Horizontal)
-        self._kspacing_slider.setRange(1, 50)  # 0.01 to 0.50
-        self._kspacing_slider.setValue(4)       # 0.04 default
-        self._kspacing_slider.valueChanged.connect(self._kspacing_slider_changed)
-        slider_row.addWidget(self._kspacing_slider)
+        self._kspacing_slider.setRange(5, 100)  # 0.005 to 0.100 (×1000)
+        self._kspacing_slider.setValue(40)      # 0.040 default
+        self._kspacing_slider.valueChanged.connect(self._on_kspacing_slider)
+        slider_row.addWidget(self._kspacing_slider, 1)
 
-        self._kspacing_label = QLabel("0.040")
-        self._kspacing_label.setMinimumWidth(50)
-        slider_row.addWidget(self._kspacing_label)
+        self._kspacing_spin = QDoubleSpinBox()
+        self._kspacing_spin.setRange(0.005, 0.100)
+        self._kspacing_spin.setDecimals(3)
+        self._kspacing_spin.setSingleStep(0.001)
+        self._kspacing_spin.setValue(0.040)
+        self._kspacing_spin.setMinimumWidth(90)
+        self._kspacing_spin.valueChanged.connect(self._on_kspacing_spin)
+        slider_row.addWidget(self._kspacing_spin)
         form.addRow(self.tr("KSPACING (2π/Å):"), slider_row)
 
         # Recommendation notes
@@ -134,9 +141,19 @@ class KpointsEditorDialog(QDialog):
 
         return page
 
-    def _kspacing_slider_changed(self, value: int) -> None:
-        spacing = value / 100.0
-        self._kspacing_label.setText(f"{spacing:.3f}")
+    def _on_kspacing_slider(self, value: int) -> None:
+        """Slider moved → sync the numeric input (blocked to avoid loops)."""
+        self._kspacing_spin.blockSignals(True)
+        self._kspacing_spin.setValue(value / 1000.0)
+        self._kspacing_spin.blockSignals(False)
+        self._update_estimate()
+        self._update_preview()
+
+    def _on_kspacing_spin(self, value: float) -> None:
+        """Numeric input changed → sync the slider (blocked to avoid loops)."""
+        self._kspacing_slider.blockSignals(True)
+        self._kspacing_slider.setValue(round(value * 1000))
+        self._kspacing_slider.blockSignals(False)
         self._update_estimate()
         self._update_preview()
 
@@ -227,7 +244,7 @@ class KpointsEditorDialog(QDialog):
 
         mode = self._mode_combo.currentIndex()
         if mode == 0:  # automatic
-            spacing = self._kspacing_slider.value() / 100.0
+            spacing = self._kspacing_spin.value()
             try:
                 mesh = estimate_k_mesh(self._structure_model.cell, spacing)
                 self._estimate_label.setText(
@@ -246,7 +263,7 @@ class KpointsEditorDialog(QDialog):
         mode = self._mode_combo.currentIndex()
 
         if mode == 0:  # automatic
-            spacing = self._kspacing_slider.value() / 100.0
+            spacing = self._kspacing_spin.value()
             gamma = self._gamma_auto.currentIndex() == 0
             content = generate_kpoints_automatic(
                 np.eye(3) if not self._structure_model else self._structure_model.cell,

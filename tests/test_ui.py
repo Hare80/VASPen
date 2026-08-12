@@ -152,6 +152,34 @@ def test_free_zoom_passes_through_cell_wall(window, monkeypatch):
     assert view._cam_distance < 0.05
 
 
+def test_kpoints_dialog_spin_slider_sync_and_zno_preview(qtbot):
+    """KSPACING numeric input syncs with the slider; ZnO example gives 9 9 5."""
+    from vaspen.core.structure import StructureModel
+    from vaspen.ui.kpoints_editor import KpointsEditorDialog
+
+    a, c = 3.289, 5.307
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "Zn2O2",
+        positions=[[0.0, 0.0, 0.0]] * 4,  # positions don't affect the mesh
+        cell=[[a, 0, 0], [-a / 2, a * np.sqrt(3) / 2, 0], [0, 0, c]],
+        pbc=True,
+    ))
+    dlg = KpointsEditorDialog(model)
+    qtbot.addWidget(dlg)
+
+    # default: spin 0.040, slider at position 40
+    assert abs(dlg._kspacing_spin.value() - 0.040) < 1e-9
+    assert dlg._kspacing_slider.value() == 40
+    assert "9 9 5" in dlg._preview.toPlainText()
+
+    # typing into the spinbox moves the slider and updates the preview
+    dlg._kspacing_spin.setValue(0.030)
+    assert dlg._kspacing_slider.value() == 30
+    assert "12 12 7" in dlg._preview.toPlainText()  # ceil(11.703)=12, ceil(6.281)=7
+    dlg.close()
+
+
 def test_undo_action_enabled_after_edit(window, monkeypatch):
     atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
     monkeypatch.setattr(
