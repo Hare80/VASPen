@@ -8,12 +8,32 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
 from vaspen.ui.main_window import MainWindow
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import setup_logger
+
+
+def _load_app_icon(icons_dir: Path) -> QIcon:
+    """Build a multi-size icon so Windows picks the crispiest match.
+
+    Uses the per-size square PNGs (16-256) generated from the source
+    image; falls back to the full landscape app.png / app.svg.
+    """
+    icon = QIcon()
+    for size in (16, 32, 48, 64, 128, 256):
+        path = icons_dir / f"app_{size}.png"
+        if path.exists():
+            icon.addFile(str(path), QSize(size, size))
+    if icon.isNull():
+        for name in ("app.png", "app.svg"):
+            path = icons_dir / name
+            if path.exists():
+                return QIcon(str(path))
+    return icon
 
 
 def main() -> int:
@@ -31,11 +51,17 @@ def main() -> int:
 
     # --- Icon ---
     icons_dir = Path(__file__).parent / "resources" / "icons"
-    for name in ("app.png", "app.svg"):
-        icon_path = icons_dir / name
-        if icon_path.exists():
-            app.setWindowIcon(QIcon(str(icon_path)))
-            break
+    app.setWindowIcon(_load_app_icon(icons_dir))
+
+    # --- Windows taskbar identity (dev mode otherwise shows python.exe) ---
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "VASPen.0.1"
+            )
+        except Exception:
+            pass
 
     # --- Logger ---
     logger = setup_logger()
