@@ -115,6 +115,10 @@ class MainWindow(QMainWindow):
         self.act_preferences.triggered.connect(self._on_preferences)
 
         # ── View ──
+        self.act_reset_view = QAction(self.tr("&Reset View"), self)
+        self.act_reset_view.setStatusTip(self.tr("Reset the camera to the default view"))
+        self.act_reset_view.triggered.connect(lambda: self._viewport.reset_view())
+
         self.act_lang_en = QAction(self.tr("English"), self)
         self.act_lang_en.setCheckable(True)
         self.act_lang_en.triggered.connect(lambda: self._switch_language("en"))
@@ -187,6 +191,8 @@ class MainWindow(QMainWindow):
 
         # View
         self._menu_view = mb.addMenu(self.tr("&View"))
+        self._menu_view.addAction(self.act_reset_view)
+        self._menu_view.addSeparator()
         self._menu_lang = self._menu_view.addMenu(self.tr("&Language"))
         self._menu_lang.addAction(self.act_lang_en)
         self._menu_lang.addAction(self.act_lang_zh)
@@ -225,6 +231,8 @@ class MainWindow(QMainWindow):
         self._toolbar.addSeparator()
         self._toolbar.addAction(self.act_surface)
         self._toolbar.addAction(self.act_supercell)
+        self._toolbar.addSeparator()
+        self._toolbar.addAction(self.act_reset_view)
         self.addToolBar(self._toolbar)
 
     # ------------------------------------------------------------------
@@ -526,6 +534,8 @@ class MainWindow(QMainWindow):
         self.act_redo.setText(self.tr("&Redo"))
         self.act_preferences.setText(self.tr("&Preferences..."))
         self.act_preferences.setStatusTip(self.tr("Configure settings"))
+        self.act_reset_view.setText(self.tr("&Reset View"))
+        self.act_reset_view.setStatusTip(self.tr("Reset the camera to the default view"))
         self.act_lang_en.setText(self.tr("English"))
         self.act_lang_zh.setText(self.tr("中文"))
         self.act_gen_incar.setText(self.tr("Generate &INCAR..."))

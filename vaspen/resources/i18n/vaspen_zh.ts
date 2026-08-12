@@ -84,6 +84,14 @@
         <translation>语言(&amp;L)</translation>
     </message>
     <message>
+        <source>&amp;Reset View</source>
+        <translation>重置视角(&amp;R)</translation>
+    </message>
+    <message>
+        <source>Reset the camera to the default view</source>
+        <translation>将相机重置为默认视角</translation>
+    </message>
+    <message>
         <source>English</source>
         <translation>English</translation>
     </message>

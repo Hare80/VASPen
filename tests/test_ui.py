@@ -114,6 +114,21 @@ def test_far_plane_covers_scene_after_edit_without_refit(window, monkeypatch):
     assert captured["far"] >= required - 1e-6
 
 
+def test_reset_view_action_restores_default_camera(window, monkeypatch):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]],
+                  cell=[10, 10, 10], pbc=True)
+    monkeypatch.setattr(fi.FileIO, "read", classmethod(lambda cls, p: atoms))
+    window._open_file("fake.xyz")
+
+    view = window._viewport
+    view._cam_azimuth = 123.0
+    view._cam_elevation = 88.0
+    window.act_reset_view.trigger()
+    # c axis is [0,0,10] → fitted default is az=0, el=0
+    assert abs(view._cam_azimuth) < 1e-6
+    assert abs(view._cam_elevation) < 1e-6
+
+
 def test_undo_action_enabled_after_edit(window, monkeypatch):
     atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
     monkeypatch.setattr(
