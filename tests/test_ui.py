@@ -1,5 +1,6 @@
 """UI smoke tests — main window launch, live language switch, open path."""
 
+import numpy as np
 import pytest
 from ase import Atoms
 
@@ -79,6 +80,38 @@ def test_structure_tree_panel_syncs_with_model(window, monkeypatch):
     # selecting a row selects the atom in the model
     tree._table.selectRow(1)
     assert window._structure.selected_index == 1
+
+
+def test_far_plane_covers_scene_after_edit_without_refit(window, monkeypatch):
+    """Regression: after in-place edits (supercell etc.) the camera is
+    not re-fit, so the ortho far plane must be computed from the CURRENT
+    atom positions — a stale _fit_radius clipped far atoms into a
+    cross-section that zooming out could never recover."""
+    from vaspen.ui import viewport3d as vp
+
+    captured = {}
+
+    def fake_ortho(left, right, bottom, top, near, far):
+        captured["far"] = far
+        return np.eye(4)
+
+    monkeypatch.setattr(vp, "_ortho", fake_ortho)
+
+    small = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]],
+                  cell=[10, 10, 10], pbc=True)
+    big = Atoms(["H"] * 9, positions=np.arange(27).reshape(9, 3) * 2.0,
+                cell=[60, 60, 60], pbc=True)
+
+    view = window._viewport
+    view.resize(800, 600)
+    view.set_structure(small)                    # fits camera to small scene
+    view.set_structure(big, reset_view=False)    # simulate supercell: no refit
+    view._camera_matrices()
+
+    required = view._cam_distance + float(
+        np.linalg.norm(view._atom_pos - view._cam_center, axis=1).max()
+    ) + float(view._atom_radius.max()) + 5.0
+    assert captured["far"] >= required - 1e-6
 
 
 def test_undo_action_enabled_after_edit(window, monkeypatch):

@@ -751,13 +751,24 @@ class Viewport3D(QOpenGLWidget):
         aspect = w / h
         half_h = self._cam_distance
         half_w = half_h * aspect
-        r = self._fit_radius
         # Orthographic projection (crystallography convention — the
         # user's preferred default; perspective distorts parallel
         # lattice edges). Near plane fixed at 0.01 so geometry only
         # clips once it is genuinely behind the camera.
         near = 0.01
-        far = self._cam_distance + r + 5.0
+        # Far plane must cover the CURRENT scene extent — after
+        # in-place edits (supercell, add/delete atoms) the camera is
+        # intentionally not re-fit, so _fit_radius is stale and a fixed
+        # margin would clip far atoms into a cross-section. Zooming out
+        # could never recover that, hence the per-frame computation.
+        if len(self._atom_pos) > 0:
+            extent = float(
+                np.linalg.norm(self._atom_pos - self._cam_center, axis=1).max()
+            )
+            extent += float(self._atom_radius.max())
+        else:
+            extent = self._fit_radius
+        far = self._cam_distance + extent + 5.0
         proj = _ortho(-half_w, half_w, -half_h, half_h, near, far)
         return proj, view
 
