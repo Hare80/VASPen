@@ -66,21 +66,78 @@ def test_reset_filepath_forces_save_as(model):
     assert model.filepath is None
 
 
-def test_delete_selected_atom_clears_selection(model):
+def test_delete_selected_atom_clears_selection_and_emits(model):
     atoms = Atoms(["H"] * 5, positions=np.arange(15).reshape(5, 3) * 0.5)
     model.load_atoms(atoms)
+    cleared = _counter(model, "selection_cleared")
     model.select_atom(3)
     model.delete_atom(3)
     assert model.selected_index is None
+    assert cleared.count == 1
 
 
-@pytest.mark.xfail(reason="known bug: deleting an earlier atom leaves a stale index")
 def test_delete_atom_before_selection_shifts_selection(model):
     atoms = Atoms(["H"] * 5, positions=np.arange(15).reshape(5, 3) * 0.5)
     model.load_atoms(atoms)
     model.select_atom(3)
-    model.delete_atom(0)  # indices shift left; selection should become 2
+    model.delete_atom(0)  # indices shift left; selection becomes 2
     assert model.selected_index == 2
+
+
+def test_set_atom_position_moves_single_atom(model):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    model.load_atoms(atoms)
+    modified = _counter(model, "structure_modified")
+    model.set_atom_position(0, [1.0, 2.0, 3.0])
+    assert np.allclose(model.positions[0], [1.0, 2.0, 3.0])
+    assert np.allclose(model.positions[1], [0.74, 0, 0])
+    assert modified.count == 1
+    assert model.is_dirty is True
+
+
+def test_undo_redo_delete_atom(model):
+    atoms = Atoms(["H"] * 3, positions=np.arange(9).reshape(3, 3) * 0.5)
+    model.load_atoms(atoms)
+    assert not model.can_undo and not model.can_redo
+
+    model.delete_atom(1)
+    assert model.n_atoms == 2
+    assert model.can_undo and not model.can_redo
+
+    model.undo()
+    assert model.n_atoms == 3
+    assert model.is_dirty is True
+    assert not model.can_undo and model.can_redo
+
+    model.redo()
+    assert model.n_atoms == 2
+    assert model.can_undo and not model.can_redo
+
+
+def test_undo_replaces_derived_structure(model):
+    """Surface cut / supercell use replace_atoms — must be undoable."""
+    model.load_atoms(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]))
+    model.replace_atoms(Atoms("Fe", positions=[[1, 1, 1]]))
+    assert model.n_atoms == 1
+    model.undo()
+    assert model.n_atoms == 2
+    assert model.symbols == ["H", "H"]
+
+
+def test_load_clears_history(model):
+    model.load_atoms(Atoms("H"))
+    model.delete_atom(0)
+    assert model.can_undo
+    model.load_atoms(Atoms("He"))
+    assert not model.can_undo and not model.can_redo
+
+
+def test_history_capped(model):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    model.load_atoms(atoms)
+    for _ in range(model._max_history + 5):
+        model.set_atom_position(0, [0.0, 0.0, 0.0])
+    assert len(model._undo_stack) <= model._max_history
 
 
 def test_unique_symbols_first_appearance_order(model):

@@ -128,9 +128,11 @@ python scripts/build.py
 - [x] Main window with menus, toolbars, status bar
 - [x] INCAR/KPOINTS/POTCAR editor dialogs
 - [x] Surface/slab cutting
-- [x] i18n infrastructure (en/zh)
+- [x] i18n infrastructure (en/zh, live switching)
 - [x] 3D viewport (Qt native OpenGL ball-and-stick rendering)
-- [ ] Structure tree panel (atom list, cell parameters)
+- [x] Structure tree panel (atom list, cell parameters, selection sync)
+- [x] Structure editing (add/delete atoms, position editing, undo/redo)
+- [x] Test suite (unit + UI smoke tests)
 - [ ] Welcome page with recent files
 - [ ] QSS theming
 - [ ] SSH remote server connection + job submission (future)

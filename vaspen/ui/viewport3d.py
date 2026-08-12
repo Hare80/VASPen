@@ -28,6 +28,8 @@ from ase import Atoms
 from ase.data import atomic_numbers, covalent_radii
 from ase.geometry import get_distances
 
+from vaspen.utils.logger import logger
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import (
     QColor,
@@ -812,6 +814,7 @@ class Viewport3D(QOpenGLWidget):
             self._data_dirty = True
         except Exception:
             self._gl_failed = True
+            logger.exception("OpenGL initialization failed — 3D view degraded")
 
     def _build_program(self, vert_src: str, frag_src: str) -> QOpenGLShaderProgram:
         """Compile and link a shader program; raise on failure."""
@@ -1159,7 +1162,10 @@ class Viewport3D(QOpenGLWidget):
                 float((iid >> 16) & 0xFF) / 255.0,
                 1.0,
             )
-            mvp = proj @ view @ _sphere_model(self._atom_pos[i], scale)
+            # Draw at the edge-sphere scale (1.04×) so picking matches the
+            # visible silhouette — clicks on the dark outline ring of an
+            # atom must hit it, not fall through to the background.
+            mvp = proj @ view @ _sphere_model(self._atom_pos[i], scale * EDGE_SCALE)
             self._flat_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
             self._flat_prog.setUniformValue("uColor", *color)
             gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,

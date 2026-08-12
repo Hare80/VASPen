@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import FileIO
+from vaspen.ui.structure_tree import StructureTreePanel
 from vaspen.ui.viewport3d import Viewport3D
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger
@@ -102,10 +103,12 @@ class MainWindow(QMainWindow):
         self.act_undo = QAction(self.tr("&Undo"), self)
         self.act_undo.setShortcut(QKeySequence.Undo)
         self.act_undo.setEnabled(False)
+        self.act_undo.triggered.connect(lambda: self._structure.undo())
 
         self.act_redo = QAction(self.tr("&Redo"), self)
         self.act_redo.setShortcut(QKeySequence.Redo)
         self.act_redo.setEnabled(False)
+        self.act_redo.triggered.connect(lambda: self._structure.redo())
 
         self.act_preferences = QAction(self.tr("&Preferences..."), self)
         self.act_preferences.setStatusTip(self.tr("Configure settings"))
@@ -253,13 +256,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _create_dock_widgets(self) -> None:
-        # Structure tree dock (left side) — placeholder
+        # Structure tree dock (left side) — atom list + cell parameters
         self._dock_structure = QDockWidget(self.tr("Structure"), self)
         self._dock_structure.setObjectName("dock_structure")
         self._dock_structure.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self._structure_placeholder = QLabel(self.tr("Open a file to view structure details."))
-        self._structure_placeholder.setAlignment(Qt.AlignCenter)
-        self._dock_structure.setWidget(self._structure_placeholder)
+        self._structure_tree = StructureTreePanel(self._structure)
+        self._dock_structure.setWidget(self._structure_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, self._dock_structure)
 
     # ------------------------------------------------------------------
@@ -280,6 +282,7 @@ class MainWindow(QMainWindow):
         model.structure_loaded.connect(self._on_structure_loaded)
         model.structure_modified.connect(self._on_structure_modified)
         model.atom_selected.connect(self._on_atom_selected)
+        model.selection_cleared.connect(self._on_selection_cleared)
 
     # ------------------------------------------------------------------
     # File operations
@@ -296,8 +299,10 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             self._structure = StructureModel()
             self._connect_model_signals(self._structure)
+            self._structure_tree.set_model(self._structure)
             self._viewport.set_structure(None)
             self._update_status_bar()
+            self._update_edit_actions()
             self._set_status(self.tr("New structure created."))
 
     def _on_open(self) -> None:
@@ -548,7 +553,6 @@ class MainWindow(QMainWindow):
         # Toolbar / docks / status bar
         self._toolbar.setWindowTitle(self.tr("Main Toolbar"))
         self._dock_structure.setWindowTitle(self.tr("Structure"))
-        self._structure_placeholder.setText(self.tr("Open a file to view structure details."))
         self._status_label.setText(self.tr("Ready"))
         self._update_recent_menu()
         if self._structure.n_atoms > 0:
@@ -647,12 +651,23 @@ class MainWindow(QMainWindow):
     def _on_structure_loaded(self) -> None:
         self._viewport.set_structure(self._structure.atoms)
         self._update_status_bar()
+        self._update_edit_actions()
 
     def _on_structure_modified(self) -> None:
         """Structure changed (add/remove atoms, supercell, surface cut...)."""
         # Keep the user's camera — in-place edits must not snap the view back
         self._viewport.set_structure(self._structure.atoms, reset_view=False)
         self._update_status_bar()
+        self._update_edit_actions()
+
+    def _on_selection_cleared(self) -> None:
+        """Selection cleared via the model (e.g. the selected atom was deleted)."""
+        self._viewport.highlight_atom(None)
+
+    def _update_edit_actions(self) -> None:
+        """Enable Undo/Redo based on the model's edit history."""
+        self.act_undo.setEnabled(self._structure.can_undo)
+        self.act_redo.setEnabled(self._structure.can_redo)
 
     def _on_atom_clicked(self, index: int) -> None:
         """User clicked an atom in the 3D viewport."""

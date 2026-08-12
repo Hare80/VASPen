@@ -58,3 +58,41 @@ def test_open_failure_shows_error(window, monkeypatch):
     )
     window._open_file("fake.xyz")  # must not raise
     assert window._structure.n_atoms == 0
+
+
+def test_structure_tree_panel_syncs_with_model(window, monkeypatch):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: atoms)
+    )
+    window._open_file("fake.xyz")
+
+    tree = window._structure_tree
+    assert tree._table.rowCount() == 2
+    assert tree._table.item(1, 1).text() == "H"
+    assert "H2" in tree._cell_label.text()
+
+    # selecting in 3D highlights the row
+    window._structure.select_atom(0)
+    assert tree._table.currentRow() == 0
+
+    # selecting a row selects the atom in the model
+    tree._table.selectRow(1)
+    assert window._structure.selected_index == 1
+
+
+def test_undo_action_enabled_after_edit(window, monkeypatch):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: atoms)
+    )
+    window._open_file("fake.xyz")
+    assert not window.act_undo.isEnabled()
+
+    window._structure.delete_atom(0)
+    assert window.act_undo.isEnabled()
+    assert not window.act_redo.isEnabled()
+
+    window.act_undo.trigger()
+    assert window._structure.n_atoms == 2
+    assert window.act_redo.isEnabled()

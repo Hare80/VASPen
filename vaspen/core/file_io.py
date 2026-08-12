@@ -147,6 +147,11 @@ class FileIO:
             ValueError: If the file extension is not registered.
         """
         path = Path(filepath)
+        if fmt is not None:
+            # Explicit format request bypasses the extension registry
+            from ase.io import write as ase_write
+            ase_write(str(path), atoms, format=fmt)
+            return
         ext = path.suffix.lower()
         if ext not in cls._writers:
             raise ValueError(

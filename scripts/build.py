@@ -5,21 +5,26 @@ Usage:
     python scripts/build.py --nuitka     # Nuitka (optimized, release)
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
+RESOURCES = ROOT / "vaspen" / "resources"
 
 
 def build_pyinstaller() -> None:
     """Build with PyInstaller — fast, good for development."""
+    # --add-data takes "source<os.pathsep>dest" (';' on Windows, ':' on Linux).
+    # Dest "vaspen/resources" mirrors the source layout so the frozen code
+    # finds i18n/icons next to the package (Path(__file__).parent).
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", "VASPen",
         "--windowed",
         "--onedir",
-        "--add-data", f"vaspen{Path('resources')}=vaspen{Path('resources')}",
+        "--add-data", f"{RESOURCES}{os.pathsep}vaspen{os.sep}resources",
         str(ROOT / "vaspen" / "main.py"),
     ]
     print(f"Running: {' '.join(cmd)}")

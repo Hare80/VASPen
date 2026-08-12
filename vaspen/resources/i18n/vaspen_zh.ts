@@ -419,6 +419,61 @@ Labels: G=Gamma, X, M, R, K, L, W, etc.</source>
     </message>
 </context>
 <context>
+    <name>StructureTreePanel</name>
+    <message>
+        <source>No structure loaded.</source>
+        <translation>未加载结构。</translation>
+    </message>
+    <message>
+        <source>Index</source>
+        <translation>序号</translation>
+    </message>
+    <message>
+        <source>Element</source>
+        <translation>元素</translation>
+    </message>
+    <message>
+        <source>Formula: {}
+a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
+α = {:.2f}°   β = {:.2f}°   γ = {:.2f}°</source>
+        <translation>化学式：{}
+a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
+α = {:.2f}°   β = {:.2f}°   γ = {:.2f}°</translation>
+    </message>
+    <message>
+        <source>Add Atom...</source>
+        <translation>添加原子...</translation>
+    </message>
+    <message>
+        <source>Delete Atom</source>
+        <translation>删除原子</translation>
+    </message>
+    <message>
+        <source>Invalid Position</source>
+        <translation>无效坐标</translation>
+    </message>
+    <message>
+        <source>Position must be a number.</source>
+        <translation>坐标必须是数字。</translation>
+    </message>
+    <message>
+        <source>Add Atom</source>
+        <translation>添加原子</translation>
+    </message>
+    <message>
+        <source>Element and Cartesian position (x y z), e.g. Fe 1.0 2.0 3.0:</source>
+        <translation>元素和笛卡尔坐标 (x y z)，例如 Fe 1.0 2.0 3.0：</translation>
+    </message>
+    <message>
+        <source>Invalid Input</source>
+        <translation>无效输入</translation>
+    </message>
+    <message>
+        <source>Expected format: Element x y z</source>
+        <translation>预期格式：元素 x y z</translation>
+    </message>
+</context>
+<context>
     <name>FileIO</name>
     <message>
         <source>Structure files</source>

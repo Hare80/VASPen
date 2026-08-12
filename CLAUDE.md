@@ -493,13 +493,13 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 
 ### v0.1 — MVP (Sprint 1-3)
 - [x] Project skeleton
-- [ ] Main window with menus
+- [x] Main window with menus
 - [x] 3D structure viewer (ball-and-stick)
-- [ ] Open/save cif, xyz, POSCAR, CONTCAR
-- [ ] INCAR/KPOINTS generation with preset defaults
-- [ ] POTCAR generation from local pseudopotential library
-- [ ] Basic structure editing (add/remove atoms, supercell)
-- [ ] Surface/slab cutting
+- [x] Open/save cif, xyz, POSCAR, CONTCAR
+- [x] INCAR/KPOINTS generation with preset defaults
+- [x] POTCAR generation from local pseudopotential library
+- [x] Basic structure editing (add/delete atoms, position editing, undo/redo, supercell)
+- [x] Surface/slab cutting
 
 ### v0.2 — Polish (Sprint 4)
 - [ ] i18n (en/zh)

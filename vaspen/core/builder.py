@@ -52,7 +52,7 @@ class StructureBuilder:
             index: Atom index.
             new_symbol: New element symbol.
         """
-        atoms = model.atoms
+        atoms = model.atoms.copy()  # copy first so undo snapshots stay valid
         if 0 <= index < len(atoms):
             atoms[index].symbol = new_symbol
             model.replace_atoms(atoms)  # triggers signal
@@ -85,7 +85,7 @@ class StructureBuilder:
             vector: (dx, dy, dz) in Angstrom.
             indices: Atom indices to move. If None, moves all atoms.
         """
-        atoms = model.atoms
+        atoms = model.atoms.copy()  # copy first so undo snapshots stay valid
         vec = np.asarray(vector)
         if indices is None:
             atoms.translate(vec)

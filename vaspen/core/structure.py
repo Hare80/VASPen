@@ -46,6 +46,10 @@ class StructureModel(QObject):
         self._filepath: str | None = None
         self._selected_index: int | None = None
         self._dirty: bool = False
+        # Edit history (snapshot-based undo/redo)
+        self._undo_stack: list[Atoms] = []
+        self._redo_stack: list[Atoms] = []
+        self._max_history = 50
 
     # ------------------------------------------------------------------
     # Properties
@@ -86,6 +90,7 @@ class StructureModel(QObject):
         self._filepath = str(path)
         self._dirty = False
         self._selected_index = None
+        self._clear_history()
         self.structure_loaded.emit()
 
     def load_atoms(self, atoms: Atoms, filepath: str | Path | None = None) -> None:
@@ -100,6 +105,7 @@ class StructureModel(QObject):
             self._filepath = str(Path(filepath))
         self._dirty = False
         self._selected_index = None
+        self._clear_history()
         self.structure_loaded.emit()
 
     def save(self, filepath: str | Path | None = None, fmt: str | None = None) -> None:
@@ -198,6 +204,7 @@ class StructureModel(QObject):
 
     def replace_atoms(self, new_atoms: Atoms) -> None:
         """Replace the entire structure with a new Atoms object."""
+        self._push_undo()
         self._atoms = new_atoms
         self._dirty = True
         self._selected_index = None
@@ -211,20 +218,67 @@ class StructureModel(QObject):
         """
         self._filepath = None
 
+    # ------------------------------------------------------------------
+    # Edit history (snapshot-based undo/redo)
+    # ------------------------------------------------------------------
+
+    def _push_undo(self) -> None:
+        """Snapshot the current atoms before a mutation."""
+        self._undo_stack.append(self._atoms.copy())
+        self._redo_stack.clear()
+        if len(self._undo_stack) > self._max_history:
+            self._undo_stack.pop(0)
+
+    def _clear_history(self) -> None:
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo_stack)
+
+    def undo(self) -> None:
+        """Revert the most recent structure change."""
+        if not self._undo_stack:
+            return
+        self._redo_stack.append(self._atoms.copy())
+        self._restore(self._undo_stack.pop())
+
+    def redo(self) -> None:
+        """Re-apply the most recently undone change."""
+        if not self._redo_stack:
+            return
+        self._undo_stack.append(self._atoms.copy())
+        self._restore(self._redo_stack.pop())
+
+    def _restore(self, atoms: Atoms) -> None:
+        """Restore a history snapshot and notify observers."""
+        self._atoms = atoms
+        self._dirty = True
+        self._selected_index = None
+        self.structure_modified.emit()
+
     def set_cell(self, cell: np.ndarray) -> None:
         """Set the unit cell (3x3 matrix)."""
+        self._push_undo()
         self._atoms.set_cell(cell)
         self._dirty = True
         self.structure_modified.emit()
 
     def set_positions(self, positions: np.ndarray) -> None:
         """Set Cartesian positions (N×3)."""
+        self._push_undo()
         self._atoms.set_positions(positions)
         self._dirty = True
         self.structure_modified.emit()
 
     def set_scaled_positions(self, scaled: np.ndarray) -> None:
         """Set fractional coordinates (N×3)."""
+        self._push_undo()
         self._atoms.set_scaled_positions(scaled)
         self._dirty = True
         self.structure_modified.emit()
@@ -233,22 +287,41 @@ class StructureModel(QObject):
         """Append atoms from another Atoms or StructureModel."""
         if isinstance(other, StructureModel):
             other = other._atoms
+        self._push_undo()
         self._atoms.extend(other)
         self._dirty = True
         self.structure_modified.emit()
 
-    def delete_atom(self, index: int) -> None:
-        """Delete the atom at the given index."""
+    def set_atom_position(self, index: int, position: np.ndarray) -> None:
+        """Set one atom's Cartesian position (absolute)."""
         if 0 <= index < len(self._atoms):
+            self._push_undo()
+            self._atoms.positions[index] = np.asarray(position, dtype=float)
+            self._dirty = True
+            self.structure_modified.emit()
+
+    def delete_atom(self, index: int) -> None:
+        """Delete the atom at the given index.
+
+        Shifts the selection when an atom before it is deleted, and
+        emits selection_cleared when the selected atom itself is removed.
+        """
+        if 0 <= index < len(self._atoms):
+            self._push_undo()
             del self._atoms[index]
             self._dirty = True
-            if self._selected_index == index:
-                self._selected_index = None
+            if self._selected_index is not None:
+                if self._selected_index == index:
+                    self._selected_index = None
+                    self.selection_cleared.emit()
+                elif self._selected_index > index:
+                    self._selected_index -= 1
             self.structure_modified.emit()
 
     def translate_atom(self, index: int, vector: np.ndarray) -> None:
         """Translate a single atom by a Cartesian vector."""
         if 0 <= index < len(self._atoms):
+            self._push_undo()
             self._atoms[index].position += np.asarray(vector)
             self._dirty = True
             self.structure_modified.emit()
