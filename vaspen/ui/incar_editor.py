@@ -236,16 +236,19 @@ class IncarEditorDialog(QDialog):
                 raise ValueError("POTCAR library not configured")
 
             from pathlib import Path
-            from vaspen.core.vasp_input import get_potcar_recommendation, POTCAR_FUNCTIONAL_VERSIONS
+            from vaspen.core.vasp_input import (
+                get_potcar_recommendation,
+                resolve_potcar_dir,
+            )
 
             elements = self._structure_model.unique_symbols
             library = Path(potcar_path)
-            version = POTCAR_FUNCTIONAL_VERSIONS["PBE"]
+            potcar_dir = resolve_potcar_dir(library, "PBE")
 
             max_encut = 400
             for el in elements:
                 variant = get_potcar_recommendation(el, "PBE")
-                potcar_file = library / version / variant / "POTCAR"
+                potcar_file = potcar_dir / variant / "POTCAR"
                 if potcar_file.exists():
                     p = Potcar.from_file(str(potcar_file))
                     if p:

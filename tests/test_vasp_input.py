@@ -6,6 +6,7 @@ from ase import Atoms
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.vasp_input import (
+    available_variants,
     estimate_k_mesh,
     generate_all_inputs,
     generate_kpoints_automatic,
@@ -14,6 +15,7 @@ from vaspen.core.vasp_input import (
     generate_potcar,
     get_high_symmetry_points,
     get_potcar_recommendation,
+    resolve_potcar_dir,
 )
 
 
@@ -110,6 +112,55 @@ def test_generate_potcar_concatenates_in_element_order(tmp_path):
 def test_potcar_recommendation_uses_d_variant():
     assert get_potcar_recommendation("Ga", "PBE") == "Ga_d"
     assert get_potcar_recommendation("Fe", "PBE") == "Fe"
+
+
+def test_wiki_recommendations_per_functional():
+    """Defaults follow the VASP wiki 'Available pseudopotentials' tables."""
+    # PBE.54/64 semi-core rules
+    assert get_potcar_recommendation("Li", "PBE") == "Li_sv"
+    assert get_potcar_recommendation("Na", "PBE") == "Na_pv"
+    assert get_potcar_recommendation("W", "PBE") == "W_sv"
+    assert get_potcar_recommendation("Ta", "PBE") == "Ta_pv"
+    assert get_potcar_recommendation("Bi", "PBE") == "Bi_d"
+    # As/Sb are PLAIN on the wiki (no _d)
+    assert get_potcar_recommendation("As", "PBE") == "As"
+    assert get_potcar_recommendation("Sb", "PBE") == "Sb"
+    # lanthanides with fixed valence
+    assert get_potcar_recommendation("Pr", "PBE") == "Pr_3"
+    assert get_potcar_recommendation("Eu", "PBE") == "Eu_2"
+    assert get_potcar_recommendation("Yb", "PBE") == "Yb_2"
+    # LDA has no fixed-valence lanthanides
+    assert get_potcar_recommendation("Pr", "LDA") == "Pr"
+    assert get_potcar_recommendation("Ga", "LDA") == "Ga_d"
+    # PW91 (2010) lacks W_sv / Po_d
+    assert get_potcar_recommendation("W", "PW91") == "W"
+    assert get_potcar_recommendation("Po", "PW91") == "Po"
+    assert get_potcar_recommendation("Ga", "PW91") == "Ga_d"
+    # PBE_new shares the PBE lists
+    assert get_potcar_recommendation("W", "PBE_new") == "W_sv"
+
+
+def test_resolve_potcar_dir_prefers_potpaw_name(tmp_path):
+    (tmp_path / "potpaw_PBE.54").mkdir()
+    (tmp_path / "PBE.54").mkdir()
+    assert resolve_potcar_dir(tmp_path, "PBE").name == "potpaw_PBE.54"
+
+
+def test_available_variants_discovers_wiki_variants(tmp_path):
+    lib = tmp_path / "potpaw_PBE.54"
+    for name in ("Ga", "Ga_d", "Ga_h", "Fe", "H.5", "junk"):
+        (lib / name).mkdir(parents=True)
+    variants = available_variants(tmp_path, "PBE", "Ga")
+    assert variants[0] == "Ga_d"  # wiki recommendation first
+    assert set(variants) == {"Ga_d", "Ga", "Ga_h"}
+    # fractional hydrogen variants are recognized
+    assert "H.5" in available_variants(tmp_path, "PBE", "H")
+    # non-matching dirs are ignored
+    assert "junk" not in variants
+
+
+def test_available_variants_empty_without_library(tmp_path):
+    assert available_variants(tmp_path, "PBE", "Fe") == []
 
 
 def test_unknown_functional_raises():

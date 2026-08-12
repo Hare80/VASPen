@@ -27,9 +27,10 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.vasp_input import (
     POTCAR_FUNCTIONAL_VERSIONS,
-    POTCAR_SPECIAL_RECOMMENDATIONS,
+    available_variants,
     generate_potcar,
     get_potcar_recommendation,
+    resolve_potcar_dir,
 )
 from vaspen.utils.config import AppConfig
 
@@ -134,20 +135,27 @@ class PotcarDialog(QDialog):
 
         functional = self._functional_combo.currentText()
         elements = self._structure_model.unique_symbols
+        library = self._path_edit.text()
 
         for el in elements:
             combo = QComboBox()
-            # Available variants for this element
-            recommendation = get_potcar_recommendation(el, functional)
-            variants = [el, recommendation] if recommendation != el else [el]
-            # Add common suffixes
-            for suffix in ["", "_d", "_sv", "_pv"]:
-                variant = el + suffix
-                if variant not in variants:
-                    variants.append(variant)
+            # Discover what the library actually offers (all wiki
+            # variants: _d/_sv/_pv/_s/_h/_GW/_AE/_2/_3/fractional...);
+            # fall back to the recommendation + common suffixes when
+            # no library is configured yet.
+            variants = available_variants(library, functional, el) if library else []
+            if not variants:
+                recommendation = get_potcar_recommendation(el, functional)
+                variants = [recommendation]
+                if el not in variants:
+                    variants.append(el)
+                for suffix in ("_d", "_sv", "_pv", "_h", "_s"):
+                    v = el + suffix
+                    if v not in variants:
+                        variants.append(v)
             combo.addItems(variants)
-            # Select recommended
-            idx = combo.findText(recommendation)
+            # Pre-select the wiki-recommended default when available
+            idx = combo.findText(get_potcar_recommendation(el, functional))
             if idx >= 0:
                 combo.setCurrentIndex(idx)
             self._elements_layout.addRow(f"{el}:", combo)
@@ -164,14 +172,14 @@ class PotcarDialog(QDialog):
             self._preview.setPlainText("")
             return
 
-        version = POTCAR_FUNCTIONAL_VERSIONS[functional]
-        lines = [f"# POTCAR for functional = {functional} ({version})"]
+        version_dir = resolve_potcar_dir(Path(library), functional)
+        lines = [f"# POTCAR for functional = {functional} ({version_dir.name})"]
         lines.append(f"# Library root: {library}")
         lines.append("")
 
         for el, combo in self._element_combos.items():
             variant = combo.currentText()
-            expected_path = Path(library) / version / variant / "POTCAR"
+            expected_path = version_dir / variant / "POTCAR"
             exists = "✓" if expected_path.exists() else "✗"
             lines.append(f"{exists} {el}: {variant}  →  {expected_path}")
 
@@ -197,13 +205,12 @@ class PotcarDialog(QDialog):
             )
             return
 
-        # Map elements to selected variants (respecting user choice)
-        # Note: generate_potcar uses automatic recommendation;
-        # we use a manual file-by-file concatenation here.
+        # Map elements to selected variants (respecting user choice).
+        # Note: generate_potcar uses automatic recommendation; we use a
+        # manual file-by-file concatenation here.
         contents: list[str] = []
         self._paths_used = []
-        version = POTCAR_FUNCTIONAL_VERSIONS[functional]
-        potcar_dir = Path(library) / version
+        potcar_dir = resolve_potcar_dir(Path(library), functional)
 
         for el, combo in self._element_combos.items():
             variant = combo.currentText()

@@ -6,6 +6,7 @@ calculation types.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -316,64 +317,125 @@ def estimate_k_mesh(
 # ======================================================================
 # POTCAR Generation
 # ======================================================================
-
-# POTCAR recommendation rules (semi-core states → _d or _sv variants)
-# Default functional → PBE.54
+# Library directory names and per-element default variants follow the
+# official VASP wiki: https://vasp.at/wiki/Available_pseudopotentials
+# (each library's "Standard potentials" table marks the recommended
+# default variant per element in bold).
 
 POTCAR_DEFAULT_FUNCTIONAL = "PBE"
-POTCAR_DEFAULT_VERSION = "PBE.54"
 
-# Elements that benefit from semi-core variants (PBE.54 naming)
-POTCAR_SPECIAL_RECOMMENDATIONS: dict[str, str] = {
-    # d-electron elements → use *_d
-    "Ga": "Ga_d",
-    "In": "In_d",
-    "Sn": "Sn_d",
-    "Pb": "Pb_d",
-    "Ge": "Ge_d",
-    "As": "As_d",
-    "Sb": "Sb_d",
-    "Bi": "Bi_d",
-    "Tl": "Tl_d",
-    # Alkali / alkaline earth with shallow semi-core → use *_sv
-    "Rb": "Rb_sv",
-    "Cs": "Cs_sv",
-    "Sr": "Sr_sv",
-    "Ba": "Ba_sv",
-    # Transition metals: standard PBE.54 (no suffix) is usually fine
-    # but _pv variants are available for higher accuracy
+# Functional → candidate version-directory names (VASP distribution
+# names, per the wiki). The first existing directory is used; the bare
+# short names are fallbacks for libraries without the potpaw_ prefix.
+POTCAR_FUNCTIONAL_VERSIONS: dict[str, list[str]] = {
+    "PBE": ["potpaw_PBE.54", "PBE.54"],
+    "PBE_new": ["potpaw_PBE.64", "PBE.64"],   # wiki: latest, recommended
+    "LDA": ["potpaw_LDA.54", "LDA.54"],
+    "PW91": ["potpaw_GGA", "PW91.54", "GGA"],  # potpaw_GGA = PW91 (2006)
 }
 
-POTCAR_FUNCTIONAL_VERSIONS = {
-    "LDA": "LDA.54",
-    "PBE": "PBE.54",
-    "PBE_new": "PBE.64",
-    "PW91": "PW91.54",
+# Wiki-recommended default variant per element (the bold table entry).
+# Elements not listed use the plain variant (e.g. "Fe").
+_SV_FULL = {
+    "Li": "Li_sv", "K": "K_sv", "Ca": "Ca_sv", "Sc": "Sc_sv", "Ti": "Ti_sv",
+    "V": "V_sv", "Rb": "Rb_sv", "Sr": "Sr_sv", "Y": "Y_sv", "Zr": "Zr_sv",
+    "Nb": "Nb_sv", "Mo": "Mo_sv", "Cs": "Cs_sv", "Ba": "Ba_sv",
+    "W": "W_sv", "Fr": "Fr_sv", "Ra": "Ra_sv",
+}
+_PV = {
+    "Na": "Na_pv", "Cr": "Cr_pv", "Mn": "Mn_pv", "Tc": "Tc_pv",
+    "Ru": "Ru_pv", "Rh": "Rh_pv", "Hf": "Hf_pv", "Ta": "Ta_pv",
+}
+_D_FULL = {
+    "Ga": "Ga_d", "Ge": "Ge_d", "In": "In_d", "Sn": "Sn_d",
+    "Tl": "Tl_d", "Pb": "Pb_d", "Bi": "Bi_d", "Po": "Po_d",
+}
+_LANTHANIDES = {
+    "Pr": "Pr_3", "Nd": "Nd_3", "Pm": "Pm_3", "Sm": "Sm_3",
+    "Eu": "Eu_2", "Gd": "Gd_3", "Tb": "Tb_3", "Dy": "Dy_3",
+    "Ho": "Ho_3", "Er": "Er_3", "Tm": "Tm_3", "Yb": "Yb_2", "Lu": "Lu_3",
+}
+# PW91 (2010) has no Mo_sv/W_sv/Fr_sv/Ra_sv and no Po_d
+_SV_PW91 = {k: v for k, v in _SV_FULL.items() if k not in ("Mo", "W", "Fr", "Ra")}
+_D_PW91 = {k: v for k, v in _D_FULL.items() if k != "Po"}
+
+_PBE_SPECIAL = {**_SV_FULL, **_PV, **_D_FULL, **_LANTHANIDES}
+
+POTCAR_SPECIAL_RECOMMENDATIONS: dict[str, dict[str, str]] = {
+    "PBE": _PBE_SPECIAL,
+    "PBE_new": _PBE_SPECIAL,  # .54 and .64 share the same lists on the wiki
+    "LDA": {**_SV_FULL, **_PV, **_D_FULL},  # no fixed-valence lanthanides
+    "PW91": {**_SV_PW91, **_PV, **_D_PW91, **_LANTHANIDES},
 }
 
 
 def get_potcar_recommendation(element: str, functional: str = "PBE") -> str:
-    """Get the recommended POTCAR variant for an element.
+    """Get the wiki-recommended POTCAR variant for an element.
+
+    Based on the bold (default) entries in the "Standard potentials"
+    tables at https://vasp.at/wiki/Available_pseudopotentials.
 
     Args:
         element: Element symbol (e.g. "Ga", "Fe").
-        functional: Exchange-correlation functional ("LDA", "PBE", "PW91").
+        functional: Exchange-correlation functional ("LDA", "PBE",
+            "PBE_new", "PW91").
 
     Returns:
-        POTCAR variant name (e.g. "Ga_d" for Ga with PBE.54).
+        POTCAR variant name (e.g. "Ga_d" for Ga; "Fe" when the plain
+        potential is recommended).
+
+    Raises:
+        ValueError: If functional is not recognized.
     """
     if functional not in POTCAR_FUNCTIONAL_VERSIONS:
         raise ValueError(f"Unknown functional: {functional}. "
                          f"Known: {list(POTCAR_FUNCTIONAL_VERSIONS)}")
+    return POTCAR_SPECIAL_RECOMMENDATIONS.get(functional, {}).get(element, element)
 
-    version = POTCAR_FUNCTIONAL_VERSIONS[functional]
 
-    # Check special recommendations
-    if functional == "PBE" and element in POTCAR_SPECIAL_RECOMMENDATIONS:
-        return POTCAR_SPECIAL_RECOMMENDATIONS[element]
+def resolve_potcar_dir(library: str | Path, functional: str) -> Path:
+    """First existing version directory for the functional in a library.
 
-    # Default: element name as-is (e.g. "Fe")
-    return element
+    Falls back to the primary candidate name if none exists (the
+    missing-library error is reported by generate_potcar).
+    """
+    names = POTCAR_FUNCTIONAL_VERSIONS[functional]
+    lib = Path(library)
+    for name in names:
+        d = lib / name
+        if d.exists():
+            return d
+    return lib / names[0]
+
+
+def available_variants(
+    library: str | Path,
+    functional: str,
+    element: str,
+) -> list[str]:
+    """POTCAR variant names available for an element in the library.
+
+    Discovers variants from the library directory itself — any
+    subdirectory of the version dir named ``{element}``,
+    ``{element}_{suffix}`` (``_d``/``_sv``/``_pv``/``_s``/``_h``/
+    ``_GW``/``_AE``/``_2``/``_3``/…) or fractional names like ``H.5`` —
+    so every variant listed on the VASP wiki is recognized without a
+    hardcoded list. The wiki-recommended default comes first.
+
+    Returns:
+        Ordered variant names (may be empty if the library is missing).
+    """
+    version_dir = resolve_potcar_dir(library, functional)
+    variants: set[str] = set()
+    if version_dir.exists():
+        pattern = rf"^{re.escape(element)}(_[A-Za-z]+)?(\.\d+)?$"
+        for d in version_dir.iterdir():
+            if d.is_dir() and re.match(pattern, d.name):
+                variants.add(d.name)
+    recommended = get_potcar_recommendation(element, functional)
+    ordered = [recommended] if recommended in variants else []
+    ordered += sorted(variants - set(ordered))
+    return ordered
 
 
 def generate_potcar(
@@ -401,8 +463,7 @@ def generate_potcar(
         FileNotFoundError: If a POTCAR file is missing.
     """
     library = Path(potcar_library_path)
-    version = POTCAR_FUNCTIONAL_VERSIONS[functional]
-    potcar_dir = library / version
+    potcar_dir = resolve_potcar_dir(library, functional)
 
     if not potcar_dir.exists():
         raise FileNotFoundError(
