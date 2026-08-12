@@ -228,7 +228,14 @@ class IncarEditorDialog(QDialog):
 
         # Try to get ENMAX from pymatgen POTCAR data
         try:
+            import warnings
             from pymatgen.io.vasp import Potcar
+
+            # pymatgen's POTCAR database does not know variant names like
+            # Ba_sv — the warning is noise; ENMAX is read from the header.
+            warnings.filterwarnings(
+                "ignore", message="POTCAR data with symbol .* is not known to pymatgen"
+            )
 
             config = __import__('vaspen.utils.config', fromlist=['AppConfig']).AppConfig()
             potcar_path = config.potcar_library_path
