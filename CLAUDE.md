@@ -6,7 +6,7 @@
 
 **Target users:** Computational materials science researchers who use VASP.
 
-**License:** Proprietary (commercial).
+**License:** MIT — free and open source.
 
 ---
 

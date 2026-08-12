@@ -139,7 +139,7 @@ python scripts/build.py
 
 ## License
 
-Proprietary. All rights reserved.
+VASPen is free and open source, released under the [MIT License](LICENSE).
 
 ## Acknowledgments
 
