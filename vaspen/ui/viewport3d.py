@@ -936,8 +936,12 @@ class Viewport3D(QOpenGLWidget):
         # actually fades instead of showing the raw cross-section.
         self._sphere_prog.bind()
         self._sphere_prog.setUniformValue("uView", _to_qmatrix(view))
-        self._sphere_prog.setUniformValue("uFadeStart", NEAR_FADE_START)
-        self._sphere_prog.setUniformValue("uFadeEnd", NEAR_FADE_END)
+        # PySide6 has no (name, float) overload for setUniformValue —
+        # set by location instead.
+        self._sphere_prog.setUniformValue(
+            self._sphere_prog.uniformLocation("uFadeStart"), NEAR_FADE_START)
+        self._sphere_prog.setUniformValue(
+            self._sphere_prog.uniformLocation("uFadeEnd"), NEAR_FADE_END)
         self._unit_vao.bind()
         gl.glEnable(GL_BLEND)
         gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
