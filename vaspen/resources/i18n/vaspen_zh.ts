@@ -292,10 +292,6 @@ Files: {}</source>
         <translation>关于 VASPen</translation>
     </message>
     <message>
-        <source>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;A cross-platform GUI for VASP first-principles calculations.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Built with:&lt;/b&gt; PySide6, ASE, pymatgen, Qt native OpenGL&lt;/p&gt;&lt;p&gt;Free and open source (MIT License).&lt;/p&gt;</source>
-        <translation>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;用于 VASP 第一性原理计算的跨平台图形界面。&lt;/p&gt;&lt;p&gt;&lt;b&gt;构建于：&lt;/b&gt; PySide6、ASE、pymatgen、Qt 原生 OpenGL&lt;/p&gt;&lt;p&gt;免费开源（MIT 许可证）。&lt;/p&gt;</translation>
-    </message>
-    <message>
         <source>(No recent files)</source>
         <translation>（无最近文件）</translation>
     </message>
@@ -424,6 +420,17 @@ Labels: G=Gamma, X, M, R, K, L, W, etc.</source>
     <message>
         <source># {}</source>
         <translation># {}</translation>
+    </message>
+</context>
+<context>
+    <name>AboutDialog</name>
+    <message>
+        <source>About VASPen</source>
+        <translation>关于 VASPen</translation>
+    </message>
+    <message>
+        <source>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;A cross-platform GUI for VASP first-principles calculations.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Built with:&lt;/b&gt; PySide6, ASE, pymatgen, Qt native OpenGL&lt;/p&gt;&lt;p&gt;Free and open source (MIT License).&lt;/p&gt;</source>
+        <translation>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;用于 VASP 第一性原理计算的跨平台图形界面。&lt;/p&gt;&lt;p&gt;&lt;b&gt;构建于：&lt;/b&gt; PySide6、ASE、pymatgen、Qt 原生 OpenGL&lt;/p&gt;&lt;p&gt;免费开源（MIT 许可证）。&lt;/p&gt;</translation>
     </message>
 </context>
 <context>

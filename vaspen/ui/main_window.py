@@ -594,16 +594,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_about(self) -> None:
-        QMessageBox.about(
-            self,
-            self.tr("About VASPen"),
-            self.tr(
-                "<h2>VASPen v0.1.0</h2>"
-                "<p>A cross-platform GUI for VASP first-principles calculations.</p>"
-                "<p><b>Built with:</b> PySide6, ASE, pymatgen, Qt native OpenGL</p>"
-                "<p>Free and open source (MIT License).</p>"
-            ),
-        )
+        from vaspen.ui.about_dialog import AboutDialog
+        dlg = AboutDialog(self)
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # Drag & Drop
