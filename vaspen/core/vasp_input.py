@@ -1,12 +1,7 @@
 """VASP input file generation — INCAR, KPOINTS, POTCAR.
 
-Default values are based on vaspkit's built-in presets, which represent
-community best practices for common calculation types.
-
-Reference:
-    vaspkit (https://vaspkit.com/) — the most widely used VASP
-    pre/post-processing toolkit in the Chinese computational materials
-    community and beyond.
+Default values follow community best practices for common VASP
+calculation types.
 """
 
 from __future__ import annotations
@@ -18,12 +13,12 @@ import numpy as np
 from ase.dft.kpoints import get_special_points as ase_get_special_points
 
 # ======================================================================
-# INCAR Presets — modeled after vaspkit's default recommendations
+# INCAR Presets — community-standard defaults
 # ======================================================================
 # Each preset is a dict of tag → value. Values are written as-is to
 # the INCAR file (strings, ints, floats, bools).
 #
-# Key vaspkit design principles reflected here:
+# Key design principles:
 #   1. ENCUT defaults to 400 eV (user should increase to 1.3× ENMAX).
 #   2. ISMEAR=0 (Gaussian) for most calculations.
 #   3. ISMEAR=-5 (tetrahedron) for DOS.
@@ -153,10 +148,10 @@ INCAR_TAG_DESCRIPTIONS: dict[str, str] = {
 }
 
 # ======================================================================
-# KPOINTS Generation — modeled after vaspkit
+# KPOINTS Generation
 # ======================================================================
 
-# vaspkit-recommended KSPACING values
+# Recommended KSPACING values
 KSPACING_RECOMMEND = {
     "insulator": 0.04,
     "metal": 0.03,
@@ -172,13 +167,13 @@ def generate_kpoints_automatic(
 ) -> str:
     """Generate KPOINTS content using automatic KSPACING mode.
 
-    This is vaspkit's recommended approach — VASP automatically
+    This is the recommended approach — VASP automatically
     determines the optimal k-mesh from KSPACING and the cell.
 
     Args:
         structure_cell: 3×3 cell matrix (Angstrom).
         k_spacing: Target k-point spacing in Å⁻¹.
-                   vaspkit recommended: 0.04 (insulators), 0.03 (metals).
+                   Recommended: 0.04 (insulators), 0.03 (metals).
         gamma_centered: True for Gamma-centered, False for Monkhorst-Pack.
 
     Returns:
@@ -242,7 +237,7 @@ def generate_kpoints_line_mode(
         high_symmetry_path: List of (start_label, end_label) pairs.
             Example: [("G", "X"), ("X", "M"), ("M", "G")].
         n_points_per_segment: Number of k-points per path segment
-            (vaspkit default: 20). Each segment includes both endpoints;
+            (default: 20). Each segment includes both endpoints;
             junction points appear once per adjacent segment.
         special_points: High-symmetry label → fractional coordinates,
             e.g. from get_high_symmetry_points(cell).
@@ -300,7 +295,7 @@ def estimate_k_mesh(
 ) -> tuple[int, int, int]:
     """Estimate a k-mesh (n1, n2, n3) from cell and target spacing.
 
-    Follows VASP's automatic-mesh formula (same as vaspkit):
+    Follows VASP's automatic-mesh formula:
         n_i = max(1, ceil(|b_i| / KSPACING))
     where b_i are the reciprocal lattice vectors.
 
@@ -322,15 +317,13 @@ def estimate_k_mesh(
 # POTCAR Generation
 # ======================================================================
 
-# vaspkit POTCAR recommendation rules
+# POTCAR recommendation rules (semi-core states → _d or _sv variants)
 # Default functional → PBE.54
-# Elements with semi-core states → _d or _sv variants
 
 POTCAR_DEFAULT_FUNCTIONAL = "PBE"
 POTCAR_DEFAULT_VERSION = "PBE.54"
 
 # Elements that benefit from semi-core variants (PBE.54 naming)
-# Based on vaspkit recommendations
 POTCAR_SPECIAL_RECOMMENDATIONS: dict[str, str] = {
     # d-electron elements → use *_d
     "Ga": "Ga_d",
@@ -390,7 +383,7 @@ def generate_potcar(
 ) -> tuple[str, list[str]]:
     """Generate POTCAR content by concatenating individual POTCAR files.
 
-    Follows vaspkit's approach:
+    Concatenates per-element POTCAR files in POSCAR order:
         1. For each element, find the recommended POTCAR directory.
         2. Concatenate in element order (as they appear in POSCAR).
         3. Note that the order matters — POTCAR must match POSCAR atom order.
@@ -398,7 +391,7 @@ def generate_potcar(
     Args:
         elements: List of element symbols in POSCAR order.
         potcar_library_path: Root path to the pseudopotential library
-            (same structure as vaspkit expects).
+            (standard VASP pseudopotential layout).
         functional: "LDA", "PBE", or "PW91".
 
     Returns:

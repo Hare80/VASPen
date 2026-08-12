@@ -58,7 +58,7 @@ VASPen/
 │   │   ├── file_io.py          # Unified file read/write with format registry
 │   │   ├── surface.py          # Miller-index slab cutting via ASE
 │   │   ├── builder.py          # Add/remove/replace atoms, supercell, symmetry
-│   │   └── vasp_input.py       # INCAR/KPOINTS/POTCAR generation with vaspkit presets
+│   │   └── vasp_input.py       # INCAR/KPOINTS/POTCAR generation with presets
 │   ├── resources/
 │   │   ├── i18n/
 │   │   │   ├── vaspen_en.ts   # English source translations
@@ -317,11 +317,11 @@ PyVista was also considered (VTK-based) but is heavier and harder to embed in Qt
 
 ---
 
-## 8. vaspkit Reference for Defaults
+## 8. Default-Value Reference (community standards)
 
 ### 8.1 INCAR Presets
 
-vaspkit's INCAR strategy uses **layered defaults by calculation type**. We replicate this in `vaspen/core/vasp_input.py`:
+The INCAR strategy uses **layered defaults by calculation type**. Implemented in `vaspen/core/vasp_input.py`:
 
 | Tag | SCF | Optimization | Band | DOS | Optical |
 |-----|-----|-------------|------|-----|---------|
@@ -344,7 +344,7 @@ vaspkit's INCAR strategy uses **layered defaults by calculation type**. We repli
 
 ### 8.2 KPOINTS Modes
 
-| Mode | Key Parameter | vaspkit Default |
+| Mode | Key Parameter | Default |
 |------|--------------|-----------------|
 | Automatic (KSPACING) | KSPACING = 0.04 | Insulators: 0.04, Metals: 0.03 |
 | Manual Mesh | n1, n2, n3 | User-specified |
@@ -354,11 +354,11 @@ vaspkit's INCAR strategy uses **layered defaults by calculation type**. We repli
 
 | Element | Recommended Variant | Reason |
 |---------|-------------------|--------|
-| Most elements | PBE_54 (PBE.54) | vaspkit default |
+| Most elements | PBE_54 (PBE.54) | default |
 | Ga, In, Sn, Pb, Ge | *_d variants | Semi-core d electrons |
 | Alkali / Alkaline earth | *_sv variants | Semi-core s/p electrons |
 
-Default functional: PBE. Pseudopotential library root path is configured by the user (pointing to vaspkit's potcar directory or their own).
+Default functional: PBE. Pseudopotential library root path is configured by the user (pointing to a standard pseudopotential directory or their own).
 
 ---
 
@@ -496,7 +496,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [ ] Main window with menus
 - [x] 3D structure viewer (ball-and-stick)
 - [ ] Open/save cif, xyz, POSCAR, CONTCAR
-- [ ] INCAR/KPOINTS generation with vaspkit presets
+- [ ] INCAR/KPOINTS generation with preset defaults
 - [ ] POTCAR generation from local pseudopotential library
 - [ ] Basic structure editing (add/remove atoms, supercell)
 - [ ] Surface/slab cutting

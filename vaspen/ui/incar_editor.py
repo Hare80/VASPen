@@ -2,7 +2,7 @@
 
 Provides a table-based INCAR tag editor with presets for common
 calculation types (SCF, Optimization, Band, DOS, Optical, NEB).
-Defaults follow vaspkit recommendations.
+Defaults follow community-standard settings.
 """
 
 from __future__ import annotations

@@ -587,8 +587,7 @@ class MainWindow(QMainWindow):
                 "<h2>VASPen v0.1.0</h2>"
                 "<p>A cross-platform GUI for VASP first-principles calculations.</p>"
                 "<p><b>Built with:</b> PySide6, ASE, pymatgen, Qt native OpenGL</p>"
-                "<p>Default settings based on "
-                "<a href='https://vaspkit.com'>vaspkit</a> recommendations.</p>"
+                "<p>Free and open source (MIT License).</p>"
             ),
         )
 

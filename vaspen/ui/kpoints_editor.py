@@ -1,7 +1,7 @@
 """KPOINTS editor dialog.
 
 Supports three modes:
-- Automatic KSPACING (vaspkit recommended)
+- Automatic KSPACING (recommended)
 - Manual k-mesh grid
 - Line-mode for band structure
 """

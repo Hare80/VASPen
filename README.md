@@ -8,9 +8,9 @@ A cross-platform desktop GUI for VASP first-principles calculations. Provides vi
 - **Multi-format support** — open CIF, XYZ, POSCAR, CONTCAR, XSF, PDB and more (via ASE)
 - **Structure editing** — add/remove/replace atoms, create supercells, sort/wrap atoms
 - **Surface/slab cutting** — specify Miller indices (hkl), layers, and vacuum thickness
-- **INCAR generation** — presets for SCF, Optimization, Band, DOS, Optical, and NEB (defaults based on [vaspkit](https://vaspkit.com))
+- **INCAR generation** — presets for SCF, Optimization, Band, DOS, Optical, and NEB (community-standard defaults)
 - **KPOINTS generation** — Automatic KSPACING, manual mesh, and line-mode for band structure
-- **POTCAR generation** — per-element pseudopotential selection with vaspkit-recommended variants, auto-concatenation
+- **POTCAR generation** — per-element pseudopotential selection with recommended semi-core variants, auto-concatenation
 - **One-click input generation** — generate all four VASP input files at once
 - **i18n** — English and Chinese interface (switchable)
 - **Cross-platform** — Windows (primary) and Linux
@@ -50,7 +50,7 @@ python -m vaspen.main
 
 ## Configuring POTCAR Library
 
-VASPen needs a local pseudopotential library to generate POTCAR files. The library should follow vaspkit's directory structure:
+VASPen needs a local pseudopotential library to generate POTCAR files. The library uses the standard VASP pseudopotential directory layout:
 
 ```
 potcar/
@@ -67,7 +67,7 @@ potcar/
 
 Set the path in **Edit → Preferences → Pseudopotential Library**.
 
-If you already use vaspkit, point VASPen to the same POTCAR directory.
+If you already have such a library, point VASPen to the same directory.
 
 ## Project Structure
 
@@ -143,4 +143,4 @@ VASPen is free and open source, released under the [MIT License](LICENSE).
 
 ## Acknowledgments
 
-Default parameters are based on [vaspkit](https://vaspkit.com) recommendations — the most widely used VASP pre/post-processing toolkit. Structure I/O is powered by [ASE](https://wiki.fysik.dtu.dk/ase/) and [pymatgen](https://pymatgen.org/).
+Structure I/O is powered by [ASE](https://wiki.fysik.dtu.dk/ase/) and [pymatgen](https://pymatgen.org/); high-symmetry k-path generation uses [spglib](https://spglib.readthedocs.io/).

@@ -77,7 +77,7 @@ class SettingsDialog(QDialog):
         potcar_note = QLabel(self.tr(
             "The library should have subdirectories like:\n"
             "  PBE.54/Fe/POTCAR, PBE.54/O/POTCAR, ...\n"
-            "This matches vaspkit's expected directory structure."
+            "This is the standard VASP pseudopotential directory layout."
         ))
         potcar_note.setWordWrap(True)
         potcar_form.addRow("", potcar_note)
