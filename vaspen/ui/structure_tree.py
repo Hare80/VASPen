@@ -16,12 +16,15 @@ from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCompleter,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMenu,
     QMessageBox,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -55,6 +58,19 @@ def composition_text(
     if vacancy > 1e-9:
         parts.append(f"{translate('Vacancy')} {vacancy / n_sites * 100:.1f}%")
     return " · ".join(parts)
+
+
+class _ElementDelegate(QStyledItemDelegate):
+    """Inline editor for the Element column with symbol autocomplete."""
+
+    def createEditor(self, parent, option, index):
+        editor = QLineEdit(parent)
+        completer = QCompleter(
+            [s for s in chemical_symbols if s != "X"], editor)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        editor.setCompleter(completer)
+        return editor
 
 
 class StructureTreePanel(QWidget):
@@ -97,6 +113,8 @@ class StructureTreePanel(QWidget):
         self._table.setContextMenuPolicy(Qt.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._on_context_menu)
         self._table.cellChanged.connect(self._on_cell_changed)
+        # Element column: inline editor with symbol autocomplete.
+        self._table.setItemDelegateForColumn(1, _ElementDelegate(self._table))
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self._table, 1)
 

@@ -268,3 +268,17 @@ def test_extract_occupancy_vacancy():
     occ = extract_occupancy(atoms)
     assert occ is not None
     assert occ[0] == {"Fe": 0.5}
+
+
+def test_write_filter_is_categorized():
+    """Save filter lists formats per type (VESTA-style) with no combined
+    "Structure files" entry — the read filter keeps the combined entry."""
+    read_filter = FileIO.file_filter(for_writing=False)
+    assert read_filter.startswith("Structure files (")
+
+    write_filter = FileIO.file_filter(for_writing=True)
+    assert "Structure files (" not in write_filter
+    assert write_filter.startswith("CIF — ")
+    assert write_filter.endswith("All files (*)")
+    assert "POSCAR / CONTCAR (VASP) (*.vasp" in write_filter
+    assert "*.cif" in write_filter and "*.xyz" in write_filter

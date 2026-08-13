@@ -15,7 +15,6 @@ view-direction button and has no such issue.
 
 from __future__ import annotations
 
-from ase.data import chemical_symbols
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QColor
 from PySide6.QtWidgets import (
@@ -49,6 +48,7 @@ from vaspen.core.render_settings import (
     PALETTES,
     RenderSettings,
 )
+from vaspen.ui.periodic_table_dialog import PeriodicTableDialog
 from vaspen.ui.viewport3d import element_color
 from vaspen.utils.config import AppConfig
 
@@ -264,14 +264,7 @@ class DisplayOptionsDialog(QDialog):
         row2 = QHBoxLayout()
         self._add_element_btn = QToolButton()
         self._add_element_btn.setText(self.tr("Add element…"))
-        self._add_element_btn.setPopupMode(QToolButton.InstantPopup)
-        self._add_element_menu = QMenu(self)
-        for sym in chemical_symbols[1:]:
-            action = QAction(sym, self)
-            action.triggered.connect(
-                lambda checked=False, s=sym: self._on_add_element(s))
-            self._add_element_menu.addAction(action)
-        self._add_element_btn.setMenu(self._add_element_menu)
+        self._add_element_btn.clicked.connect(self._open_periodic_table)
         row2.addWidget(self._add_element_btn)
         self._reset_all_btn = QPushButton(self.tr("Reset all overrides"))
         self._reset_all_btn.clicked.connect(self._on_reset_all_overrides)
@@ -631,6 +624,14 @@ class DisplayOptionsDialog(QDialog):
             self._grad_bottom = (color.redF(), color.greenF(), color.blueF())
             self._set_swatch_color(self._grad_bottom_swatch, self._grad_bottom)
             self._apply()
+
+    def _open_periodic_table(self) -> None:
+        """Open the periodic table; clicking an element adds its row."""
+        dlg = PeriodicTableDialog(self)
+        if dlg.exec() != PeriodicTableDialog.DialogCode.Accepted:
+            return
+        if dlg.selected_symbol:
+            self._on_add_element(dlg.selected_symbol)
 
     def _on_add_element(self, sym: str) -> None:
         if sym in self._overrides:

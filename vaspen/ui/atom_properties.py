@@ -1,8 +1,11 @@
 """Atom properties panel (right dock) — edit the selected atom.
 
-Shows element (editable), stable ID, Cartesian x/y/z and fractional
-coordinates (editable, periodic structures only), plus charge/force/
-velocity when the file carries them (read-only).
+Shows element (editable text with autocomplete + a "…" periodic-table
+picker), stable ID, Cartesian x/y/z and fractional coordinates (editable
+text fields, periodic structures only), plus charge/force/velocity when
+the file carries them (read-only). Coordinate and element fields are
+plain text inputs — no spin-box arrows; invalid input reverts to the
+model value.
 
 Non-modal/persistent → implements changeEvent + refresh so it
 re-translates live (CLAUDE.md §11.2 pattern).
@@ -13,18 +16,24 @@ from __future__ import annotations
 import numpy as np
 from ase.data import chemical_symbols
 
-from PySide6.QtCore import QEvent
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
-    QComboBox,
-    QDoubleSpinBox,
+    QCompleter,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QToolButton,
     QWidget,
 )
 
 from vaspen.core.builder import StructureBuilder
 from vaspen.core.structure import StructureModel
+from vaspen.ui.periodic_table_dialog import PeriodicTableDialog
 from vaspen.ui.structure_tree import composition_text
+
+# Element symbols for the autocompleter (skip placeholder "X").
+_ELEMENT_SYMBOLS = chemical_symbols[1:]
 
 
 class AtomPropertiesPanel(QWidget):
@@ -42,31 +51,45 @@ class AtomPropertiesPanel(QWidget):
         self._status_label.setWordWrap(True)
         layout.addRow(self._status_label)
 
-        self._element_combo = QComboBox(self)
-        self._element_combo.addItems(chemical_symbols[1:])  # skip "X"
-        self._element_combo.currentTextChanged.connect(self._on_element_changed)
+        # Element: editable text + autocomplete + "…" periodic table.
+        self._element_edit = QLineEdit(self)
+        completer = QCompleter(_ELEMENT_SYMBOLS, self)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        self._element_edit.setCompleter(completer)
+        self._element_edit.editingFinished.connect(self._on_element_edited)
+        self._element_pick_btn = QToolButton(self)
+        self._element_pick_btn.setText("…")
+        self._element_pick_btn.setToolTip(self.tr("Open periodic table…"))
+        self._element_pick_btn.clicked.connect(self._open_periodic_table)
+        element_row = QWidget(self)
+        element_layout = QHBoxLayout(element_row)
+        element_layout.setContentsMargins(0, 0, 0, 0)
+        element_layout.setSpacing(2)
+        element_layout.addWidget(self._element_edit, 1)
+        element_layout.addWidget(self._element_pick_btn)
         self._element_label = QLabel(self.tr("Element:"))
-        layout.addRow(self._element_label, self._element_combo)
+        layout.addRow(self._element_label, element_row)
 
         self._id_label = QLabel("—")
         self._id_caption = QLabel(self.tr("ID:"))
         layout.addRow(self._id_caption, self._id_label)
 
-        self._x_spin = self._make_spin()
-        self._y_spin = self._make_spin()
-        self._z_spin = self._make_spin()
-        layout.addRow(QLabel("x (Å):"), self._x_spin)
-        layout.addRow(QLabel("y (Å):"), self._y_spin)
-        layout.addRow(QLabel("z (Å):"), self._z_spin)
+        self._x_edit = self._make_coord_edit()
+        self._y_edit = self._make_coord_edit()
+        self._z_edit = self._make_coord_edit()
+        layout.addRow(QLabel("x (Å):"), self._x_edit)
+        layout.addRow(QLabel("y (Å):"), self._y_edit)
+        layout.addRow(QLabel("z (Å):"), self._z_edit)
 
         self._frac_caption = QLabel(self.tr("Fractional (periodic only)"))
         layout.addRow(self._frac_caption)
-        self._fx_spin = self._make_spin()
-        self._fy_spin = self._make_spin()
-        self._fz_spin = self._make_spin()
-        layout.addRow(QLabel("fx:"), self._fx_spin)
-        layout.addRow(QLabel("fy:"), self._fy_spin)
-        layout.addRow(QLabel("fz:"), self._fz_spin)
+        self._fx_edit = self._make_coord_edit()
+        self._fy_edit = self._make_coord_edit()
+        self._fz_edit = self._make_coord_edit()
+        layout.addRow(QLabel("fx:"), self._fx_edit)
+        layout.addRow(QLabel("fy:"), self._fy_edit)
+        layout.addRow(QLabel("fz:"), self._fz_edit)
 
         # Site composition (partially-occupied structures only; hidden
         # otherwise — see refresh()).
@@ -87,13 +110,13 @@ class AtomPropertiesPanel(QWidget):
         self._velocity_caption = QLabel(self.tr("Velocity:"))
         layout.addRow(self._velocity_caption, self._velocity_label)
 
-        # Connect edit commits ONCE — programmatic setValue never fires
+        # Connect edit commits ONCE — programmatic setText never fires
         # editingFinished, so no connect/disconnect churn is needed
         # (repeated disconnect+reconnect leaked duplicate connections).
-        for spin in (self._x_spin, self._y_spin, self._z_spin):
-            spin.editingFinished.connect(self._on_cartesian_edited)
-        for spin in (self._fx_spin, self._fy_spin, self._fz_spin):
-            spin.editingFinished.connect(self._on_fractional_edited)
+        for edit in (self._x_edit, self._y_edit, self._z_edit):
+            edit.editingFinished.connect(self._on_cartesian_edited)
+        for edit in (self._fx_edit, self._fy_edit, self._fz_edit):
+            edit.editingFinished.connect(self._on_fractional_edited)
 
         self.set_model(model)
 
@@ -123,11 +146,10 @@ class AtomPropertiesPanel(QWidget):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_spin() -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
-        spin.setRange(-1e6, 1e6)
-        spin.setDecimals(6)
-        return spin
+    def _make_coord_edit() -> QLineEdit:
+        """Plain text coordinate field — no spin-box arrows (user
+        decision 2026-08-14: values are typed, not stepped)."""
+        return QLineEdit()
 
     @staticmethod
     def _property_value(atoms, key: str, index: int) -> np.ndarray | None:
@@ -152,6 +174,7 @@ class AtomPropertiesPanel(QWidget):
 
     def _retranslate(self) -> None:
         self._element_label.setText(self.tr("Element:"))
+        self._element_pick_btn.setToolTip(self.tr("Open periodic table…"))
         self._id_caption.setText(self.tr("ID:"))
         self._frac_caption.setText(self.tr("Fractional (periodic only)"))
         self._composition_caption.setText(self.tr("Composition"))
@@ -178,9 +201,9 @@ class AtomPropertiesPanel(QWidget):
                 symbol = model.symbols[index]
                 self._status_label.setText(self.tr("Atom {} ({})").format(index, symbol))
 
-            for w in (self._element_combo, self._id_label,
-                      self._x_spin, self._y_spin, self._z_spin,
-                      self._fx_spin, self._fy_spin, self._fz_spin,
+            for w in (self._element_edit, self._element_pick_btn, self._id_label,
+                      self._x_edit, self._y_edit, self._z_edit,
+                      self._fx_edit, self._fy_edit, self._fz_edit,
                       self._charge_label, self._force_label, self._velocity_label):
                 w.setEnabled(single)
 
@@ -208,20 +231,20 @@ class AtomPropertiesPanel(QWidget):
 
             if single:
                 index = next(iter(sel))
-                self._element_combo.setCurrentText(model.symbols[index])
+                self._element_edit.setText(model.symbols[index])
                 self._id_label.setText(str(model.atom_id(index)))
                 pos = model.positions[index]
-                self._x_spin.setValue(float(pos[0]))
-                self._y_spin.setValue(float(pos[1]))
-                self._z_spin.setValue(float(pos[2]))
+                self._x_edit.setText(f"{pos[0]:.6f}")
+                self._y_edit.setText(f"{pos[1]:.6f}")
+                self._z_edit.setText(f"{pos[2]:.6f}")
                 periodic = model.is_periodic
-                for spin in (self._fx_spin, self._fy_spin, self._fz_spin):
-                    spin.setEnabled(single and periodic)
+                for edit in (self._fx_edit, self._fy_edit, self._fz_edit):
+                    edit.setEnabled(single and periodic)
                 if periodic:
                     frac = model.scaled_positions[index]
-                    self._fx_spin.setValue(float(frac[0]))
-                    self._fy_spin.setValue(float(frac[1]))
-                    self._fz_spin.setValue(float(frac[2]))
+                    self._fx_edit.setText(f"{frac[0]:.6f}")
+                    self._fy_edit.setText(f"{frac[1]:.6f}")
+                    self._fz_edit.setText(f"{frac[2]:.6f}")
                 for key, label in (("initial_charges", self._charge_label),
                                    ("forces", self._force_label),
                                    ("velocities", self._velocity_label)):
@@ -241,11 +264,32 @@ class AtomPropertiesPanel(QWidget):
         sel = self._model.selected_indices
         return next(iter(sel)) if len(sel) == 1 else None
 
-    def _on_element_changed(self, symbol: str) -> None:
-        if self._refreshing or not symbol or self._model is None:
+    def _revert_edits(self) -> None:
+        """Restore field texts from the model (invalid input guard)."""
+        self.refresh()
+
+    def _open_periodic_table(self) -> None:
+        """Open the periodic table; clicking an element applies it."""
+        index = self._single_index()
+        if index is None:
+            return
+        dlg = PeriodicTableDialog(self)
+        if dlg.exec() != PeriodicTableDialog.DialogCode.Accepted:
+            return
+        if dlg.selected_symbol is None:
+            return
+        self._element_edit.setText(dlg.selected_symbol)
+        self._on_element_edited()
+
+    def _on_element_edited(self) -> None:
+        if self._refreshing or self._model is None:
             return
         index = self._single_index()
         if index is None:
+            return
+        symbol = self._element_edit.text().strip().capitalize()
+        if symbol not in _ELEMENT_SYMBOLS:
+            self._revert_edits()
             return
         if symbol != self._model.symbols[index]:
             StructureBuilder.replace_element(self._model, index, symbol)
@@ -256,7 +300,12 @@ class AtomPropertiesPanel(QWidget):
         index = self._single_index()
         if index is None:
             return
-        pos = [self._x_spin.value(), self._y_spin.value(), self._z_spin.value()]
+        try:
+            pos = [float(self._x_edit.text()), float(self._y_edit.text()),
+                   float(self._z_edit.text())]
+        except ValueError:
+            self._revert_edits()
+            return
         self._model.set_atom_position(index, np.asarray(pos, dtype=float))
 
     def _on_fractional_edited(self) -> None:
@@ -265,5 +314,10 @@ class AtomPropertiesPanel(QWidget):
         index = self._single_index()
         if index is None or not self._model.is_periodic:
             return
-        frac = [self._fx_spin.value(), self._fy_spin.value(), self._fz_spin.value()]
+        try:
+            frac = [float(self._fx_edit.text()), float(self._fy_edit.text()),
+                    float(self._fz_edit.text())]
+        except ValueError:
+            self._revert_edits()
+            return
         self._model.set_atom_scaled_position(index, np.asarray(frac, dtype=float))

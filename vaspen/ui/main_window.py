@@ -40,6 +40,21 @@ from vaspen.ui.viewport3d import Viewport3D
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger
 
+# Characters that are invalid in Windows filenames.
+_INVALID_FILENAME_CHARS = '<>:"/\\|?*'
+
+
+def _sanitize_filename(name: str) -> str:
+    """Make a formula safe to use as a Windows filename.
+
+    Strips characters invalid on Windows and replaces the decimal points
+    of disordered formulas ("Fe2.05Ni0.5Co0.2") with underscores so the
+    extension dot stays unambiguous.
+    """
+    cleaned = "".join(
+        c for c in name if c not in _INVALID_FILENAME_CHARS)
+    return cleaned.replace(".", "_").strip() or "structure"
+
 
 class MainWindow(QMainWindow):
     """Top-level application window."""
@@ -731,6 +746,29 @@ class MainWindow(QMainWindow):
         )
         return reply == QMessageBox.Save
 
+    def _confirm_disorder_loss(self, operation: str) -> bool:
+        """Warn that an operation will discard fractional-occupancy data.
+
+        Some structure operations (supercell, symmetrize) rebuild the
+        atoms from scratch and cannot carry the site compositions over.
+        Requires the user's confirmation when the structure is
+        disordered.
+        """
+        if not self._structure.has_disorder:
+            return True
+        reply = QMessageBox.warning(
+            self,
+            self.tr("Partial Occupancy"),
+            self.tr(
+                "This structure has partial occupancy (disorder).\n"
+                "{} will discard the fractional occupancy "
+                "information.\n\n"
+                "Continue?").format(operation),
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        return reply == QMessageBox.Yes
+
     def _on_save(self) -> None:
         """Save the current structure."""
         fp = self._structure.filepath
@@ -748,14 +786,33 @@ class MainWindow(QMainWindow):
         else:
             self._on_save_as()
 
+    def _default_save_name(self) -> str:
+        """Default filename for Save As: loaded stem, else the formula.
+
+        The formula is sanitized for Windows filenames (invalid characters
+        stripped, decimal points in disordered formulas become '_').
+        """
+        fp = self._structure.filepath
+        if fp:
+            stem = Path(fp).stem
+        else:
+            stem = _sanitize_filename(self._structure.chemical_formula)
+        return stem + ".cif"
+
     def _on_save_as(self) -> None:
         """Save the structure to a new file."""
         file_filter = FileIO.file_filter(for_writing=True)
+        # Default to the first (CIF) category so the suggested extension
+        # matches the pre-selected filter.
+        selected = file_filter.split(";;")[0]
+        default_path = str(
+            Path(self._config.last_directory) / self._default_save_name())
         filepath, _ = QFileDialog.getSaveFileName(
             self,
             self.tr("Save Structure As"),
-            self._config.last_directory,
+            default_path,
             file_filter,
+            selected,
         )
         if filepath:
             try:
@@ -887,6 +944,10 @@ class MainWindow(QMainWindow):
 
         dlg = SupercellDialog(self)
         if dlg.exec() == SupercellDialog.Accepted and dlg.factors is not None:
+            # Building a supercell drops the fractional-occupancy info —
+            # confirm first for disordered structures.
+            if not self._confirm_disorder_loss(self.tr("Creating a supercell")):
+                return
             StructureBuilder.make_supercell(self._structure, dlg.factors)
             self._structure.reset_filepath()  # derived structure → Save As
             self._set_status(self.tr("Supercell {}×{}×{} created.").format(*dlg.factors))

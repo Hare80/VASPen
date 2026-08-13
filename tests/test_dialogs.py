@@ -459,3 +459,102 @@ def test_display_options_ambient_slider_goes_to_2(qtbot):
     assert dlg._amb_slider.maximum() == 200
     dlg._amb_slider.setValue(150)
     assert view.render_settings_calls[-1].ambient == pytest.approx(1.50)
+
+
+# ----------------------------------------------------------------------
+# Periodic table dialog
+# ----------------------------------------------------------------------
+
+def test_periodic_table_dialog_layout_and_selection(qtbot):
+    """118 element buttons in the standard periodic arrangement; clicking
+    one accepts the dialog with the chosen symbol."""
+    from ase.data import chemical_symbols
+
+    from vaspen.ui.periodic_table_dialog import (
+        PeriodicTableDialog, element_position,
+    )
+
+    dlg = PeriodicTableDialog()
+    qtbot.addWidget(dlg)
+    assert len(dlg._element_buttons) == 118
+    # layout spot checks (standard periodic table positions)
+    assert element_position("H") == (1, 1)
+    assert element_position("He") == (1, 18)
+    assert element_position("Fe") == (4, 8)
+    assert element_position("La") == (8, 3)
+    assert element_position("Og") == (7, 18)
+    # every element is placed
+    for z in range(1, 119):
+        assert chemical_symbols[z] in dlg._element_buttons
+
+    dlg._on_element("Fe")
+    assert dlg.selected_symbol == "Fe"
+    assert dlg.result() == 1  # Accepted
+
+
+def test_display_options_add_element_uses_periodic_table(qtbot, monkeypatch):
+    """The Add element… button opens the periodic table; clicking an
+    element there adds its override row (replaces the old 118-entry
+    QMenu)."""
+    from vaspen.ui.periodic_table_dialog import PeriodicTableDialog
+
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    assert dlg._row_swatch_for("Au") is None  # not in the fake structure
+
+    class _FakeDlg:
+        DialogCode = PeriodicTableDialog.DialogCode
+
+        def __init__(self, parent=None):
+            self.selected_symbol = "Au"
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "vaspen.ui.display_options_dialog.PeriodicTableDialog", _FakeDlg)
+    dlg._add_element_btn.click()
+    assert dlg._row_swatch_for("Au") is not None
+
+
+def test_symmetry_dialog_disorder_warns(qtbot, monkeypatch, disordered_atoms):
+    """Symmetrizing a disordered structure requires confirmation — the
+    operation rebuilds atoms from scratch and drops the occupancy."""
+    from ase import Atoms as _Atoms
+    from PySide6.QtWidgets import QMessageBox
+
+    m = StructureModel()
+    m.load_atoms(disordered_atoms)
+    dlg = SymmetryDialog(m)
+    qtbot.addWidget(dlg)
+
+    monkeypatch.setattr(
+        "vaspen.ui.symmetry_dialog.QMessageBox.warning",
+        staticmethod(lambda *a, **k: QMessageBox.Cancel))
+    dlg._on_symmetrize()
+    assert dlg.result_atoms is None  # cancelled — nothing applied
+
+    monkeypatch.setattr(
+        "vaspen.ui.symmetry_dialog.QMessageBox.warning",
+        staticmethod(lambda *a, **k: QMessageBox.Yes))
+    monkeypatch.setattr(
+        "vaspen.core.symmetry.symmetrize", lambda atoms: _Atoms("Fe"))
+    dlg._on_symmetrize()
+    assert dlg.result_atoms is not None
+
+
+def test_symmetry_dialog_clean_no_warning(qtbot, monkeypatch, si_bulk):
+    """A structure without disorder symmetrizes without any warning."""
+    def _boom(*a, **k):
+        raise AssertionError("warning shown for a clean structure")
+    monkeypatch.setattr(
+        "vaspen.ui.symmetry_dialog.QMessageBox.warning",
+        staticmethod(_boom))
+
+    m = StructureModel()
+    m.load_atoms(si_bulk)
+    dlg = SymmetryDialog(m)
+    qtbot.addWidget(dlg)
+    dlg._on_symmetrize()
+    assert dlg.result_atoms is not None

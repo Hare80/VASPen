@@ -235,14 +235,19 @@ class FileIO:
         """Build a Qt file-dialog filter string.
 
         Args:
-            for_writing: If True, only include writable formats.
+            for_writing: If True, only include writable formats. The write
+                filter is categorized per type (VESTA-style) with no
+                combined "Structure files" entry; the read filter keeps
+                the combined entry first for convenience.
 
         Returns:
             Filter string like ``"Structure files (*.cif *.xyz);;All files (*)"``.
         """
         exts = cls.supported_write_formats() if for_writing else cls.supported_read_formats()
-        patterns = " ".join(f"*{e}" for e in exts) + " POSCAR CONTCAR"
-        filters = [_tr("Structure files") + f" ({patterns})"]
+        filters: list[str] = []
+        if not for_writing:
+            patterns = " ".join(f"*{e}" for e in exts) + " POSCAR CONTCAR"
+            filters.append(_tr("Structure files") + f" ({patterns})")
         for ext in exts:
             if ext in (".poscar", ".contcar"):
                 continue  # covered by the combined VASP entry below

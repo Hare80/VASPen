@@ -1,5 +1,7 @@
 """UI smoke tests — main window launch, live language switch, open path."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -819,3 +821,94 @@ def test_poscar_save_confirm_disorder(window, monkeypatch, disordered_atoms,
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(_boom))
     window._on_export_poscar()
     assert target.exists()
+
+
+def test_save_as_default_filename(window, monkeypatch, disordered_atoms):
+    """Save As suggests a default filename: the loaded file's stem, or
+    the (sanitized) chemical formula for unnamed structures."""
+    from PySide6.QtWidgets import QFileDialog
+
+    captured = {}
+
+    def _fake_save(parent, title, default_path, filt, selected):
+        captured["path"] = default_path
+        captured["selected"] = selected
+        return ("", "")
+
+    monkeypatch.setattr(QFileDialog, "getSaveFileName",
+                        staticmethod(_fake_save))
+
+    # unnamed structure → formula-based name
+    window._structure.load_atoms(
+        Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10]))
+    window._on_save_as()
+    assert Path(captured["path"]).name == "H2.cif"
+    # the pre-selected filter is the first (CIF) category
+    assert captured["selected"].startswith("CIF — ")
+
+    # loaded file → its stem
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: Atoms("H2")))
+    window._open_file("water.xyz")
+    window._on_save_as()
+    assert Path(captured["path"]).name == "water.cif"
+
+    # disordered formula → decimal points become underscores
+    window._structure.reset_filepath()  # unnamed/derived structure
+    window._structure.load_atoms(disordered_atoms)
+    window._on_save_as()
+    assert Path(captured["path"]).name == "Fe2_05Ni0_5Co0_2.cif"
+
+
+def test_supercell_disorder_warns(window, monkeypatch, disordered_atoms):
+    """Creating a supercell from a disordered structure requires
+    confirmation (make_supercell drops the occupancy info silently)."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from vaspen.ui.supercell_dialog import SupercellDialog as _RealSupercell
+
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: disordered_atoms))
+    window._open_file("fake.cif")
+    n0 = window._structure.n_atoms
+
+    class _FakeDlg:
+        Accepted = _RealSupercell.Accepted
+
+        def __init__(self, parent=None):
+            self.factors = (2, 2, 2)
+
+        def exec(self):
+            return _RealSupercell.Accepted
+
+    monkeypatch.setattr("vaspen.ui.supercell_dialog.SupercellDialog",
+                        _FakeDlg)
+
+    # Cancel → structure unchanged, disorder intact
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **k: QMessageBox.Cancel))
+    window._on_supercell()
+    assert window._structure.n_atoms == n0
+    assert window._structure.has_disorder
+
+    # Confirm → supercell applied, occupancy cleared
+    monkeypatch.setattr(
+        QMessageBox, "warning", staticmethod(lambda *a, **k: QMessageBox.Yes))
+    window._on_supercell()
+    assert window._structure.n_atoms == n0 * 8
+    assert not window._structure.has_disorder
+
+    # Clean structure → no warning at all
+    def _boom(*a, **k):
+        raise AssertionError("warning shown for a clean structure")
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(_boom))
+    from ase import Atoms as _Atoms
+    monkeypatch.setattr(
+        fi.FileIO, "read",
+        classmethod(lambda cls, p: _Atoms("H2",
+                                          positions=[[0, 0, 0], [0.74, 0, 0]],
+                                          cell=[10, 10, 10])))
+    window._open_file("fake.xyz")
+    n_clean = window._structure.n_atoms
+    window._on_supercell()
+    assert window._structure.n_atoms == n_clean * 8

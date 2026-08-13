@@ -908,13 +908,14 @@ def test_properties_panel_edits_selection(window, monkeypatch):
     assert "No atom selected" in panel._status_label.text()
 
     window._structure.select_atom(0)
-    assert panel._element_combo.currentText() == "O"
+    assert panel._element_edit.text() == "O"
     assert panel._id_label.text() == "0"
 
-    panel._element_combo.setCurrentText("Fe")
+    panel._element_edit.setText("Fe")
+    panel._on_element_edited()
     assert window._structure.symbols[0] == "Fe"
 
-    panel._x_spin.setValue(1.5)
+    panel._x_edit.setText("1.5")
     panel._on_cartesian_edited()
     assert np.isclose(window._structure.positions[0][0], 1.5)
 
@@ -926,11 +927,58 @@ def test_properties_panel_fractional_edit(window, monkeypatch, si_bulk):
     _load(window, monkeypatch, si_bulk, "bulk.vasp")
     panel = window._atom_props
     window._structure.select_atom(0)
-    assert panel._fx_spin.isEnabled()
+    assert panel._fx_edit.isEnabled()
 
-    panel._fx_spin.setValue(0.5)
+    panel._fx_edit.setText("0.5")
     panel._on_fractional_edited()
     assert np.isclose(window._structure.scaled_positions[0][0], 0.5)
+
+
+def test_properties_panel_invalid_input_reverts(window, monkeypatch):
+    """Coordinate/element fields are plain text inputs: garbage input
+    reverts to the model value instead of being applied."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    panel = window._atom_props
+    window._structure.select_atom(0)
+
+    panel._x_edit.setText("not-a-number")
+    panel._on_cartesian_edited()
+    assert np.isclose(window._structure.positions[0][0], 0.0)
+    assert panel._x_edit.text() == "0.000000"  # reverted display
+
+    panel._element_edit.setText("Xx")
+    panel._on_element_edited()
+    assert window._structure.symbols[0] == "O"
+    assert panel._element_edit.text() == "O"
+
+
+def test_properties_panel_periodic_table_pick(window, monkeypatch):
+    """The "…" button opens the periodic table; clicking an element
+    there replaces the selected atom."""
+    from ase.build import molecule
+
+    from vaspen.ui.periodic_table_dialog import PeriodicTableDialog
+
+    _load(window, monkeypatch, molecule("H2O"))
+    panel = window._atom_props
+    window._structure.select_atom(0)
+
+    class _FakeDlg:
+        DialogCode = PeriodicTableDialog.DialogCode
+
+        def __init__(self, parent=None):
+            self.selected_symbol = "Fe"
+
+        def exec(self):
+            return self.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "vaspen.ui.atom_properties.PeriodicTableDialog", _FakeDlg)
+    panel._element_pick_btn.click()
+    assert window._structure.symbols[0] == "Fe"
+    assert panel._element_edit.text() == "Fe"
 
 
 def test_edit_menu_selection_ops(window, monkeypatch):

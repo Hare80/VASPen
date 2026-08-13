@@ -711,6 +711,20 @@ VASP POSCAR 格式不支持分数占据——保存的文件每个位置将只�
 
 是否继续保存？</translation>
     </message>
+    <message>
+        <source>Creating a supercell</source>
+        <translation>创建超胞</translation>
+    </message>
+    <message>
+        <source>This structure has partial occupancy (disorder).
+{} will discard the fractional occupancy information.
+
+Continue?</source>
+        <translation>该结构存在部分占据（无序）。
+{} 将丢弃分数占据信息。
+
+是否继续？</translation>
+    </message>
 </context>
 <context>
     <name>StructureTreePanel</name>
@@ -938,6 +952,17 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <source>Vacancy</source>
         <translation>空位</translation>
     </message>
+    <message>
+        <source>Open periodic table…</source>
+        <translation>打开元素周期表…</translation>
+    </message>
+</context>
+<context>
+    <name>PeriodicTableDialog</name>
+    <message>
+        <source>Periodic Table</source>
+        <translation>元素周期表</translation>
+    </message>
 </context>
 <context>
     <name>LatticeDialog</name>
@@ -1062,6 +1087,20 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
         <source>Could not symmetrize the structure.</source>
         <translation>无法对称化该结构。</translation>
+    </message>
+    <message>
+        <source>Partial Occupancy</source>
+        <translation>部分占据</translation>
+    </message>
+    <message>
+        <source>This structure has partial occupancy (disorder).
+Symmetrizing will discard the fractional occupancy information.
+
+Continue?</source>
+        <translation>该结构存在部分占据（无序）。
+对称化将丢弃分数占据信息。
+
+是否继续？</translation>
     </message>
 </context>
 <context>
