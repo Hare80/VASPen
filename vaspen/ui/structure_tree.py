@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -41,6 +42,7 @@ class StructureTreePanel(QWidget):
         super().__init__(parent)
         self._model = model
         self._refreshing = False  # guards feedback loops during refresh
+        self._frac_mode = False   # False = Cartesian, True = fractional
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -49,6 +51,16 @@ class StructureTreePanel(QWidget):
         self._cell_label = QLabel(self.tr("No structure loaded."))
         self._cell_label.setWordWrap(True)
         layout.addWidget(self._cell_label)
+
+        # ── Cartesian / fractional toggle (periodic structures only).
+        # The label shows the CURRENT mode; clicking switches — no
+        # checked/highlighted state (user preference). ──
+        self._frac_btn = QToolButton(self)
+        self._frac_btn.setText(self.tr("Cartesian"))
+        self._frac_btn.setToolTip(
+            self.tr("Click to switch between Cartesian and fractional coordinates"))
+        self._frac_btn.clicked.connect(self._on_frac_clicked)
+        layout.addWidget(self._frac_btn)
 
         # ── Atom table ──
         self._table = QTableWidget(0, 5)
@@ -106,9 +118,23 @@ class StructureTreePanel(QWidget):
         model = self._model
         self._refreshing = True
         try:
-            self._table.setHorizontalHeaderLabels(
-                [self.tr("Index"), self.tr("Element"), "x (Å)", "y (Å)", "z (Å)"]
-            )
+            periodic = model.is_periodic
+            self._frac_btn.setEnabled(periodic and model.n_atoms > 0)
+            frac_mode = self._frac_mode and periodic
+            if self._frac_mode and not periodic:
+                self._frac_mode = False  # model became a molecule
+            # The label shows the CURRENT coordinate mode.
+            self._frac_btn.setText(
+                self.tr("Fractional") if self._frac_mode else self.tr("Cartesian"))
+
+            if frac_mode:
+                self._table.setHorizontalHeaderLabels(
+                    [self.tr("Index"), self.tr("Element"), "fx", "fy", "fz"]
+                )
+            else:
+                self._table.setHorizontalHeaderLabels(
+                    [self.tr("Index"), self.tr("Element"), "x (Å)", "y (Å)", "z (Å)"]
+                )
 
             # Cell parameters
             if model.n_atoms == 0:
@@ -125,7 +151,7 @@ class StructureTreePanel(QWidget):
 
             # Atom table
             symbols = model.symbols
-            positions = model.positions
+            values = model.scaled_positions if frac_mode else model.positions
             self._table.setRowCount(0)
             self._table.setRowCount(len(symbols))
             for i, sym in enumerate(symbols):
@@ -144,7 +170,7 @@ class StructureTreePanel(QWidget):
                 self._table.setItem(i, 1, el_item)
 
                 for j in range(3):
-                    val_item = QTableWidgetItem(f"{positions[i, j]:.6f}")
+                    val_item = QTableWidgetItem(f"{values[i, j]:.6f}")
                     self._table.setItem(i, 2 + j, val_item)
 
             # Restore selection highlight (multi-select aware)
@@ -153,6 +179,11 @@ class StructureTreePanel(QWidget):
             ])
         finally:
             self._refreshing = False
+
+    def _on_frac_clicked(self) -> None:
+        """Cartesian ↔ fractional coordinate display/edit mode."""
+        self._frac_mode = not self._frac_mode
+        self.refresh()
 
     # ------------------------------------------------------------------
     # Selection sync (table → model)
@@ -244,10 +275,16 @@ class StructureTreePanel(QWidget):
             )
             self.refresh()  # revert the bad text
             return
-        pos = self._model.positions[row].copy()
-        pos[col - 2] = new_value
-        self._model.set_atom_position(row, pos)
-        logger.debug("Atom %d moved to %s", row, pos)
+        if self._frac_mode and self._model.is_periodic:
+            frac = self._model.scaled_positions[row].copy()
+            frac[col - 2] = new_value
+            self._model.set_atom_scaled_position(row, frac)
+            logger.debug("Atom %d frac position set to %s", row, frac)
+        else:
+            pos = self._model.positions[row].copy()
+            pos[col - 2] = new_value
+            self._model.set_atom_position(row, pos)
+            logger.debug("Atom %d moved to %s", row, pos)
 
     def _change_element(self, row: int, item) -> None:
         """Validate an edited element symbol and replace the atom."""

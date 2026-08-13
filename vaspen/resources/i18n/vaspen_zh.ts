@@ -443,6 +443,110 @@ Files: {}</source>
         <source>Detected {} bonds</source>
         <translation>已判断成键：{} 个</translation>
     </message>
+    <message>
+        <source>Distance</source>
+        <translation>距离</translation>
+    </message>
+    <message>
+        <source>Angle</source>
+        <translation>角度</translation>
+    </message>
+    <message>
+        <source>Dihedral</source>
+        <translation>二面角</translation>
+    </message>
+    <message>
+        <source>Click two atoms to measure their distance</source>
+        <translation>点击两个原子测量距离</translation>
+    </message>
+    <message>
+        <source>Click three atoms to measure the angle</source>
+        <translation>点击三个原子测量角度</translation>
+    </message>
+    <message>
+        <source>Click four atoms to measure the dihedral</source>
+        <translation>点击四个原子测量二面角</translation>
+    </message>
+    <message>
+        <source>Measurements</source>
+        <translation>测量</translation>
+    </message>
+    <message>
+        <source>Properties</source>
+        <translation>属性</translation>
+    </message>
+    <message>
+        <source>Ball &amp; Stick</source>
+        <translation>球棍模型</translation>
+    </message>
+    <message>
+        <source>Space Filling (CPK)</source>
+        <translation>空间填充 (CPK)</translation>
+    </message>
+    <message>
+        <source>Wireframe</source>
+        <translation>线框</translation>
+    </message>
+    <message>
+        <source>Display &amp;Style</source>
+        <translation>显示样式(&amp;S)</translation>
+    </message>
+    <message>
+        <source>Show Unit &amp;Cell</source>
+        <translation>显示晶胞(&amp;C)</translation>
+    </message>
+    <message>
+        <source>Show or hide the unit cell frame</source>
+        <translation>显示或隐藏晶胞线框</translation>
+    </message>
+    <message>
+        <source>Atom &amp;Labels</source>
+        <translation>原子标签(&amp;L)</translation>
+    </message>
+    <message>
+        <source>Show element labels on atoms</source>
+        <translation>在原子上显示元素标签</translation>
+    </message>
+    <message>
+        <source>Select &amp;All</source>
+        <translation>全选(&amp;A)</translation>
+    </message>
+    <message>
+        <source>Select &amp;None</source>
+        <translation>取消选择(&amp;N)</translation>
+    </message>
+    <message>
+        <source>&amp;Invert Selection</source>
+        <translation>反选(&amp;I)</translation>
+    </message>
+    <message>
+        <source>Select &amp;Neighbors</source>
+        <translation>选择相邻原子(&amp;N)</translation>
+    </message>
+    <message>
+        <source>Select &amp;Connected</source>
+        <translation>选择相连部分(&amp;C)</translation>
+    </message>
+    <message>
+        <source>Bond &amp;Order</source>
+        <translation>键级(&amp;O)</translation>
+    </message>
+    <message>
+        <source>Single</source>
+        <translation>单键</translation>
+    </message>
+    <message>
+        <source>Double</source>
+        <translation>双键</translation>
+    </message>
+    <message>
+        <source>Triple</source>
+        <translation>三键</translation>
+    </message>
+    <message>
+        <source>Aromatic</source>
+        <translation>芳香键</translation>
+    </message>
 </context>
 <context>
     <name>Viewport3D</name>
@@ -616,6 +720,22 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <source>Expected format: Element x y z</source>
         <translation>预期格式：元素 x y z</translation>
     </message>
+    <message>
+        <source>Fractional</source>
+        <translation>分数坐标</translation>
+    </message>
+    <message>
+        <source>Show and edit fractional coordinates</source>
+        <translation>显示并编辑分数坐标</translation>
+    </message>
+    <message>
+        <source>Click to switch between Cartesian and fractional coordinates</source>
+        <translation>点击在笛卡尔坐标与分数坐标之间切换</translation>
+    </message>
+    <message>
+        <source>Cartesian</source>
+        <translation>笛卡尔坐标</translation>
+    </message>
 </context>
 <context>
     <name>FileIO</name>
@@ -685,6 +805,68 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
         <source>Remember this value</source>
         <translation>记住此值</translation>
+    </message>
+</context>
+<context>
+    <name>MeasurementPanel</name>
+    <message>
+        <source>Measurements</source>
+        <translation>测量</translation>
+    </message>
+    <message>
+        <source>Clear All</source>
+        <translation>全部清除</translation>
+    </message>
+    <message>
+        <source>Distance</source>
+        <translation>距离</translation>
+    </message>
+    <message>
+        <source>Angle</source>
+        <translation>角度</translation>
+    </message>
+    <message>
+        <source>Dihedral</source>
+        <translation>二面角</translation>
+    </message>
+</context>
+<context>
+    <name>AtomPropertiesPanel</name>
+    <message>
+        <source>No atom selected</source>
+        <translation>未选择原子</translation>
+    </message>
+    <message>
+        <source>{} atoms selected</source>
+        <translation>已选择 {} 个原子</translation>
+    </message>
+    <message>
+        <source>Atom {} ({})</source>
+        <translation>原子 {} ({})</translation>
+    </message>
+    <message>
+        <source>Element:</source>
+        <translation>元素：</translation>
+    </message>
+    <message>
+        <source>ID:</source>
+        <translation>编号：</translation>
+    </message>
+    <message>
+        <source>Fractional (periodic only)</source>
+        <translation>分数坐标（仅周期性结构）</translation>
+    </message>
+    <message>
+        <source>Charge:</source>
+        <translation>电荷：</translation>
+    </message>
+    <message>
+        <source>Force:</source>
+        <translation>受力：</translation>
+    </message>
+    <message>
+        <source>Velocity:</source>
+        <translation>速度：</translation>
     </message>
 </context>
 </TS>

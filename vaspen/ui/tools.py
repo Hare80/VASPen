@@ -28,6 +28,9 @@ class ToolMode(Enum):
     MOVE_ATOM = auto()
     DELETE = auto()
     CREATE_BOND = auto()
+    MEASURE_DISTANCE = auto()
+    MEASURE_ANGLE = auto()
+    MEASURE_TORSION = auto()
 
 
 class Tool:
@@ -420,6 +423,56 @@ class DeleteTool(Tool):
         return Qt.CursorShape.ForbiddenCursor
 
 
+class MeasureTool(Tool):
+    """Click N atoms in sequence → measurement_added(kind, indices).
+
+    Picked atoms are shown with the preview highlight; clicking empty
+    space (or Esc) cancels the pending picks. Plain drag orbits.
+    """
+
+    def __init__(self, viewport, kind: str, need: int) -> None:
+        super().__init__(viewport)
+        self._kind = kind
+        self._need = need
+        self._picked: list[int] = []
+
+    def mouse_press(self, event, pos) -> bool:
+        self._press_pos = pos
+        return True
+
+    def mouse_move(self, event, pos) -> None:
+        if self._vp._dragged:
+            _orbit_to(self._vp, pos)
+
+    def mouse_release(self, event, pos) -> None:
+        vp = self._vp
+        if vp._dragged:
+            return
+        hit = vp.pick(pos)
+        if hit is None or hit[0] != "atom":
+            self.cancel()
+            return
+        self._picked.append(hit[1])
+        vp.set_preview_highlight(set(self._picked))
+        if len(self._picked) >= self._need:
+            kind, picked = self._kind, list(self._picked[:self._need])
+            self.cancel()
+            vp.measurement_added.emit(kind, picked)
+
+    def key_press(self, event) -> bool:
+        if event.key() == Qt.Key_Escape:
+            self.cancel()
+            return True
+        return False
+
+    def cancel(self) -> None:
+        self._picked = []
+        self._vp.set_preview_highlight(None)
+
+    def cursor(self) -> Qt.CursorShape:
+        return Qt.CursorShape.CrossCursor
+
+
 TOOL_CLASSES = {
     ToolMode.SELECT: SelectTool,
     ToolMode.ADD_ATOM: AddAtomTool,
@@ -428,7 +481,16 @@ TOOL_CLASSES = {
     ToolMode.DELETE: DeleteTool,
 }
 
+_MEASURE_SPECS = {
+    ToolMode.MEASURE_DISTANCE: ("distance", 2),
+    ToolMode.MEASURE_ANGLE: ("angle", 3),
+    ToolMode.MEASURE_TORSION: ("dihedral", 4),
+}
+
 
 def make_tool(mode: ToolMode, viewport) -> Tool:
     """Instantiate the tool for a mode."""
+    if mode in _MEASURE_SPECS:
+        kind, need = _MEASURE_SPECS[mode]
+        return MeasureTool(viewport, kind, need)
     return TOOL_CLASSES[mode](viewport)

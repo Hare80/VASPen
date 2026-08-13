@@ -147,6 +147,28 @@ class MainWindow(QMainWindow):
         self.act_lang_en.setChecked(lang == "en")
         self.act_lang_zh.setChecked(lang == "zh")
 
+        # ── Display style (View menu) ──
+        self._style_actions: dict[str, QAction] = {}
+        self._style_group = QActionGroup(self)
+        self._style_group.setExclusive(True)
+        for style, text in [
+            ("ball_stick", self.tr("Ball & Stick")),
+            ("cpk", self.tr("Space Filling (CPK)")),
+            ("wireframe", self.tr("Wireframe")),
+        ]:
+            act = QAction(text, self)
+            act.setCheckable(True)
+            self._style_group.addAction(act)
+            self._style_actions[style] = act
+
+        self.act_show_cell = QAction(self.tr("Show Unit &Cell"), self)
+        self.act_show_cell.setCheckable(True)
+        self.act_show_cell.setStatusTip(self.tr("Show or hide the unit cell frame"))
+
+        self.act_show_labels = QAction(self.tr("Atom &Labels"), self)
+        self.act_show_labels.setCheckable(True)
+        self.act_show_labels.setStatusTip(self.tr("Show element labels on atoms"))
+
         # ── Calculate ──
         self.act_gen_incar = QAction(self.tr("Generate &INCAR..."), self)
         self.act_gen_incar.triggered.connect(self._on_generate_incar)
@@ -180,6 +202,9 @@ class MainWindow(QMainWindow):
             (ToolMode.MOVE_ATOM, self.tr("Move"), self.tr("Drag an atom to move it (Esc cancels)")),
             (ToolMode.DELETE, self.tr("Delete"), self.tr("Click an atom or bond to delete it")),
             (ToolMode.CREATE_BOND, self.tr("Create Bond"), self.tr("Click two atoms to create a bond")),
+            (ToolMode.MEASURE_DISTANCE, self.tr("Distance"), self.tr("Click two atoms to measure their distance")),
+            (ToolMode.MEASURE_ANGLE, self.tr("Angle"), self.tr("Click three atoms to measure the angle")),
+            (ToolMode.MEASURE_TORSION, self.tr("Dihedral"), self.tr("Click four atoms to measure the dihedral")),
         ]:
             act = QAction(text, self)
             act.setCheckable(True)
@@ -198,13 +223,46 @@ class MainWindow(QMainWindow):
         self.act_auto_bonds.setCheckable(True)
         self.act_auto_bonds.setStatusTip(
             self.tr("Automatically detect bonds whenever the structure changes"))
-        self.act_auto_bonds.setChecked(True)
+        self.act_auto_bonds.setChecked(False)  # settled: off by default
         self.act_auto_bonds.toggled.connect(self._on_auto_bonds_toggled)
 
         self.act_detect_bonds = QAction(self.tr("Detect &Bonds"), self)
         self.act_detect_bonds.setStatusTip(
             self.tr("Re-detect all bonds from the current geometry"))
         self.act_detect_bonds.triggered.connect(self._on_detect_bonds)
+
+        # ── Selection operations ──
+        self.act_select_all = QAction(self.tr("Select &All"), self)
+        self.act_select_all.setShortcut(QKeySequence.SelectAll)
+        self.act_select_all.setShortcutContext(Qt.ApplicationShortcut)
+        self.act_select_all.triggered.connect(
+            lambda: self._structure.select_all())
+
+        self.act_select_none = QAction(self.tr("Select &None"), self)
+        self.act_select_none.triggered.connect(
+            lambda: self._structure.select_none())
+
+        self.act_select_invert = QAction(self.tr("&Invert Selection"), self)
+        self.act_select_invert.triggered.connect(
+            lambda: self._structure.select_invert())
+
+        self.act_select_neighbors = QAction(self.tr("Select &Neighbors"), self)
+        self.act_select_neighbors.triggered.connect(
+            lambda: self._structure.select_neighbors())
+
+        self.act_select_connected = QAction(self.tr("Select &Connected"), self)
+        self.act_select_connected.triggered.connect(
+            lambda: self._structure.select_connected())
+
+        # ── Bond order (applies to the selected bond) ──
+        self._bond_order_actions: dict[int, QAction] = {}
+        for order, text in [(1, self.tr("Single")), (2, self.tr("Double")),
+                            (3, self.tr("Triple")), (4, self.tr("Aromatic"))]:
+            act = QAction(text, self)
+            act.setEnabled(False)
+            act.triggered.connect(
+                lambda checked, o=order: self._on_set_bond_order(o))
+            self._bond_order_actions[order] = act
 
         # ── Help ──
         self.act_about = QAction(self.tr("&About VASPen"), self)
@@ -239,6 +297,16 @@ class MainWindow(QMainWindow):
         self._menu_edit.addAction(self.act_undo)
         self._menu_edit.addAction(self.act_redo)
         self._menu_edit.addSeparator()
+        self._menu_edit.addAction(self.act_select_all)
+        self._menu_edit.addAction(self.act_select_none)
+        self._menu_edit.addAction(self.act_select_invert)
+        self._menu_edit.addAction(self.act_select_neighbors)
+        self._menu_edit.addAction(self.act_select_connected)
+        self._menu_edit.addSeparator()
+        self._bond_order_menu = self._menu_edit.addMenu(self.tr("Bond &Order"))
+        for act in self._bond_order_actions.values():
+            self._bond_order_menu.addAction(act)
+        self._menu_edit.addSeparator()
         self._menu_edit.addAction(self.act_auto_bonds)
         self._menu_edit.addSeparator()
         self._menu_edit.addAction(self.act_preferences)
@@ -246,6 +314,12 @@ class MainWindow(QMainWindow):
         # View
         self._menu_view = mb.addMenu(self.tr("&View"))
         self._menu_view.addAction(self.act_reset_view)
+        self._menu_view.addSeparator()
+        self._menu_style = self._menu_view.addMenu(self.tr("Display &Style"))
+        for act in self._style_actions.values():
+            self._menu_style.addAction(act)
+        self._menu_view.addAction(self.act_show_cell)
+        self._menu_view.addAction(self.act_show_labels)
         self._menu_view.addSeparator()
         self._menu_lang = self._menu_view.addMenu(self.tr("&Language"))
         self._menu_lang.addAction(self.act_lang_en)
@@ -307,6 +381,15 @@ class MainWindow(QMainWindow):
         self._edit_toolbar.addAction(self.act_detect_bonds)
 
         self._edit_toolbar.addSeparator()
+        for mode in (ToolMode.MEASURE_DISTANCE, ToolMode.MEASURE_ANGLE,
+                     ToolMode.MEASURE_TORSION):
+            act = self._mode_actions[mode]
+            act.toggled.connect(
+                lambda checked, m=mode: self._viewport.set_mode(m) if checked else None
+            )
+            self._edit_toolbar.addAction(act)
+
+        self._edit_toolbar.addSeparator()
         self._element_label = QLabel(self.tr("Element:"))
         self._edit_toolbar.addWidget(self._element_label)
         self._element_combo = QComboBox(self)
@@ -346,6 +429,17 @@ class MainWindow(QMainWindow):
         self._edit_toolbar.addAction(self.act_undo)
         self._edit_toolbar.addAction(self.act_redo)
         self.addToolBar(self._edit_toolbar)
+
+        # Display style wiring (the viewport exists at this point)
+        for style, act in self._style_actions.items():
+            act.toggled.connect(
+                lambda checked, s=style: self._viewport.set_structure_style(s)
+                if checked else None
+            )
+        self._style_actions["ball_stick"].setChecked(True)
+        self.act_show_cell.toggled.connect(self._viewport.set_show_cell)
+        self.act_show_cell.setChecked(True)
+        self.act_show_labels.toggled.connect(self._viewport.set_show_labels)
 
     def _set_view_direction(self, azimuth: float, elevation: float,
                             up: tuple[float, float, float] | None = None) -> None:
@@ -393,6 +487,27 @@ class MainWindow(QMainWindow):
         self._dock_structure.setWidget(self._structure_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, self._dock_structure)
 
+        # Measurement dock (right side) — distance/angle/dihedral list
+        from vaspen.ui.measurement import MeasurementManager, MeasurementPanel
+
+        self._measurement_manager = MeasurementManager(self._structure)
+        self._dock_measure = QDockWidget(self.tr("Measurements"), self)
+        self._dock_measure.setObjectName("dock_measure")
+        self._dock_measure.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self._measurement_panel = MeasurementPanel(self._measurement_manager)
+        self._dock_measure.setWidget(self._measurement_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, self._dock_measure)
+
+        # Atom properties dock (right side) — edit the selected atom
+        from vaspen.ui.atom_properties import AtomPropertiesPanel
+
+        self._dock_props = QDockWidget(self.tr("Properties"), self)
+        self._dock_props.setObjectName("dock_props")
+        self._dock_props.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        self._atom_props = AtomPropertiesPanel(self._structure)
+        self._dock_props.setWidget(self._atom_props)
+        self.addDockWidget(Qt.RightDockWidgetArea, self._dock_props)
+
     # ------------------------------------------------------------------
     # Signal wiring
     # ------------------------------------------------------------------
@@ -409,7 +524,10 @@ class MainWindow(QMainWindow):
         self._viewport.bond_created.connect(self._on_bond_created)
         self._viewport.bond_removed.connect(self._on_bond_removed)
         self._viewport.delete_requested.connect(self._on_delete_requested)
+        self._viewport.measurement_added.connect(self._on_measurement_added)
         self._viewport.mode_changed.connect(self._on_mode_changed)
+        # Any manager change (add/remove/clear/sync) pushes to the viewport
+        self._measurement_manager.changed.connect(self._push_measurements)
 
     def _connect_model_signals(self, model: StructureModel) -> None:
         """Connect a StructureModel's signals to window/UI updates.
@@ -421,6 +539,7 @@ class MainWindow(QMainWindow):
         model.atom_selected.connect(self._on_atom_selected)
         model.selection_cleared.connect(self._on_selection_cleared)
         model.selection_changed.connect(self._on_selection_changed)
+        model.bond_selection_changed.connect(self._on_bond_selection_changed)
 
     # ------------------------------------------------------------------
     # File operations
@@ -438,6 +557,9 @@ class MainWindow(QMainWindow):
             self._structure = StructureModel()
             self._connect_model_signals(self._structure)
             self._structure_tree.set_model(self._structure)
+            self._measurement_manager.clear()
+            self._measurement_manager.set_model(self._structure)
+            self._atom_props.set_model(self._structure)
             self._viewport.set_structure(None)
             self._update_status_bar()
             self._update_edit_actions()
@@ -705,12 +827,31 @@ class MainWindow(QMainWindow):
         self.act_detect_bonds.setText(self.tr("Detect &Bonds"))
         self.act_detect_bonds.setStatusTip(
             self.tr("Re-detect all bonds from the current geometry"))
+        self.act_select_all.setText(self.tr("Select &All"))
+        self.act_select_none.setText(self.tr("Select &None"))
+        self.act_select_invert.setText(self.tr("&Invert Selection"))
+        self.act_select_neighbors.setText(self.tr("Select &Neighbors"))
+        self.act_select_connected.setText(self.tr("Select &Connected"))
+        self._bond_order_menu.setTitle(self.tr("Bond &Order"))
+        for order, text in [(1, self.tr("Single")), (2, self.tr("Double")),
+                            (3, self.tr("Triple")), (4, self.tr("Aromatic"))]:
+            self._bond_order_actions[order].setText(text)
         self.act_preferences.setText(self.tr("&Preferences..."))
         self.act_preferences.setStatusTip(self.tr("Configure settings"))
         self.act_reset_view.setText(self.tr("&Reset View"))
         self.act_reset_view.setStatusTip(self.tr("Reset the camera to the default view"))
         self.act_lang_en.setText(self.tr("English"))
         self.act_lang_zh.setText(self.tr("中文"))
+        for style, text in [
+            ("ball_stick", self.tr("Ball & Stick")),
+            ("cpk", self.tr("Space Filling (CPK)")),
+            ("wireframe", self.tr("Wireframe")),
+        ]:
+            self._style_actions[style].setText(text)
+        self.act_show_cell.setText(self.tr("Show Unit &Cell"))
+        self.act_show_cell.setStatusTip(self.tr("Show or hide the unit cell frame"))
+        self.act_show_labels.setText(self.tr("Atom &Labels"))
+        self.act_show_labels.setStatusTip(self.tr("Show element labels on atoms"))
         self.act_gen_incar.setText(self.tr("Generate &INCAR..."))
         self.act_gen_kpoints.setText(self.tr("Generate &KPOINTS..."))
         self.act_gen_potcar.setText(self.tr("Generate &POTCAR..."))
@@ -728,6 +869,7 @@ class MainWindow(QMainWindow):
         self._recent_menu.setTitle(self.tr("&Recent Files"))
         self._menu_edit.setTitle(self.tr("&Edit"))
         self._menu_view.setTitle(self.tr("&View"))
+        self._menu_style.setTitle(self.tr("Display &Style"))
         self._menu_lang.setTitle(self.tr("&Language"))
         self._menu_calc.setTitle(self.tr("&Calculate"))
         self._menu_tools.setTitle(self.tr("&Tools"))
@@ -737,6 +879,8 @@ class MainWindow(QMainWindow):
         self._toolbar.setWindowTitle(self.tr("Main Toolbar"))
         self._edit_toolbar.setWindowTitle(self.tr("Edit Toolbar"))
         self._dock_structure.setWindowTitle(self.tr("Structure"))
+        self._dock_measure.setWindowTitle(self.tr("Measurements"))
+        self._dock_props.setWindowTitle(self.tr("Properties"))
         self._status_label.setText(self.tr("Ready"))
         for mode, (text, tip) in {
             ToolMode.SELECT: (self.tr("Select"),
@@ -749,6 +893,12 @@ class MainWindow(QMainWindow):
                               self.tr("Click an atom or bond to delete it")),
             ToolMode.CREATE_BOND: (self.tr("Create Bond"),
                                    self.tr("Click two atoms to create a bond")),
+            ToolMode.MEASURE_DISTANCE: (self.tr("Distance"),
+                                        self.tr("Click two atoms to measure their distance")),
+            ToolMode.MEASURE_ANGLE: (self.tr("Angle"),
+                                     self.tr("Click three atoms to measure the angle")),
+            ToolMode.MEASURE_TORSION: (self.tr("Dihedral"),
+                                       self.tr("Click four atoms to measure the dihedral")),
         }.items():
             act = self._mode_actions[mode]
             act.setText(text)
@@ -852,6 +1002,9 @@ class MainWindow(QMainWindow):
         self._update_recent_menu()
 
     def _on_structure_loaded(self) -> None:
+        # Measurements belong to the PREVIOUS structure — their atom IDs
+        # would silently resolve to unrelated atoms of the new one.
+        self._measurement_manager.clear()
         self._viewport.set_structure(self._structure.atoms,
                                      bonds=self._structure.bonds)
         self._sync_auto_bonds_action()
@@ -868,7 +1021,9 @@ class MainWindow(QMainWindow):
         # set_structure resets the viewport highlight — re-apply the model
         # selection so it survives edits
         self._viewport.set_highlight(self._structure.selected_indices)
+        self._viewport.set_bond_highlight(self._structure.selected_bonds)
         self._sync_auto_bonds_action()
+        self._measurement_manager.sync_with_model()  # → changed → push
         self._update_status_bar()
         self._update_edit_actions()
 
@@ -908,6 +1063,7 @@ class MainWindow(QMainWindow):
     def _on_background_clicked(self) -> None:
         """User clicked empty space in the 3D viewport."""
         self._structure.clear_selection()
+        self._structure.clear_bond_selection()
 
     def _on_atom_selected(self, index: int) -> None:
         """Atom selection changed via the model (e.g. from structure tree)."""
@@ -993,12 +1149,38 @@ class MainWindow(QMainWindow):
                 pass
 
     def _on_bond_clicked(self, index: int) -> None:
-        """Select tool clicked a bond (status only in Phase 1)."""
+        """Select tool clicked a bond → select it (bond list index)."""
+        self._structure.select_bond(index)
+
+    def _on_bond_selection_changed(self) -> None:
+        """Bond selection changed via the model."""
+        self._viewport.set_bond_highlight(self._structure.selected_bonds)
+        sel = self._structure.selected_bonds
+        for act in self._bond_order_actions.values():
+            act.setEnabled(len(sel) == 1)
+        if len(sel) == 1:
+            k = next(iter(sel))
+            try:
+                b = self._structure.bonds[k]
+                self._set_status(self.tr("Bond {}–{} (order {})").format(
+                    b.i, b.j, b.order))
+            except IndexError:
+                pass
+
+    def _on_set_bond_order(self, order: int) -> None:
+        """Bond Order menu: change the selected bond's order (undoable)."""
+        sel = self._structure.selected_bonds
+        if len(sel) != 1:
+            return
+        k = next(iter(sel))
         try:
-            b = self._structure.bonds[index]
-            self._set_status(self.tr("Bond {}–{} (order {})").format(b.i, b.j, b.order))
+            b = self._structure.bonds[k]
         except IndexError:
-            pass
+            return
+        self._structure.set_bond_order(b.i, b.j, order)
+        # bond edits clear the selection — re-select so the user can
+        # chain order changes (Double → Aromatic …)
+        self._structure.select_bond(k)
 
     def _on_mode_changed(self, mode: ToolMode) -> None:
         """Keep the toolbar checked state in sync with the viewport mode."""
@@ -1011,6 +1193,16 @@ class MainWindow(QMainWindow):
         indices = sorted(self._structure.selected_indices, reverse=True)
         if indices:
             self._structure.delete_atoms(indices)
+
+    def _on_measurement_added(self, kind: str, indices: list) -> None:
+        """Measure tool completed a pick sequence."""
+        self._measurement_manager.add(kind, indices)  # sync → changed → push
+
+    def _push_measurements(self) -> None:
+        """Push the manager's payload to the viewport (no re-sync here —
+        sync_with_model emits changed, so this must stay side-effect-free
+        to avoid a signal loop)."""
+        self._viewport.set_measurements(self._measurement_manager.payload())
 
     def _on_auto_bonds_toggled(self, checked: bool) -> None:
         """Auto Detect Bonds action: re-derive connectivity (undoable)."""

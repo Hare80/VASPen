@@ -245,38 +245,40 @@ def test_make_periodic_undo_restores_molecule(model):
 # Bonds, atom IDs, multi-select (3D structure editor)
 # ----------------------------------------------------------------------
 
-def test_bonds_auto_computed_on_load(model):
+def test_bonds_detected_once_on_load_manual_default(model):
+    """Settled policy: bonds are detected once at load; the mode is
+    manual by default (Auto Detect Bonds is off)."""
     from ase.build import molecule
 
     model.load_atoms(molecule("H2O"))
-    assert model.bond_mode == "auto"
+    assert model.bond_mode == "manual"
     assert len(model.bonds) == 2
 
 
-def test_first_manual_bond_edit_switches_mode_and_freezes_auto_list(model):
+def test_manual_mode_does_not_recompute_on_edits(model):
     from ase.build import molecule
 
     model.load_atoms(molecule("H2O"))
-    auto_bonds = model.bonds
+    assert len(model.bonds) == 2
     model.add_bond(1, 2)  # H–H
     assert model.bond_mode == "manual"
-    assert len(model.bonds) == len(auto_bonds) + 1
+    assert len(model.bonds) == 3
     assert (1, 2) in [(b.i, b.j) for b in model.bonds]
     # manual mode: moving atoms must NOT recompute the bond list
     model.set_atom_position(0, [0.5, 0.5, 0.5])
     assert len(model.bonds) == 3
 
 
-def test_bond_edit_undo_restores_mode_and_list(model):
+def test_bond_edit_undo_restores_list(model):
     from ase.build import molecule
 
     model.load_atoms(molecule("H2O"))
     before = model.bonds
     model.add_bond(1, 2)
-    assert model.bond_mode == "manual"
+    assert len(model.bonds) == 3
 
     model.undo()
-    assert model.bond_mode == "auto"
+    assert model.bond_mode == "manual"
     assert model.bonds == before
 
     model.redo()
@@ -436,7 +438,8 @@ def test_set_bond_mode_roundtrip(model):
     from ase.build import molecule
 
     model.load_atoms(molecule("H2O"))
-    model.add_bond(1, 2)  # switches to manual
+    assert model.bond_mode == "manual"  # settled default
+    model.add_bond(1, 2)  # manual stays manual
     assert model.bond_mode == "manual"
     assert len(model.bonds) == 3
 
@@ -471,3 +474,30 @@ def test_detect_bonds_one_shot(model):
 
     model.undo()  # one-shot detection is undoable
     assert len(model.bonds) == 2
+
+
+def test_bond_selection_and_clearing(model):
+    from ase.build import molecule
+
+    model.load_atoms(molecule("H2O"))
+    changed = _counter(model, "bond_selection_changed")
+    model.select_bond(0)
+    assert model.selected_bonds == {0}
+    assert changed.count == 1
+
+    model.remove_bond(0, 1)  # bond list changes → selection dropped
+    assert model.selected_bonds == set()
+    assert changed.count == 2
+
+
+def test_bond_selection_survives_manual_edit_and_undo(model):
+    from ase.build import molecule
+
+    model.load_atoms(molecule("H2O"))
+    model.set_bond_mode("manual")
+    model.select_bond(1)
+    model.set_atom_position(0, [0.05, 0, 0])  # manual: no recompute
+    assert model.selected_bonds == {1}  # survives the edit
+
+    model.undo()
+    assert model.selected_bonds == {1}

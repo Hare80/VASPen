@@ -47,6 +47,9 @@ class StructureBuilder:
     def replace_element(model: StructureModel, index: int, new_symbol: str) -> None:
         """Replace the element of a single atom.
 
+        The selection is preserved (the atom keeps its index), so the
+        properties panel / tree can chain element + position edits.
+
         Args:
             model: Target structure model.
             index: Atom index.
@@ -55,7 +58,10 @@ class StructureBuilder:
         atoms = model.atoms.copy()  # copy first so undo snapshots stay valid
         if 0 <= index < len(atoms):
             atoms[index].symbol = new_symbol
-            model.replace_atoms(atoms)  # triggers signal
+            selection = model.selected_indices
+            model.replace_atoms(atoms)  # triggers signal (and clears selection)
+            if selection:
+                model.set_selection(selection)
 
     @staticmethod
     def make_supercell(

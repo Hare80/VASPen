@@ -74,6 +74,20 @@ def test_barium_barium_no_bond_beyond_capped_radius():
     assert _bonds_of(atoms) == []
 
 
+def test_bond_order_inference():
+    """Detected bonds carry an inferred order (1/2/3) by length ratio."""
+    ethylene = molecule("C2H4")
+    bonds = _bonds_of(ethylene)
+    c_c = next(b for b in bonds if {b.i, b.j} == {0, 1})
+    assert c_c.order == 2
+
+    co = molecule("CO")
+    assert _bonds_of(co)[0].order == 3
+
+    water = molecule("H2O")
+    assert all(b.order == 1 for b in _bonds_of(water))
+
+
 def test_max_bond_length_cutoff():
     atoms = Atoms("NaCl", positions=[[0.0, 0, 0], [BOND_MAX_LENGTH + 0.1, 0, 0]],
                   cell=[20, 20, 20], pbc=False)

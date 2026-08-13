@@ -6,8 +6,8 @@ Qt signals so that every observer (3D viewport, structure tree,
 status bar) stays in sync.
 
 Beyond the ASE Atoms payload the model owns:
-- a persistent bond list (auto-connectivity until the first manual
-  bond edit switches it to manual mode),
+- a persistent bond list (detected once at load; manual by default —
+  the Auto Detect Bonds toggle re-enables per-edit recomputation),
 - stable atom IDs (survive deletion/undo — measurements reference
   them instead of indices),
 - multi-atom selection.
@@ -96,6 +96,7 @@ class _Snapshot:
     atom_ids: list[int]
     next_id: int
     selected_indices: frozenset[int]
+    selected_bonds: frozenset[int]
 
 
 class StructureModel(QObject):
@@ -116,6 +117,7 @@ class StructureModel(QObject):
     atom_selected = Signal(int)
     selection_cleared = Signal()
     selection_changed = Signal()
+    bond_selection_changed = Signal()
 
     def __init__(self, atoms: Atoms | None = None, parent: QObject | None = None) -> None:
         """Initialize the model.
@@ -128,6 +130,7 @@ class StructureModel(QObject):
         self._atoms: Atoms = atoms if atoms is not None else Atoms()
         self._filepath: str | None = None
         self._selected_indices: set[int] = set()
+        self._selected_bonds: set[int] = set()  # bond list indices
         self._dirty: bool = False
         # Edit history (snapshot-based undo/redo)
         self._undo_stack: list[_Snapshot] = []
@@ -135,7 +138,10 @@ class StructureModel(QObject):
         self._max_history = 50
         # Persistent bond list + stable atom IDs
         self._bonds: list[Bond] = []
-        self._bond_mode: str = "auto"  # "auto" | "manual"
+        # Settled policy (2026-08-13): bonds are detected ONCE at load;
+        # manual mode is the default — the Auto Detect Bonds toggle
+        # re-enables per-edit recomputation.
+        self._bond_mode: str = "manual"  # "auto" | "manual"
         self._atom_ids: list[int] = []
         self._next_id: int = 0
 
@@ -403,6 +409,32 @@ class StructureModel(QObject):
         self.set_selection(seen)
 
     # ------------------------------------------------------------------
+    # Bond selection (bond list indices)
+    # ------------------------------------------------------------------
+
+    @property
+    def selected_bonds(self) -> set[int]:
+        """Copy of the selected bond indices (into the bond list)."""
+        return set(self._selected_bonds)
+
+    def select_bond(self, index: int) -> None:
+        """Select a single bond by its list index."""
+        if 0 <= index < len(self._bonds):
+            self._selected_bonds = {index}
+            self.bond_selection_changed.emit()
+
+    def clear_bond_selection(self) -> None:
+        """Clear the bond selection."""
+        self._selected_bonds = set()
+        self.bond_selection_changed.emit()
+
+    def _clear_stale_bond_selection(self) -> None:
+        """Drop the bond selection when the bond list changes."""
+        if self._selected_bonds:
+            self._selected_bonds = set()
+            self.bond_selection_changed.emit()
+
+    # ------------------------------------------------------------------
     # Structure mutation
     # ------------------------------------------------------------------
 
@@ -432,9 +464,14 @@ class StructureModel(QObject):
     # ------------------------------------------------------------------
 
     def _reset_derived_state(self) -> None:
-        """Reset bonds/IDs to match the current atoms (load / replace)."""
+        """Reset bonds/IDs to match the current atoms (load / replace).
+
+        Bonds are detected ONCE here; the mode stays manual (settled
+        policy) so later edits do not silently recompute them.
+        """
         self._bonds = _compute_bonds(self._atoms)
-        self._bond_mode = "auto"
+        self._bond_mode = "manual"
+        self._selected_bonds = set()
         n = len(self._atoms)
         self._atom_ids = list(range(n))
         self._next_id = n
@@ -443,6 +480,7 @@ class StructureModel(QObject):
         """Refresh the bond list after a mutation while in auto mode."""
         if self._bond_mode == "auto":
             self._bonds = _compute_bonds(self._atoms)
+            self._clear_stale_bond_selection()
 
     def _snapshot(self) -> _Snapshot:
         """Capture the full model state for the undo stack."""
@@ -453,6 +491,7 @@ class StructureModel(QObject):
             list(self._atom_ids),
             self._next_id,
             frozenset(self._selected_indices),
+            frozenset(self._selected_bonds),
         )
 
     def _push_undo(self) -> None:
@@ -503,8 +542,12 @@ class StructureModel(QObject):
         self._selected_indices = {
             i for i in snapshot.selected_indices if 0 <= i < len(self._atoms)
         }
+        self._selected_bonds = {
+            k for k in snapshot.selected_bonds if 0 <= k < len(self._bonds)
+        }
         self.structure_modified.emit()
         self.selection_changed.emit()
+        self.bond_selection_changed.emit()
 
     def set_cell(self, cell: np.ndarray) -> None:
         """Set the unit cell (3x3 matrix)."""
@@ -551,6 +594,21 @@ class StructureModel(QObject):
         """Set fractional coordinates (N×3)."""
         self._push_undo()
         self._atoms.set_scaled_positions(scaled)
+        self._dirty = True
+        self._recompute_if_auto()
+        self.structure_modified.emit()
+
+    def set_atom_scaled_position(self, index: int, scaled: np.ndarray) -> None:
+        """Set one atom's fractional coordinates (absolute).
+
+        Requires a full-rank cell (raises ASE's error otherwise).
+        """
+        if not 0 <= index < len(self._atoms):
+            return
+        self._push_undo()
+        scaled_positions = self._atoms.get_scaled_positions()
+        scaled_positions[index] = np.asarray(scaled, dtype=float)
+        self._atoms.set_scaled_positions(scaled_positions)
         self._dirty = True
         self._recompute_if_auto()
         self.structure_modified.emit()
@@ -649,6 +707,7 @@ class StructureModel(QObject):
                 b.order,
             ))
         self._bonds = remapped
+        self._clear_stale_bond_selection()
 
         for d in deleted:
             del self._atoms[d]
@@ -700,6 +759,7 @@ class StructureModel(QObject):
             raise ValueError(f"Bond order must be 1..4, got {order}.")
         self._push_undo()
         self._switch_to_manual()
+        self._clear_stale_bond_selection()
         for k, existing in enumerate(self._bonds):
             if (existing.i, existing.j) == (bond.i, bond.j):
                 self._bonds[k] = bond
@@ -718,6 +778,7 @@ class StructureModel(QObject):
         self._bonds = [
             b for b in self._bonds if (b.i, b.j) != (bond.i, bond.j)
         ]
+        self._clear_stale_bond_selection()
         self._dirty = True
         self.structure_modified.emit()
 
@@ -741,6 +802,7 @@ class StructureModel(QObject):
             return
         self._push_undo()
         self._bond_mode = mode
+        self._clear_stale_bond_selection()
         if mode == "auto":
             self._bonds = _compute_bonds(self._atoms)
         self._dirty = True
@@ -754,6 +816,7 @@ class StructureModel(QObject):
         """
         self._push_undo()
         self._bonds = _compute_bonds(self._atoms)
+        self._clear_stale_bond_selection()
         self._dirty = True
         self.structure_modified.emit()
 

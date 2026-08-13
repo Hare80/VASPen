@@ -294,6 +294,7 @@ def _cylinder_verts(
     ends: np.ndarray,
     radius: float,
     segments: int = 12,
+    lateral_offset: float = 0.0,
 ) -> np.ndarray:
     """Bake bond cylinders into world-space triangle vertices (M×3).
 
@@ -301,6 +302,9 @@ def _cylinder_verts(
         starts: Segment start points (K×3) — atom positions.
         ends: Segment end points (K×3) — atom + minimum-image vector.
         radius: Cylinder radius in Angstrom.
+        lateral_offset: Shift the whole cylinder perpendicular to its
+            axis (used to draw double/triple bond components side by
+            side).
 
     Returns:
         Flat vertex array for glDrawArrays(GL_TRIANGLES). No normals —
@@ -321,6 +325,9 @@ def _cylinder_verts(
         u = np.cross(axis, ref)
         u /= np.linalg.norm(u)
         v = np.cross(axis, u)
+        if lateral_offset:
+            s = s + u * lateral_offset
+            e = e + u * lateral_offset
 
         angles = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
         ring_s = s + radius * (np.cos(angles)[:, None] * u + np.sin(angles)[:, None] * v)
@@ -470,6 +477,7 @@ class Viewport3D(QOpenGLWidget):
     bond_created = Signal(int, int)         # atom indices
     bond_removed = Signal(int, int)         # atom indices
     delete_requested = Signal(str, int)     # "atom"|"bond" + index
+    measurement_added = Signal(str, list)   # kind + atom indices
     mode_changed = Signal(object)           # new ToolMode
 
     def __init__(self, parent=None) -> None:
@@ -481,9 +489,11 @@ class Viewport3D(QOpenGLWidget):
         self._atom_radius = np.zeros(0, dtype=np.float32)
         self._atom_color = np.zeros((0, 4), dtype=np.float32)
         self._atom_edge = np.zeros((0, 4), dtype=np.float32)
+        self._symbols: list[str] = []
         self._bond_verts = np.zeros((0, 3), dtype=np.float32)
         self._cell_verts: np.ndarray | None = None
         self._selected_indices: set[int] = set()
+        self._selected_bonds: set[int] = set()  # bond list indices
         self._preview_indices: set[int] = set()
         self._bonds: list = []          # Bond objects, same order as render
         self._bond_ranges: list[tuple[int, int]] = []  # (first, count) vertex slices
@@ -491,6 +501,15 @@ class Viewport3D(QOpenGLWidget):
         self._ghost_pos = None          # np.ndarray | None (add-atom preview)
         self._ghost_bond_from = None    # world pos of the ghost bond's anchor
         self.current_element = "C"      # element of the atom being added
+        self._measurements = []         # [(kind, indices, text), ...]
+        self._meas_verts = np.zeros((0, 3), dtype=np.float32)
+        # Display style (parameter pack over the existing renderer)
+        self._covalent_radii = np.zeros(0, dtype=np.float32)  # unscaled
+        self._style = "ball_stick"      # "ball_stick" | "cpk" | "wireframe"
+        self._show_bonds = True
+        self._show_cell = True
+        self._show_labels = False
+        self._background_color = BACKGROUND_COLOR
         self._data_dirty = False
 
         # Interaction mode (tool dispatch — tools live in ui/tools.py)
@@ -560,6 +579,7 @@ class Viewport3D(QOpenGLWidget):
         """
         self._atoms = atoms
         self._selected_indices = set()
+        self._selected_bonds = set()
         self._preview_indices = set()
 
         if atoms is None or len(atoms) == 0:
@@ -574,6 +594,7 @@ class Viewport3D(QOpenGLWidget):
         else:
             positions = np.asarray(atoms.get_positions(), dtype=np.float32)
             symbols = list(atoms.get_chemical_symbols())
+            self._symbols = symbols
             cell = atoms.get_cell().array if atoms.get_cell().rank == 3 else np.eye(3)
             pbc = tuple(atoms.get_pbc()) if atoms.get_pbc().any() else (False, False, False)
 
@@ -584,13 +605,14 @@ class Viewport3D(QOpenGLWidget):
                 z = atomic_numbers.get(sym, 0)
                 r = float(covalent_radii[z] if 0 < z < len(covalent_radii) else 0.77)
                 base = element_color(sym)
-                radii.append(r * SPHERE_SCALE)
+                radii.append(r)
                 colors.append((base[0], base[1], base[2], 1.0))
                 e = _edge_color(base)
                 edges.append((e[0], e[1], e[2], 1.0))
 
             self._atom_pos = positions
-            self._atom_radius = np.asarray(radii, dtype=np.float32)
+            self._covalent_radii = np.asarray(radii, dtype=np.float32)
+            self._apply_display()
             self._atom_color = np.asarray(colors, dtype=np.float32)
             self._atom_edge = np.asarray(edges, dtype=np.float32)
 
@@ -601,20 +623,40 @@ class Viewport3D(QOpenGLWidget):
             # (needed by the ID-color pick pass to draw individual bonds).
             # Ranges stay aligned with bond indices even for zero-length
             # bonds (drawing 0 verts is a no-op).
+            # Bond orders: single = one cylinder; double/triple = parallel
+            # cylinders offset laterally; aromatic (4) = dashed segments.
             self._bond_ranges = []
             pieces = []
             offset = 0
             for b in bond_list:
-                piece = _cylinder_verts(
-                    np.asarray([positions[b.i]], dtype=np.float64),
-                    np.asarray([positions[b.i] + mic_vector(
-                        b.i, b.j, positions, cell, pbc)], dtype=np.float64),
-                    BOND_RADIUS,
-                )
-                self._bond_ranges.append((offset, len(piece)))
-                offset += len(piece)
-                if len(piece):
-                    pieces.append(piece)
+                s = np.asarray([positions[b.i]], dtype=np.float64)
+                e = np.asarray([positions[b.i] + mic_vector(
+                    b.i, b.j, positions, cell, pbc)], dtype=np.float64)
+                bond_pieces: list[np.ndarray] = []
+                if b.order == 2:
+                    # thinner components so the parallel sticks stay
+                    # visually separate (they would merge at 0.12 Å)
+                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.09))
+                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.09))
+                elif b.order == 3:
+                    bond_pieces.append(_cylinder_verts(s, e, 0.05))
+                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.12))
+                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.12))
+                elif b.order == 4:
+                    axis = e[0] - s[0]
+                    for d in range(6):
+                        t0 = d / 6.0 + 0.015
+                        t1 = min((d + 0.8) / 6.0, 1.0)
+                        if t1 <= t0:
+                            continue
+                        bond_pieces.append(_cylinder_verts(
+                            s + axis * t0, s + axis * t1, BOND_RADIUS))
+                else:
+                    bond_pieces.append(_cylinder_verts(s, e, BOND_RADIUS))
+                count = sum(len(p) for p in bond_pieces)
+                self._bond_ranges.append((offset, count))
+                offset += count
+                pieces.extend(p for p in bond_pieces if len(p))
             self._bond_verts = (np.concatenate(pieces) if pieces
                                 else np.zeros((0, 3), dtype=np.float32))
 
@@ -640,6 +682,52 @@ class Viewport3D(QOpenGLWidget):
     def set_preview_highlight(self, indices) -> None:
         """Set a temporary highlight (e.g. CreateBond's first atom)."""
         self._preview_indices = set(indices) if indices else set()
+        self.update()
+
+    def set_bond_highlight(self, indices) -> None:
+        """Set the selected-bond highlight (bond list indices)."""
+        self._selected_bonds = set(indices) if indices else set()
+        self.update()
+
+    # ------------------------------------------------------------------
+    # Display styles (parameter packs — no second renderer)
+    # ------------------------------------------------------------------
+
+    def _apply_display(self) -> None:
+        """Apply the current style to the atom radii / bond visibility."""
+        if self._style == "cpk":
+            self._atom_radius = self._covalent_radii.copy()
+        elif self._style == "wireframe":
+            self._atom_radius = self._covalent_radii * 0.25
+        else:  # ball_stick
+            self._atom_radius = self._covalent_radii * SPHERE_SCALE
+        self._show_bonds = self._style != "cpk"
+        self.update()
+
+    def set_structure_style(self, style: str) -> None:
+        """Switch the display style: "ball_stick" | "cpk" | "wireframe"."""
+        if style not in ("ball_stick", "cpk", "wireframe"):
+            raise ValueError(f"Unknown display style: {style}")
+        self._style = style
+        self._apply_display()
+
+    def structure_style(self) -> str:
+        """The current display style."""
+        return self._style
+
+    def set_show_cell(self, visible: bool) -> None:
+        """Show/hide the unit cell frame."""
+        self._show_cell = visible
+        self.update()
+
+    def set_show_labels(self, visible: bool) -> None:
+        """Show/hide element labels (only for structures ≤ 500 atoms)."""
+        self._show_labels = visible
+        self.update()
+
+    def set_background_color(self, color: tuple[float, float, float]) -> None:
+        """Set the viewport background color (RGB 0-1)."""
+        self._background_color = tuple(float(c) for c in color)
         self.update()
 
     def reset_view(self) -> None:
@@ -843,6 +931,16 @@ class Viewport3D(QOpenGLWidget):
             self._flat_prog.setAttributeBuffer(loc_c, GL_FLOAT, 0, 3, 12)
             self._cell_vao.release()
 
+            # Measurement lines (GL_LINES, uploaded on demand)
+            self._meas_vao, self._meas_vbo, _ = self._make_mesh(
+                np.zeros((0, 3), dtype=np.float32), None
+            )
+            self._meas_vao.bind()
+            loc_m = self._flat_prog.attributeLocation("aPos")
+            self._flat_prog.enableAttributeArray(loc_m)
+            self._flat_prog.setAttributeBuffer(loc_m, GL_FLOAT, 0, 3, 12)
+            self._meas_vao.release()
+
             self._gl_ready = True
             self._data_dirty = True
         except Exception:
@@ -899,6 +997,11 @@ class Viewport3D(QOpenGLWidget):
         else:
             self._cell_vbo.allocate(b"", 0)
         self._cell_vao.release()
+
+        self._meas_vao.bind()
+        self._meas_vbo.bind()
+        self._meas_vbo.allocate(self._meas_verts.tobytes(), self._meas_verts.nbytes)
+        self._meas_vao.release()
         self._data_dirty = False
 
     def paintGL(self) -> None:
@@ -917,7 +1020,7 @@ class Viewport3D(QOpenGLWidget):
 
         gl = self._gl
         gl.glViewport(0, 0, fb_w, fb_h)
-        gl.glClearColor(*BACKGROUND_COLOR, 1.0)
+        gl.glClearColor(*self._background_color, 1.0)
         gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         gl.glEnable(GL_DEPTH_TEST)
 
@@ -986,13 +1089,24 @@ class Viewport3D(QOpenGLWidget):
         gl.glDisable(GL_BLEND)
         self._unit_vao.release()
 
-        # --- Bonds (unlit cylinders) ---
-        if self._bond_n_verts > 0:
+        # --- Bonds (unlit cylinders; selected bonds highlighted) ---
+        if self._bond_n_verts > 0 and self._show_bonds:
             self._flat_prog.bind()
             self._bond_vao.bind()
             self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
-            self._flat_prog.setUniformValue("uColor", 0.55, 0.55, 0.55, 1.0)
-            gl.glDrawArrays(GL_TRIANGLES, 0, self._bond_n_verts)
+            if self._selected_bonds:
+                # per-bond colors: amber for selected, gray otherwise
+                for k, (first, count) in enumerate(self._bond_ranges):
+                    if count == 0:
+                        continue
+                    if k in self._selected_bonds:
+                        self._flat_prog.setUniformValue("uColor", *HIGHLIGHT_COLOR, 1.0)
+                    else:
+                        self._flat_prog.setUniformValue("uColor", 0.55, 0.55, 0.55, 1.0)
+                    gl.glDrawArrays(GL_TRIANGLES, first, count)
+            else:
+                self._flat_prog.setUniformValue("uColor", 0.55, 0.55, 0.55, 1.0)
+                gl.glDrawArrays(GL_TRIANGLES, 0, self._bond_n_verts)
             self._bond_vao.release()
 
         # --- Unit cell outline (faint blue, only when periodic) ---
@@ -1003,7 +1117,7 @@ class Viewport3D(QOpenGLWidget):
         # the cell or past a wall: vertices behind the near plane are
         # clamped instead of clipped, so the frame never shows a
         # near-plane "cross-section".
-        if self._cell_verts is not None and len(self._cell_verts) > 0:
+        if self._show_cell and self._cell_verts is not None and len(self._cell_verts) > 0:
             self._flat_prog.bind()
             self._cell_vao.bind()
             self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
@@ -1016,8 +1130,53 @@ class Viewport3D(QOpenGLWidget):
             gl.glDisable(GL_BLEND)
             self._cell_vao.release()
 
+        # --- Measurement lines (dashed amber; drawn on TOP of the model
+        # — depth test disabled so sticks never hide them) ---
+        if len(self._meas_verts) > 0:
+            self._flat_prog.bind()
+            self._meas_vao.bind()
+            self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
+            self._flat_prog.setUniformValue("uColor", 1.0, 0.85, 0.0, 0.95)
+            gl.glDisable(GL_DEPTH_TEST)
+            gl.glEnable(GL_BLEND)
+            gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            gl.glDrawArrays(GL_LINES, 0, len(self._meas_verts))
+            gl.glDisable(GL_BLEND)
+            gl.glEnable(GL_DEPTH_TEST)
+            self._meas_vao.release()
+
         self._sphere_prog.release()
         self._flat_prog.release()
+
+        # Measurement labels (screen space; projected from LIVE positions)
+        for _kind, idx, text in self._measurements:
+            if not idx:
+                continue
+            center = np.mean([self._atom_pos[i] for i in idx], axis=0)
+            s = self.project_to_screen(center)
+            if s is None:
+                continue
+            painter = QPainter(self)
+            painter.setPen(QColor(255, 214, 90))
+            font = QFont(self.font())
+            font.setPointSize(9)
+            painter.setFont(font)
+            painter.drawText(QPointF(s[0] + 8.0, s[1] - 6.0), text)
+            painter.end()
+
+        # Atom labels (element symbols; capped to keep the overlay fast)
+        if self._show_labels and 0 < len(self._atom_pos) <= 500:
+            painter = QPainter(self)
+            painter.setPen(QColor(225, 225, 225))
+            font = QFont(self.font())
+            font.setPointSize(8)
+            painter.setFont(font)
+            for i, pos in enumerate(self._atom_pos):
+                s = self.project_to_screen(pos)
+                if s is None:
+                    continue
+                painter.drawText(QPointF(s[0] + 4.0, s[1] - 4.0), self._symbols[i])
+            painter.end()
 
         # Ghost bond preview (anchor → ghost atom, screen-space line)
         if self._ghost_bond_from is not None and self._ghost_pos is not None:
@@ -1241,6 +1400,44 @@ class Viewport3D(QOpenGLWidget):
             None if anchor_position is None
             else np.asarray(anchor_position, dtype=float)
         )
+        self.update()
+
+    def set_measurements(self, payload) -> None:
+        """Set measurement annotations: [(kind, indices, value text), ...].
+
+        Lines are baked into a GL_LINES buffer here (minimum-image for
+        periodic cells); labels are projected every frame from the LIVE
+        atom positions, so they track atom drags.
+        """
+        self._measurements = payload
+        atoms = self._atoms
+        cell = np.asarray(
+            atoms.get_cell().array if atoms is not None and atoms.get_cell().rank == 3
+            else np.eye(3), dtype=float)
+        pbc = (tuple(atoms.get_pbc()) if atoms is not None and atoms.get_pbc().any()
+               else (False, False, False))
+
+        verts: list[np.ndarray] = []
+        for kind, idx, _text in payload:
+            if kind == "distance":
+                pairs = [(idx[0], idx[1])]
+            elif kind == "angle":
+                pairs = [(idx[1], idx[0]), (idx[1], idx[2])]
+            else:
+                pairs = [(idx[0], idx[1]), (idx[1], idx[2]), (idx[2], idx[3])]
+            for a, b in pairs:
+                start = np.asarray(self._atom_pos[a], dtype=float)
+                end = start + mic_vector(a, b, self._atom_pos, cell, pbc)
+                # Dashed: 16 segments per line, 60% duty (world-space —
+                # line stippling is not available in the GL core profile)
+                for d in range(16):
+                    t0 = d / 16.0
+                    t1 = min((d + 0.6) / 16.0, 1.0)
+                    verts.append(start + (end - start) * t0)
+                    verts.append(start + (end - start) * t1)
+        self._meas_verts = (np.asarray(verts, dtype=np.float32)
+                            if verts else np.zeros((0, 3), dtype=np.float32))
+        self._data_dirty = True
         self.update()
 
     def set_rubber_band(self, rect) -> None:

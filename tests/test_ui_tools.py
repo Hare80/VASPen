@@ -306,7 +306,7 @@ def test_create_bond_two_click_and_cancel(window, monkeypatch):
     assert view._preview_indices == set()
 
 
-def test_create_bond_undo_restores_auto_mode(window, monkeypatch):
+def test_create_bond_undo_restores_bond_list(window, monkeypatch):
     from ase.build import molecule
 
     _load(window, monkeypatch, molecule("H2O"))
@@ -315,7 +315,7 @@ def test_create_bond_undo_restores_auto_mode(window, monkeypatch):
 
     window.act_undo.trigger()
 
-    assert window._structure.bond_mode == "auto"
+    assert window._structure.bond_mode == "manual"  # settled default
     assert len(window._structure.bonds) == 2
     assert window.act_redo.isEnabled()
 
@@ -579,13 +579,16 @@ def test_auto_bonds_action_toggles_mode(window, monkeypatch):
     from ase.build import molecule
 
     _load(window, monkeypatch, molecule("H2O"))
-    assert window.act_auto_bonds.isChecked()
+    # settled: auto-detect OFF by default; bonds detected once at load
+    assert not window.act_auto_bonds.isChecked()
+    assert window._structure.bond_mode == "manual"
+    assert len(window._structure.bonds) == 2
+
+    window.act_auto_bonds.setChecked(True)
     assert window._structure.bond_mode == "auto"
 
-    window.act_auto_bonds.setChecked(False)
-    assert window._structure.bond_mode == "manual"
-
     # manual edits keep it manual; re-checking re-derives connectivity
+    window.act_auto_bonds.setChecked(False)
     window._structure.add_bond(1, 2)
     assert len(window._structure.bonds) == 3
     assert not window.act_auto_bonds.isChecked()  # synced after edit
@@ -632,6 +635,304 @@ def test_detect_bonds_action_refreshes_connectivity(window, monkeypatch):
 
     assert len(window._structure.bonds) == 0  # re-derived
     assert window._structure.bond_mode == "manual"  # mode untouched
+
+
+def test_bond_click_selects_bond(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.SELECT)
+    view._pick = lambda pos: ("bond", 1)
+
+    _click(view)
+
+    assert window._structure.selected_bonds == {1}
+    assert view._selected_bonds == {1}
+
+    # empty click clears the bond selection too
+    view._pick = lambda pos: None
+    _click(view)
+    assert window._structure.selected_bonds == set()
+
+
+def test_bond_order_bake_vertex_counts(window):
+    """Double/triple bonds render as parallel cylinders, aromatic (4)
+    as dashed segments — ranges stay per-bond and aligned."""
+    from vaspen.core.bonds import Bond
+
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    view = window._viewport
+    view.set_structure(atoms, bonds=[Bond(0, 1, 2)])
+    assert view._bond_ranges[0][1] == 144  # 2 × 72
+
+    view.set_structure(atoms, bonds=[Bond(0, 1, 3)])
+    assert view._bond_ranges[0][1] == 216  # 3 × 72
+
+    view.set_structure(atoms, bonds=[Bond(0, 1, 1)])
+    assert view._bond_ranges[0][1] == 72
+
+    view.set_structure(atoms, bonds=[Bond(0, 1, 4)])
+    assert view._bond_ranges[0][1] == 6 * 72  # dashed
+
+
+def test_measure_distance_flow(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.MEASURE_DISTANCE)
+    picks = [("atom", 0), ("atom", 1)]
+    view._pick = lambda pos: picks.pop(0)
+
+    _click(view)  # first atom
+    assert view._preview_indices == {0}
+
+    _click(view)  # second atom → measurement complete
+    assert len(window._measurement_manager) == 1
+    payload = view._measurements
+    assert len(payload) == 1
+    kind, idx, text = payload[0]
+    assert kind == "distance"
+    assert idx == [0, 1]
+    assert "Å" in text
+
+
+def test_measure_tool_cancel_on_empty_click(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.MEASURE_ANGLE)
+    view._pick = lambda pos: ("atom", 0)
+    _click(view)
+    assert view._preview_indices == {0}
+
+    view._pick = lambda pos: None
+    _click(view)
+    assert view._preview_indices == set()
+    assert len(window._measurement_manager) == 0
+
+
+def test_measurement_survives_atom_deletion(window, monkeypatch):
+    """Orphaned measurements (deleted atom) are dropped; others survive."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    manager = window._measurement_manager
+    manager.add("distance", [0, 1])
+    manager.add("angle", [0, 1, 2])
+    assert len(manager) == 2
+
+    window._structure.delete_atom(2)  # kills the angle measurement
+
+    assert len(manager) == 1
+    assert manager.payload()[0][0] == "distance"
+
+
+def test_measurements_cleared_on_new_file_open(window, monkeypatch):
+    """Regression: measurements belong to the previous structure — their
+    IDs would silently resolve to unrelated atoms of the new file."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"), "first.xyz")
+    window._measurement_manager.add("distance", [0, 1])
+    assert len(window._measurement_manager) == 1
+
+    _load(window, monkeypatch, molecule("C2H4"), "second.xyz")
+    assert len(window._measurement_manager) == 0
+    assert window._viewport._measurements == []
+
+
+def test_bond_order_menu_sets_order(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    assert not window._bond_order_actions[2].isEnabled()
+
+    window._structure.select_bond(0)
+    assert window._bond_order_actions[2].isEnabled()
+
+    window._bond_order_actions[2].trigger()
+
+    assert window._structure.bonds[0].order == 2
+    window._bond_order_actions[4].trigger()
+    assert window._structure.bonds[0].order == 4
+
+
+def test_frac_button_label_follows_mode(window, monkeypatch, si_bulk):
+    """The button shows the CURRENT mode and clicks toggle — no
+    checked/highlighted state."""
+    _load(window, monkeypatch, si_bulk, "bulk.vasp")
+    tree = window._structure_tree
+    assert tree._frac_btn.text() == "Cartesian"  # current mode
+
+    tree._frac_btn.click()
+    assert tree._frac_btn.text() == "Fractional"
+    assert tree._table.horizontalHeaderItem(2).text() == "fx"
+
+    tree._frac_btn.click()
+    assert tree._frac_btn.text() == "Cartesian"
+    assert tree._table.horizontalHeaderItem(2).text() == "x (Å)"
+
+
+def test_measurement_line_vert_counts(window):
+    """Lines are dashed: 16 segments × 2 verts per line segment."""
+    view = window._viewport
+    atoms = Atoms("H4", positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    view.set_structure(atoms)
+
+    view.set_measurements([("distance", [0, 1], "1.00 Å")])
+    assert len(view._meas_verts) == 16 * 2
+
+    view.set_measurements([("angle", [0, 1, 2], "90.00°")])
+    assert len(view._meas_verts) == 2 * 16 * 2
+
+    view.set_measurements([("dihedral", [0, 1, 2, 3], "60.00°")])
+    assert len(view._meas_verts) == 3 * 16 * 2
+
+
+def test_clear_all_pushes_empty_payload_to_viewport(window, monkeypatch):
+    """Regression: Clear All must remove the 3D measurement lines too."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    window._measurement_manager.add("distance", [0, 1])
+    assert len(window._viewport._measurements) == 1
+    assert len(window._viewport._meas_verts) > 0
+
+    window._measurement_manager.clear()
+
+    assert window._viewport._measurements == []
+    assert len(window._viewport._meas_verts) == 0
+
+
+def test_multi_bonds_use_thinner_radius(window, monkeypatch):
+    """Double/triple bond components are thinner (0.05 Å) so the
+    parallel sticks stay visually separate."""
+    from vaspen.core.bonds import Bond
+    from vaspen.ui import viewport3d as vp
+
+    calls = []
+
+    def fake_cylinder(starts, ends, radius, segments=12, lateral_offset=0.0):
+        calls.append((radius, lateral_offset))
+        return np.zeros((0, 3), dtype=np.float32)
+
+    monkeypatch.setattr(vp, "_cylinder_verts", fake_cylinder)
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    window._viewport.set_structure(atoms, bonds=[Bond(0, 1, 2)])
+    assert len(calls) == 2
+    assert all(radius == 0.05 for radius, _off in calls)
+    assert abs(calls[0][1]) == 0.09
+
+
+# ----------------------------------------------------------------------
+# Phase 2: display styles, frac toggle, properties, selection menu
+# ----------------------------------------------------------------------
+
+def test_display_styles_change_radii(window):
+    from ase.build import molecule
+
+    view = window._viewport
+    view.set_structure(molecule("H2O"))
+    base = view._atom_radius.copy()
+
+    view.set_structure_style("cpk")
+    assert np.allclose(view._atom_radius, view._covalent_radii)
+    assert view._show_bonds is False
+
+    view.set_structure_style("wireframe")
+    assert np.allclose(view._atom_radius, view._covalent_radii * 0.25)
+    assert view._show_bonds is True
+
+    view.set_structure_style("ball_stick")
+    assert np.allclose(view._atom_radius, base)
+    assert view._show_bonds is True
+
+
+def test_display_style_menu_actions(window):
+    window._style_actions["cpk"].setChecked(True)
+    assert window._viewport.structure_style() == "cpk"
+    window.act_show_cell.setChecked(False)
+    assert window._viewport._show_cell is False
+    window.act_show_labels.setChecked(True)
+    assert window._viewport._show_labels is True
+
+
+def test_tree_fractional_toggle(window, monkeypatch, si_bulk):
+    _load(window, monkeypatch, si_bulk, "bulk.vasp")
+    tree = window._structure_tree
+    assert tree._frac_btn.isEnabled()
+
+    tree._frac_btn.click()
+    headers = [tree._table.horizontalHeaderItem(j).text() for j in range(5)]
+    assert headers[2] == "fx"
+    assert float(tree._table.item(0, 2).text()) < 1.0  # fractional values
+
+    tree._table.item(0, 2).setText("0.5")
+    tree._on_cell_changed(0, 2)
+    assert np.isclose(window._structure.scaled_positions[0][0], 0.5)
+
+    tree._frac_btn.click()
+    headers = [tree._table.horizontalHeaderItem(j).text() for j in range(5)]
+    assert headers[2] == "x (Å)"
+
+
+def test_properties_panel_edits_selection(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    panel = window._atom_props
+    assert "No atom selected" in panel._status_label.text()
+
+    window._structure.select_atom(0)
+    assert panel._element_combo.currentText() == "O"
+    assert panel._id_label.text() == "0"
+
+    panel._element_combo.setCurrentText("Fe")
+    assert window._structure.symbols[0] == "Fe"
+
+    panel._x_spin.setValue(1.5)
+    panel._on_cartesian_edited()
+    assert np.isclose(window._structure.positions[0][0], 1.5)
+
+    window._structure.set_selection({1, 2})
+    assert "2" in panel._status_label.text()
+
+
+def test_properties_panel_fractional_edit(window, monkeypatch, si_bulk):
+    _load(window, monkeypatch, si_bulk, "bulk.vasp")
+    panel = window._atom_props
+    window._structure.select_atom(0)
+    assert panel._fx_spin.isEnabled()
+
+    panel._fx_spin.setValue(0.5)
+    panel._on_fractional_edited()
+    assert np.isclose(window._structure.scaled_positions[0][0], 0.5)
+
+
+def test_edit_menu_selection_ops(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    window._structure.set_selection({1})
+
+    window.act_select_all.trigger()
+    assert window._structure.selected_indices == {0, 1, 2}
+
+    window.act_select_invert.trigger()
+    assert window._structure.selected_indices == set()
+
+    window._structure.set_selection({0})
+    window.act_select_neighbors.trigger()
+    assert window._structure.selected_indices == {1, 2}
+
+    window.act_select_connected.trigger()
+    assert window._structure.selected_indices == {0, 1, 2}
+
+    window.act_select_none.trigger()
+    assert window._structure.selected_indices == set()
 
 
 def test_add_atom_placement_is_screen_outward(window, monkeypatch):

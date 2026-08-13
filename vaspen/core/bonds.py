@@ -66,6 +66,23 @@ def _is_nonmetal(symbol: str) -> bool:
     return ELECTRONEGATIVITY.get(symbol, 1.5) >= EN_NONMETAL_THRESHOLD
 
 
+def infer_bond_order(distance: float, r1: float, r2: float) -> int:
+    """Infer the bond order from the length relative to the sum of the
+    covalent radii (distance / (r1 + r2)).
+
+    Calibrated on reference geometries: C≡O 0.81, N≡N 0.80, C≡C 0.78
+    (triple); C=C 0.88 (double); C–C 0.995, C–O 1.0 (single). Aromatic
+    bonds are indistinguishable from single bonds by length alone —
+    they stay order 1 and are set manually.
+    """
+    ratio = distance / (r1 + r2)
+    if ratio <= 0.82:
+        return 3
+    if ratio <= 0.90:
+        return 2
+    return 1
+
+
 def mic_vector(
     i: int,
     j: int,
@@ -151,5 +168,6 @@ def find_bonds(
             # Rule 2: ionic contact between metal and non-metal
             ionic = nonmetals[i] != nonmetals[j]
             if covalent or ionic:
-                bonds.append(Bond(i, j, 1))
+                order = infer_bond_order(float(d), float(radii[i]), float(radii[j]))
+                bonds.append(Bond(i, j, order))
     return bonds
