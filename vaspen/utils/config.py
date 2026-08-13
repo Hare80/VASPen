@@ -73,7 +73,7 @@ class AppConfig:
     def wrap_padding(self) -> float:
         """Remembered vacuum padding for the periodic-wrap dialog (Angstrom)."""
         try:
-            return float(self.get("periodic_wrap_padding", 10.0))
+            return float(self.get("periodic_wrap_padding", 5.0))
         except (TypeError, ValueError):
             return 10.0
 

@@ -4,18 +4,27 @@ This is the central data model for the application. All structural
 information flows through this class, and changes are broadcast via
 Qt signals so that every observer (3D viewport, structure tree,
 status bar) stays in sync.
+
+Beyond the ASE Atoms payload the model owns:
+- a persistent bond list (auto-connectivity until the first manual
+  bond edit switches it to manual mode),
+- stable atom IDs (survive deletion/undo — measurements reference
+  them instead of indices),
+- multi-atom selection.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Iterable
 
 import numpy as np
 from ase import Atoms
 from ase.io import read as ase_read
 from PySide6.QtCore import QObject, Signal
 
+from vaspen.core.bonds import Bond, find_bonds
 from vaspen.core.file_io import FileIO
 
 
@@ -56,21 +65,57 @@ def wrap_in_padded_cell(atoms: Atoms, padding: float) -> Atoms:
     return wrapped
 
 
+def _compute_bonds(atoms: Atoms) -> list[Bond]:
+    """Auto-connectivity for an Atoms object (empty-safe)."""
+    if len(atoms) == 0:
+        return []
+    cell = atoms.get_cell().array if atoms.get_cell().rank == 3 else np.eye(3)
+    pbc = tuple(atoms.get_pbc()) if atoms.get_pbc().any() else (False, False, False)
+    return find_bonds(
+        np.asarray(atoms.get_positions(), dtype=float),
+        list(atoms.get_chemical_symbols()),
+        cell,
+        pbc,
+    )
+
+
+@dataclass(frozen=True)
+class _Snapshot:
+    """One undo history entry: the full model state before a mutation.
+
+    Bonds and atom IDs cannot live on the ASE Atoms object (e.g.
+    ase.build.make_supercell drops ``info``, ``extend`` fills custom
+    arrays with zeros), so the undo stack stores them beside the atoms.
+    The selection is stored too — undo/redo restores it, so the user
+    can step back to the state where they had just selected atoms.
+    """
+
+    atoms: Atoms
+    bonds: list[Bond]
+    bond_mode: str
+    atom_ids: list[int]
+    next_id: int
+    selected_indices: frozenset[int]
+
+
 class StructureModel(QObject):
     """Observable wrapper around an ASE Atoms object.
 
     Signals:
         structure_loaded: Emitted after a structure is loaded from disk.
         structure_modified: Emitted after any structural change (add/remove/
-            move atoms, change cell, etc.).
+            move atoms, change cell, bond edits, etc.).
         atom_selected(int): Emitted when the user selects an atom by index.
         selection_cleared: Emitted when the selection is cleared.
+        selection_changed: Emitted whenever the selected-atom set changes
+            (multi-select; also fires for the legacy single selection).
     """
 
     structure_loaded = Signal()
     structure_modified = Signal()
     atom_selected = Signal(int)
     selection_cleared = Signal()
+    selection_changed = Signal()
 
     def __init__(self, atoms: Atoms | None = None, parent: QObject | None = None) -> None:
         """Initialize the model.
@@ -82,12 +127,17 @@ class StructureModel(QObject):
         super().__init__(parent)
         self._atoms: Atoms = atoms if atoms is not None else Atoms()
         self._filepath: str | None = None
-        self._selected_index: int | None = None
+        self._selected_indices: set[int] = set()
         self._dirty: bool = False
         # Edit history (snapshot-based undo/redo)
-        self._undo_stack: list[Atoms] = []
-        self._redo_stack: list[Atoms] = []
+        self._undo_stack: list[_Snapshot] = []
+        self._redo_stack: list[_Snapshot] = []
         self._max_history = 50
+        # Persistent bond list + stable atom IDs
+        self._bonds: list[Bond] = []
+        self._bond_mode: str = "auto"  # "auto" | "manual"
+        self._atom_ids: list[int] = []
+        self._next_id: int = 0
 
     # ------------------------------------------------------------------
     # Properties
@@ -110,8 +160,23 @@ class StructureModel(QObject):
 
     @property
     def selected_index(self) -> int | None:
-        """Index of the currently selected atom, or None."""
-        return self._selected_index
+        """Lowest index of the selected atoms, or None (legacy single-select)."""
+        return min(self._selected_indices) if self._selected_indices else None
+
+    @property
+    def selected_indices(self) -> set[int]:
+        """Copy of the selected atom index set."""
+        return set(self._selected_indices)
+
+    @property
+    def bonds(self) -> list[Bond]:
+        """Copy of the persistent bond list."""
+        return list(self._bonds)
+
+    @property
+    def bond_mode(self) -> str:
+        """Bond mode: "auto" (recomputed per mutation) or "manual"."""
+        return self._bond_mode
 
     # ------------------------------------------------------------------
     # File I/O
@@ -127,7 +192,8 @@ class StructureModel(QObject):
         self._atoms = atoms
         self._filepath = str(path)
         self._dirty = False
-        self._selected_index = None
+        self._selected_indices = set()
+        self._reset_derived_state()
         self._clear_history()
         self.structure_loaded.emit()
 
@@ -142,7 +208,8 @@ class StructureModel(QObject):
         if filepath is not None:
             self._filepath = str(Path(filepath))
         self._dirty = False
-        self._selected_index = None
+        self._selected_indices = set()
+        self._reset_derived_state()
         self._clear_history()
         self.structure_loaded.emit()
 
@@ -236,31 +303,120 @@ class StructureModel(QObject):
         """
         return bool(self._atoms.get_cell().rank == 3 and self._atoms.pbc.any())
 
+    def atom_id(self, index: int) -> int | None:
+        """Stable ID of the atom at ``index`` (None if out of bounds).
+
+        IDs survive deletion and undo — measurements reference atoms by
+        ID so their endpoints never silently shift.
+        """
+        if 0 <= index < len(self._atom_ids):
+            return self._atom_ids[index]
+        return None
+
+    def index_of_id(self, atom_id: int) -> int | None:
+        """Current index of the atom with ``atom_id`` (None if absent)."""
+        try:
+            return self._atom_ids.index(atom_id)
+        except ValueError:
+            return None
+
     # ------------------------------------------------------------------
     # Selection
     # ------------------------------------------------------------------
 
     def select_atom(self, index: int) -> None:
-        """Select an atom by index."""
+        """Select a single atom by index (legacy single-select entry)."""
         if 0 <= index < len(self._atoms):
-            self._selected_index = index
+            self._selected_indices = {index}
             self.atom_selected.emit(index)
+            self.selection_changed.emit()
 
     def clear_selection(self) -> None:
         """Clear the current atom selection."""
-        self._selected_index = None
+        self._selected_indices = set()
         self.selection_cleared.emit()
+        self.selection_changed.emit()
+
+    def set_selection(self, indices: Iterable[int]) -> None:
+        """Replace the selection with the given atom indices."""
+        new = {i for i in indices if 0 <= i < len(self._atoms)}
+        if new != self._selected_indices:
+            self._selected_indices = new
+            self.selection_changed.emit()
+
+    def add_to_selection(self, indices: Iterable[int]) -> None:
+        """Add atoms to the current selection (union)."""
+        new = self._selected_indices | {i for i in indices if 0 <= i < len(self._atoms)}
+        if new != self._selected_indices:
+            self._selected_indices = new
+            self.selection_changed.emit()
+
+    def toggle_selection(self, indices: Iterable[int]) -> None:
+        """Toggle atoms in/out of the selection (symmetric difference)."""
+        new = self._selected_indices ^ {i for i in indices if 0 <= i < len(self._atoms)}
+        if new != self._selected_indices:
+            self._selected_indices = new
+            self.selection_changed.emit()
+
+    def select_all(self) -> None:
+        """Select every atom."""
+        self.set_selection(range(len(self._atoms)))
+
+    def select_none(self) -> None:
+        """Clear the selection (menu alias for clear_selection)."""
+        self.clear_selection()
+
+    def select_invert(self) -> None:
+        """Invert the selection within the structure."""
+        self.set_selection(
+            {i for i in range(len(self._atoms)) if i not in self._selected_indices}
+        )
+
+    def select_neighbors(self) -> None:
+        """Select the atoms bonded to the currently selected atoms."""
+        if not self._selected_indices:
+            return
+        neighbors: set[int] = set()
+        for b in self._bonds:
+            if b.i in self._selected_indices:
+                neighbors.add(b.j)
+            if b.j in self._selected_indices:
+                neighbors.add(b.i)
+        self.set_selection(neighbors)
+
+    def select_connected(self) -> None:
+        """Select the connected component(s) containing the selection (BFS)."""
+        if not self._selected_indices:
+            return
+        adjacency: dict[int, set[int]] = {}
+        for b in self._bonds:
+            adjacency.setdefault(b.i, set()).add(b.j)
+            adjacency.setdefault(b.j, set()).add(b.i)
+        seen: set[int] = set()
+        frontier = list(self._selected_indices)
+        while frontier:
+            atom = frontier.pop()
+            if atom in seen:
+                continue
+            seen.add(atom)
+            frontier.extend(adjacency.get(atom, ()))
+        self.set_selection(seen)
 
     # ------------------------------------------------------------------
     # Structure mutation
     # ------------------------------------------------------------------
 
     def replace_atoms(self, new_atoms: Atoms) -> None:
-        """Replace the entire structure with a new Atoms object."""
+        """Replace the entire structure with a new Atoms object.
+
+        Bonds reset to auto-connectivity (indices of the derived
+        structure are unrelated to the previous ones).
+        """
         self._push_undo()
         self._atoms = new_atoms
         self._dirty = True
-        self._selected_index = None
+        self._selected_indices = set()
+        self._reset_derived_state()
         self.structure_modified.emit()
 
     def reset_filepath(self) -> None:
@@ -275,9 +431,33 @@ class StructureModel(QObject):
     # Edit history (snapshot-based undo/redo)
     # ------------------------------------------------------------------
 
+    def _reset_derived_state(self) -> None:
+        """Reset bonds/IDs to match the current atoms (load / replace)."""
+        self._bonds = _compute_bonds(self._atoms)
+        self._bond_mode = "auto"
+        n = len(self._atoms)
+        self._atom_ids = list(range(n))
+        self._next_id = n
+
+    def _recompute_if_auto(self) -> None:
+        """Refresh the bond list after a mutation while in auto mode."""
+        if self._bond_mode == "auto":
+            self._bonds = _compute_bonds(self._atoms)
+
+    def _snapshot(self) -> _Snapshot:
+        """Capture the full model state for the undo stack."""
+        return _Snapshot(
+            self._atoms.copy(),
+            list(self._bonds),
+            self._bond_mode,
+            list(self._atom_ids),
+            self._next_id,
+            frozenset(self._selected_indices),
+        )
+
     def _push_undo(self) -> None:
-        """Snapshot the current atoms before a mutation."""
-        self._undo_stack.append(self._atoms.copy())
+        """Snapshot the current state before a mutation."""
+        self._undo_stack.append(self._snapshot())
         self._redo_stack.clear()
         if len(self._undo_stack) > self._max_history:
             self._undo_stack.pop(0)
@@ -298,28 +478,40 @@ class StructureModel(QObject):
         """Revert the most recent structure change."""
         if not self._undo_stack:
             return
-        self._redo_stack.append(self._atoms.copy())
+        self._redo_stack.append(self._snapshot())
         self._restore(self._undo_stack.pop())
 
     def redo(self) -> None:
         """Re-apply the most recently undone change."""
         if not self._redo_stack:
             return
-        self._undo_stack.append(self._atoms.copy())
+        self._undo_stack.append(self._snapshot())
         self._restore(self._redo_stack.pop())
 
-    def _restore(self, atoms: Atoms) -> None:
-        """Restore a history snapshot and notify observers."""
-        self._atoms = atoms
+    def _restore(self, snapshot: _Snapshot) -> None:
+        """Restore a history snapshot and notify observers.
+
+        The selection is restored too (indices that were deleted in the
+        restored state are dropped silently).
+        """
+        self._atoms = snapshot.atoms
+        self._bonds = list(snapshot.bonds)
+        self._bond_mode = snapshot.bond_mode
+        self._atom_ids = list(snapshot.atom_ids)
+        self._next_id = snapshot.next_id
         self._dirty = True
-        self._selected_index = None
+        self._selected_indices = {
+            i for i in snapshot.selected_indices if 0 <= i < len(self._atoms)
+        }
         self.structure_modified.emit()
+        self.selection_changed.emit()
 
     def set_cell(self, cell: np.ndarray) -> None:
         """Set the unit cell (3x3 matrix)."""
         self._push_undo()
         self._atoms.set_cell(cell)
         self._dirty = True
+        self._recompute_if_auto()
         self.structure_modified.emit()
 
     def make_periodic(self, padding: float) -> None:
@@ -344,6 +536,7 @@ class StructureModel(QObject):
         self._push_undo()
         self._atoms = wrap_in_padded_cell(self._atoms, float(padding))
         self._dirty = True
+        self._recompute_if_auto()
         self.structure_modified.emit()
 
     def set_positions(self, positions: np.ndarray) -> None:
@@ -351,6 +544,7 @@ class StructureModel(QObject):
         self._push_undo()
         self._atoms.set_positions(positions)
         self._dirty = True
+        self._recompute_if_auto()
         self.structure_modified.emit()
 
     def set_scaled_positions(self, scaled: np.ndarray) -> None:
@@ -358,6 +552,7 @@ class StructureModel(QObject):
         self._push_undo()
         self._atoms.set_scaled_positions(scaled)
         self._dirty = True
+        self._recompute_if_auto()
         self.structure_modified.emit()
 
     def extend_atoms(self, other: Atoms | StructureModel) -> None:
@@ -366,7 +561,10 @@ class StructureModel(QObject):
             other = other._atoms
         self._push_undo()
         self._atoms.extend(other)
+        self._atom_ids.extend(range(self._next_id, self._next_id + len(other)))
+        self._next_id += len(other)
         self._dirty = True
+        self._recompute_if_auto()
         self.structure_modified.emit()
 
     def set_atom_position(self, index: int, position: np.ndarray) -> None:
@@ -375,7 +573,36 @@ class StructureModel(QObject):
             self._push_undo()
             self._atoms.positions[index] = np.asarray(position, dtype=float)
             self._dirty = True
+            self._recompute_if_auto()
             self.structure_modified.emit()
+
+    def set_atom_positions(self, indices: Iterable[int], positions: np.ndarray) -> None:
+        """Set Cartesian positions of several atoms in ONE undo step.
+
+        Args:
+            indices: Atom indices (len K).
+            positions: New positions (K×3).
+
+        Raises:
+            ValueError: If the arrays have different lengths.
+        """
+        idx = list(indices)
+        pos = np.asarray(positions, dtype=float)
+        if len(idx) != len(pos):
+            raise ValueError(
+                f"Number of indices ({len(idx)}) does not match "
+                f"number of positions ({len(pos)})."
+            )
+        if not idx:
+            return
+        if not all(0 <= i < len(self._atoms) for i in idx):
+            raise ValueError("Atom index out of bounds.")
+        self._push_undo()
+        for i, p in zip(idx, pos):
+            self._atoms.positions[i] = p
+        self._dirty = True
+        self._recompute_if_auto()
+        self.structure_modified.emit()
 
     def delete_atom(self, index: int) -> None:
         """Delete the atom at the given index.
@@ -383,17 +610,54 @@ class StructureModel(QObject):
         Shifts the selection when an atom before it is deleted, and
         emits selection_cleared when the selected atom itself is removed.
         """
-        if 0 <= index < len(self._atoms):
-            self._push_undo()
-            del self._atoms[index]
-            self._dirty = True
-            if self._selected_index is not None:
-                if self._selected_index == index:
-                    self._selected_index = None
-                    self.selection_cleared.emit()
-                elif self._selected_index > index:
-                    self._selected_index -= 1
-            self.structure_modified.emit()
+        self.delete_atoms([index])
+
+    def delete_atoms(self, indices: Iterable[int]) -> None:
+        """Delete several atoms in one undo step.
+
+        Bonds touching a deleted atom are removed; remaining bonds are
+        remapped to the shifted indices. Selection follows the legacy
+        rule: deleted members are dropped (selection_cleared is emitted
+        when the selection becomes empty), members after a deleted atom
+        shift down by one.
+        """
+        deleted = sorted({i for i in indices if 0 <= i < len(self._atoms)},
+                         reverse=True)
+        if not deleted:
+            return
+        self._push_undo()
+
+        removed = set(deleted)
+        # Selection remap (legacy single-delete semantics generalized)
+        new_sel: set[int] = set()
+        became_empty = False
+        for s in self._selected_indices:
+            if s in removed:
+                became_empty = True
+            else:
+                new_sel.add(s - sum(1 for d in deleted if d < s))
+        self._selected_indices = new_sel
+
+        # Bond remap: drop bonds touching deleted atoms, shift the rest
+        remapped: list[Bond] = []
+        for b in self._bonds:
+            if b.i in removed or b.j in removed:
+                continue
+            remapped.append(Bond(
+                b.i - sum(1 for d in deleted if d < b.i),
+                b.j - sum(1 for d in deleted if d < b.j),
+                b.order,
+            ))
+        self._bonds = remapped
+
+        for d in deleted:
+            del self._atoms[d]
+            del self._atom_ids[d]
+
+        self._dirty = True
+        if became_empty and not self._selected_indices:
+            self.selection_cleared.emit()
+        self.structure_modified.emit()
 
     def translate_atom(self, index: int, vector: np.ndarray) -> None:
         """Translate a single atom by a Cartesian vector."""
@@ -401,7 +665,97 @@ class StructureModel(QObject):
             self._push_undo()
             self._atoms[index].position += np.asarray(vector)
             self._dirty = True
+            self._recompute_if_auto()
             self.structure_modified.emit()
+
+    # ------------------------------------------------------------------
+    # Bond editing (first manual edit switches the structure to manual
+    # mode — the current auto list is frozen as the base)
+    # ------------------------------------------------------------------
+
+    def _validate_atom_pair(self, i: int, j: int) -> None:
+        if i == j:
+            raise ValueError("A bond needs two distinct atoms.")
+        if not (0 <= i < len(self._atoms) and 0 <= j < len(self._atoms)):
+            raise ValueError("Atom index out of bounds.")
+
+    def _switch_to_manual(self) -> None:
+        """Freeze the current auto bond list (called before manual edits)."""
+        if self._bond_mode == "auto":
+            self._bond_mode = "manual"
+
+    def add_bond(self, i: int, j: int, order: int = 1) -> None:
+        """Create (or update) a bond between atoms i and j.
+
+        Args:
+            i, j: Atom indices (order-insensitive).
+            order: Bond order 1..4 (4 = aromatic).
+
+        Raises:
+            ValueError: For out-of-range indices, i == j, or bad order.
+        """
+        bond = Bond(i, j, order)
+        self._validate_atom_pair(bond.i, bond.j)
+        if not 1 <= order <= 4:
+            raise ValueError(f"Bond order must be 1..4, got {order}.")
+        self._push_undo()
+        self._switch_to_manual()
+        for k, existing in enumerate(self._bonds):
+            if (existing.i, existing.j) == (bond.i, bond.j):
+                self._bonds[k] = bond
+                break
+        else:
+            self._bonds.append(bond)
+        self._dirty = True
+        self.structure_modified.emit()
+
+    def remove_bond(self, i: int, j: int) -> None:
+        """Delete the bond between atoms i and j (no-op if absent)."""
+        bond = Bond(i, j)
+        self._validate_atom_pair(bond.i, bond.j)
+        self._push_undo()
+        self._switch_to_manual()
+        self._bonds = [
+            b for b in self._bonds if (b.i, b.j) != (bond.i, bond.j)
+        ]
+        self._dirty = True
+        self.structure_modified.emit()
+
+    def set_bond_order(self, i: int, j: int, order: int) -> None:
+        """Change the order of the bond between atoms i and j.
+
+        Creates the bond if it does not exist yet.
+        """
+        self.add_bond(i, j, order)
+
+    def set_bond_mode(self, mode: str) -> None:
+        """Switch bond mode ("auto" | "manual") — undoable.
+
+        Switching back to auto re-derives the connectivity from the
+        current geometry (manual edits are discarded); switching to
+        manual freezes the current list as the base for further edits.
+        """
+        if mode not in ("auto", "manual"):
+            raise ValueError(f"Unknown bond mode: {mode}")
+        if mode == self._bond_mode:
+            return
+        self._push_undo()
+        self._bond_mode = mode
+        if mode == "auto":
+            self._bonds = _compute_bonds(self._atoms)
+        self._dirty = True
+        self.structure_modified.emit()
+
+    def detect_bonds(self) -> None:
+        """Re-detect connectivity from the current geometry (one-shot).
+
+        Undoable; does NOT change the bond mode — call this to refresh
+        bonds manually while Auto Detect is off.
+        """
+        self._push_undo()
+        self._bonds = _compute_bonds(self._atoms)
+        self._dirty = True
+        self.structure_modified.emit()
 
     def __repr__(self) -> str:
         return (

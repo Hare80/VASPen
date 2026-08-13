@@ -8,27 +8,33 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+from ase.data import chemical_symbols
+
 from PySide6.QtCore import Qt, QSettings, QEvent, QTranslator
-from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QDockWidget,
     QFileDialog,
+    QLabel,
     QMainWindow,
     QMenu,
     QMenuBar,
     QMessageBox,
     QStatusBar,
     QToolBar,
+    QToolButton,
     QWidget,
     QVBoxLayout,
-    QLabel,
 )
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
 from vaspen.ui.structure_tree import StructureTreePanel
+from vaspen.ui.tools import ToolMode
 from vaspen.ui.viewport3d import Viewport3D
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger
@@ -61,6 +67,7 @@ class MainWindow(QMainWindow):
         self._create_toolbar()
         self._create_status_bar()
         self._create_central_widget()
+        self._create_edit_toolbar()
         self._create_dock_widgets()
         self._connect_signals()
         self._restore_window_state()
@@ -101,13 +108,21 @@ class MainWindow(QMainWindow):
         self.act_quit.triggered.connect(self.close)
 
         # ── Edit ──
+        # ApplicationShortcut: undo/redo/delete must work regardless of
+        # which widget has focus (viewport has StrongFocus and consumes
+        # key events through the active tool).
         self.act_undo = QAction(self.tr("&Undo"), self)
         self.act_undo.setShortcut(QKeySequence.Undo)
+        self.act_undo.setShortcutContext(Qt.ApplicationShortcut)
         self.act_undo.setEnabled(False)
         self.act_undo.triggered.connect(lambda: self._structure.undo())
 
         self.act_redo = QAction(self.tr("&Redo"), self)
-        self.act_redo.setShortcut(QKeySequence.Redo)
+        # QKeySequence.Redo maps to Ctrl+Y on this platform; Ctrl+Shift+Z
+        # is the other common convention — bind both explicitly.
+        self.act_redo.setShortcuts(
+            [QKeySequence.Redo, QKeySequence("Ctrl+Shift+Z"), QKeySequence("Ctrl+Y")])
+        self.act_redo.setShortcutContext(Qt.ApplicationShortcut)
         self.act_redo.setEnabled(False)
         self.act_redo.triggered.connect(lambda: self._structure.redo())
 
@@ -155,6 +170,42 @@ class MainWindow(QMainWindow):
         self.act_supercell.setStatusTip(self.tr("Create a supercell"))
         self.act_supercell.triggered.connect(self._on_supercell)
 
+        # ── 3D edit modes (exclusive; live in the edit toolbar) ──
+        self._mode_actions: dict[ToolMode, QAction] = {}
+        self._mode_group = QActionGroup(self)
+        self._mode_group.setExclusive(True)
+        for mode, text, tip in [
+            (ToolMode.SELECT, self.tr("Select"), self.tr("Select atoms (Ctrl/Shift for multi-select, Shift+drag box-select)")),
+            (ToolMode.ADD_ATOM, self.tr("Add Atom"), self.tr("Click empty space to add an atom")),
+            (ToolMode.MOVE_ATOM, self.tr("Move"), self.tr("Drag an atom to move it (Esc cancels)")),
+            (ToolMode.DELETE, self.tr("Delete"), self.tr("Click an atom or bond to delete it")),
+            (ToolMode.CREATE_BOND, self.tr("Create Bond"), self.tr("Click two atoms to create a bond")),
+        ]:
+            act = QAction(text, self)
+            act.setCheckable(True)
+            act.setStatusTip(tip)
+            self._mode_group.addAction(act)
+            self._mode_actions[mode] = act
+        self._mode_actions[ToolMode.SELECT].setChecked(True)
+
+        self.act_delete_selection = QAction(self.tr("Delete Selection"), self)
+        self.act_delete_selection.setShortcut(QKeySequence.Delete)
+        self.act_delete_selection.setShortcutContext(Qt.ApplicationShortcut)
+        self.act_delete_selection.triggered.connect(self._on_delete_selection)
+        self.addAction(self.act_delete_selection)  # window-level shortcut
+
+        self.act_auto_bonds = QAction(self.tr("&Auto Detect Bonds"), self)
+        self.act_auto_bonds.setCheckable(True)
+        self.act_auto_bonds.setStatusTip(
+            self.tr("Automatically detect bonds whenever the structure changes"))
+        self.act_auto_bonds.setChecked(True)
+        self.act_auto_bonds.toggled.connect(self._on_auto_bonds_toggled)
+
+        self.act_detect_bonds = QAction(self.tr("Detect &Bonds"), self)
+        self.act_detect_bonds.setStatusTip(
+            self.tr("Re-detect all bonds from the current geometry"))
+        self.act_detect_bonds.triggered.connect(self._on_detect_bonds)
+
         # ── Help ──
         self.act_about = QAction(self.tr("&About VASPen"), self)
         self.act_about.triggered.connect(self._on_about)
@@ -187,6 +238,8 @@ class MainWindow(QMainWindow):
         self._menu_edit = mb.addMenu(self.tr("&Edit"))
         self._menu_edit.addAction(self.act_undo)
         self._menu_edit.addAction(self.act_redo)
+        self._menu_edit.addSeparator()
+        self._menu_edit.addAction(self.act_auto_bonds)
         self._menu_edit.addSeparator()
         self._menu_edit.addAction(self.act_preferences)
 
@@ -236,6 +289,73 @@ class MainWindow(QMainWindow):
         self._toolbar.addAction(self.act_reset_view)
         self.addToolBar(self._toolbar)
 
+    def _create_edit_toolbar(self) -> None:
+        """3D editing toolbar: interaction modes, element picker, view tools."""
+        self._edit_toolbar = QToolBar(self.tr("Edit Toolbar"), self)
+        self._edit_toolbar.setObjectName("edit_toolbar")
+        self._edit_toolbar.setMovable(False)
+
+        # Interaction modes (exclusive)
+        for mode in (ToolMode.SELECT, ToolMode.ADD_ATOM, ToolMode.MOVE_ATOM,
+                     ToolMode.DELETE, ToolMode.CREATE_BOND):
+            act = self._mode_actions[mode]
+            act.toggled.connect(
+                lambda checked, m=mode: self._viewport.set_mode(m) if checked else None
+            )
+            self._edit_toolbar.addAction(act)
+        # One-shot bond detection — useful while Auto Detect Bonds is off
+        self._edit_toolbar.addAction(self.act_detect_bonds)
+
+        self._edit_toolbar.addSeparator()
+        self._element_label = QLabel(self.tr("Element:"))
+        self._edit_toolbar.addWidget(self._element_label)
+        self._element_combo = QComboBox(self)
+        self._element_combo.setEditable(False)
+        self._element_combo.addItems(chemical_symbols[1:])  # skip placeholder "X"
+        self._element_combo.setCurrentText("C")
+        self._element_combo.currentTextChanged.connect(self._on_element_changed)
+        self._edit_toolbar.addWidget(self._element_combo)
+
+        self._edit_toolbar.addSeparator()
+        self._edit_toolbar.addAction(self.act_reset_view)
+
+        self._view_dir_btn = QToolButton(self)
+        self._view_dir_btn.setText(self.tr("View"))
+        self._view_dir_btn.setToolTip(self.tr("Align the camera with a world axis"))
+        self._view_dir_btn.setPopupMode(QToolButton.InstantPopup)
+        self._view_dir_menu = QMenu(self)
+        for label, az, el, up in [
+            (self.tr("Front (+z)"), 0.0, 0.0, None),
+            (self.tr("Back (−z)"), 180.0, 0.0, None),
+            (self.tr("Left (−x)"), -90.0, 0.0, None),
+            (self.tr("Right (+x)"), 90.0, 0.0, None),
+            (self.tr("Top (+y)"), 0.0, 89.9, (0.0, 0.0, 1.0)),
+            (self.tr("Bottom (−y)"), 0.0, -89.9, (0.0, 0.0, -1.0)),
+        ]:
+            action = QAction(label, self)
+            # QMenu.addAction(text, callable) calls plain lambdas with NO
+            # arguments — use a QAction with an optional checked instead.
+            action.triggered.connect(
+                lambda checked=False, a=az, e=el, u=up: self._set_view_direction(a, e, u)
+            )
+            self._view_dir_menu.addAction(action)
+        self._view_dir_btn.setMenu(self._view_dir_menu)
+        self._edit_toolbar.addWidget(self._view_dir_btn)
+
+        self._edit_toolbar.addSeparator()
+        self._edit_toolbar.addAction(self.act_undo)
+        self._edit_toolbar.addAction(self.act_redo)
+        self.addToolBar(self._edit_toolbar)
+
+    def _set_view_direction(self, azimuth: float, elevation: float,
+                            up: tuple[float, float, float] | None = None) -> None:
+        """Point the camera along a world-axis direction (View menu)."""
+        self._viewport.set_view_direction(azimuth, elevation, up)
+
+    def _on_element_changed(self, symbol: str) -> None:
+        """Keep the viewport's ghost-atom element in sync with the combo."""
+        self._viewport.current_element = symbol
+
     # ------------------------------------------------------------------
     # Status Bar
     # ------------------------------------------------------------------
@@ -282,6 +402,14 @@ class MainWindow(QMainWindow):
         # Viewport ↔ model bidirectional wiring
         self._viewport.atom_clicked.connect(self._on_atom_clicked)
         self._viewport.background_clicked.connect(self._on_background_clicked)
+        self._viewport.bond_clicked.connect(self._on_bond_clicked)
+        self._viewport.atoms_selected.connect(self._on_atoms_selected)
+        self._viewport.atom_place_requested.connect(self._on_atom_place_requested)
+        self._viewport.atoms_moved.connect(self._on_atoms_moved)
+        self._viewport.bond_created.connect(self._on_bond_created)
+        self._viewport.bond_removed.connect(self._on_bond_removed)
+        self._viewport.delete_requested.connect(self._on_delete_requested)
+        self._viewport.mode_changed.connect(self._on_mode_changed)
 
     def _connect_model_signals(self, model: StructureModel) -> None:
         """Connect a StructureModel's signals to window/UI updates.
@@ -292,6 +420,7 @@ class MainWindow(QMainWindow):
         model.structure_modified.connect(self._on_structure_modified)
         model.atom_selected.connect(self._on_atom_selected)
         model.selection_cleared.connect(self._on_selection_cleared)
+        model.selection_changed.connect(self._on_selection_changed)
 
     # ------------------------------------------------------------------
     # File operations
@@ -570,6 +699,12 @@ class MainWindow(QMainWindow):
         self.act_quit.setText(self.tr("&Quit"))
         self.act_undo.setText(self.tr("&Undo"))
         self.act_redo.setText(self.tr("&Redo"))
+        self.act_auto_bonds.setText(self.tr("&Auto Detect Bonds"))
+        self.act_auto_bonds.setStatusTip(
+            self.tr("Automatically detect bonds whenever the structure changes"))
+        self.act_detect_bonds.setText(self.tr("Detect &Bonds"))
+        self.act_detect_bonds.setStatusTip(
+            self.tr("Re-detect all bonds from the current geometry"))
         self.act_preferences.setText(self.tr("&Preferences..."))
         self.act_preferences.setStatusTip(self.tr("Configure settings"))
         self.act_reset_view.setText(self.tr("&Reset View"))
@@ -600,8 +735,28 @@ class MainWindow(QMainWindow):
 
         # Toolbar / docks / status bar
         self._toolbar.setWindowTitle(self.tr("Main Toolbar"))
+        self._edit_toolbar.setWindowTitle(self.tr("Edit Toolbar"))
         self._dock_structure.setWindowTitle(self.tr("Structure"))
         self._status_label.setText(self.tr("Ready"))
+        for mode, (text, tip) in {
+            ToolMode.SELECT: (self.tr("Select"),
+                              self.tr("Select atoms (Ctrl/Shift for multi-select, Shift+drag box-select)")),
+            ToolMode.ADD_ATOM: (self.tr("Add Atom"),
+                                self.tr("Click empty space to add an atom")),
+            ToolMode.MOVE_ATOM: (self.tr("Move"),
+                                 self.tr("Drag an atom to move it (Esc cancels)")),
+            ToolMode.DELETE: (self.tr("Delete"),
+                              self.tr("Click an atom or bond to delete it")),
+            ToolMode.CREATE_BOND: (self.tr("Create Bond"),
+                                   self.tr("Click two atoms to create a bond")),
+        }.items():
+            act = self._mode_actions[mode]
+            act.setText(text)
+            act.setStatusTip(tip)
+        self.act_delete_selection.setText(self.tr("Delete Selection"))
+        self._element_label.setText(self.tr("Element:"))
+        self._view_dir_btn.setText(self.tr("View"))
+        self._view_dir_btn.setToolTip(self.tr("Align the camera with a world axis"))
         self._update_recent_menu()
         if self._structure.n_atoms > 0:
             self._update_status_bar()
@@ -697,14 +852,23 @@ class MainWindow(QMainWindow):
         self._update_recent_menu()
 
     def _on_structure_loaded(self) -> None:
-        self._viewport.set_structure(self._structure.atoms)
+        self._viewport.set_structure(self._structure.atoms,
+                                     bonds=self._structure.bonds)
+        self._sync_auto_bonds_action()
         self._update_status_bar()
         self._update_edit_actions()
 
     def _on_structure_modified(self) -> None:
         """Structure changed (add/remove atoms, supercell, surface cut...)."""
+        # Tools must not keep stale indices/preview state across edits
+        self._viewport.cancel_active_tool()
         # Keep the user's camera — in-place edits must not snap the view back
-        self._viewport.set_structure(self._structure.atoms, reset_view=False)
+        self._viewport.set_structure(
+            self._structure.atoms, reset_view=False, bonds=self._structure.bonds)
+        # set_structure resets the viewport highlight — re-apply the model
+        # selection so it survives edits
+        self._viewport.set_highlight(self._structure.selected_indices)
+        self._sync_auto_bonds_action()
         self._update_status_bar()
         self._update_edit_actions()
 
@@ -712,13 +876,33 @@ class MainWindow(QMainWindow):
         """Selection cleared via the model (e.g. the selected atom was deleted)."""
         self._viewport.highlight_atom(None)
 
+    def _on_selection_changed(self) -> None:
+        """Selection set changed (multi-select aware)."""
+        self._viewport.set_highlight(self._structure.selected_indices)
+        self._update_selection_status()
+
+    def _update_selection_status(self) -> None:
+        """Show the selection in the status bar (single atom or count)."""
+        sel = self._structure.selected_indices
+        if not sel:
+            return
+        if len(sel) == 1:
+            index = next(iter(sel))
+            sym = self._structure.symbols[index]
+            pos = self._structure.positions[index]
+            self._set_status(self.tr("Atom {}: {} at ({:.3f}, {:.3f}, {:.3f}) Å").format(
+                index, sym, pos[0], pos[1], pos[2]
+            ))
+        else:
+            self._set_status(self.tr("{} atoms selected").format(len(sel)))
+
     def _update_edit_actions(self) -> None:
         """Enable Undo/Redo based on the model's edit history."""
         self.act_undo.setEnabled(self._structure.can_undo)
         self.act_redo.setEnabled(self._structure.can_redo)
 
     def _on_atom_clicked(self, index: int) -> None:
-        """User clicked an atom in the 3D viewport."""
+        """User clicked an atom in the 3D viewport (legacy single-select)."""
         self._structure.select_atom(index)
 
     def _on_background_clicked(self) -> None:
@@ -734,6 +918,120 @@ class MainWindow(QMainWindow):
             self._set_status(self.tr("Atom {}: {} at ({:.3f}, {:.3f}, {:.3f}) Å").format(
                 index, sym, pos[0], pos[1], pos[2]
             ))
+
+    # ------------------------------------------------------------------
+    # 3D edit-tool handlers (Interaction → Command → Model)
+    # ------------------------------------------------------------------
+
+    def _on_atoms_selected(self, indices: list, mode: str) -> None:
+        """Selection from a viewport tool (click / box / modifiers)."""
+        if mode == "add":
+            self._structure.add_to_selection(indices)
+        elif mode == "toggle":
+            self._structure.toggle_selection(indices)
+        else:
+            self._structure.set_selection(indices)
+
+    def _on_atom_place_requested(self, position, anchor) -> None:
+        """Add-atom tool: place the chosen element at a world position.
+
+        When the atom was grown from an anchor atom, the new bond is
+        created too (in auto mode the recompute already finds it; in
+        manual mode the bond is added explicitly).
+        """
+        from vaspen.core.builder import StructureBuilder
+
+        model = self._structure
+        pos = np.asarray(position, dtype=float)
+        if model.is_periodic:
+            # Wrap into the home cell (fractional %1 on periodic axes)
+            cell = np.asarray(model.cell, dtype=float)
+            frac = np.linalg.solve(cell.T, pos)
+            for ax in range(3):
+                if model.pbc[ax]:
+                    frac[ax] %= 1.0
+            pos = frac @ cell
+        symbol = self._element_combo.currentText()
+        StructureBuilder.add_atom(model, symbol, pos)
+        new_index = model.n_atoms - 1
+        if anchor is not None and model.bond_mode == "manual":
+            model.add_bond(anchor, new_index)
+        self._set_status(self.tr("Atom {} added at ({:.3f}, {:.3f}, {:.3f}) Å").format(
+            symbol, pos[0], pos[1], pos[2]
+        ))
+
+    def _on_atoms_moved(self, indices: list, positions) -> None:
+        """Move tool committed a drag — one undoable model call."""
+        self._structure.set_atom_positions(
+            indices, np.asarray(positions, dtype=float))
+
+    def _on_bond_created(self, i: int, j: int) -> None:
+        try:
+            self._structure.add_bond(i, j)
+            self._set_status(self.tr("Bond created: {}–{}").format(i, j))
+        except ValueError as e:
+            self._set_status(str(e))
+
+    def _on_bond_removed(self, i: int, j: int) -> None:
+        try:
+            self._structure.remove_bond(i, j)
+            self._set_status(self.tr("Bond removed: {}–{}").format(i, j))
+        except ValueError as e:
+            self._set_status(str(e))
+
+    def _on_delete_requested(self, kind: str, index: int) -> None:
+        """Delete tool clicked an atom/bond, or deletes the selection."""
+        if kind == "selection":
+            self._on_delete_selection()
+        elif kind == "atom":
+            self._structure.delete_atom(index)
+        elif kind == "bond":
+            try:
+                b = self._structure.bonds[index]
+                self._structure.remove_bond(b.i, b.j)
+            except (IndexError, ValueError):
+                pass
+
+    def _on_bond_clicked(self, index: int) -> None:
+        """Select tool clicked a bond (status only in Phase 1)."""
+        try:
+            b = self._structure.bonds[index]
+            self._set_status(self.tr("Bond {}–{} (order {})").format(b.i, b.j, b.order))
+        except IndexError:
+            pass
+
+    def _on_mode_changed(self, mode: ToolMode) -> None:
+        """Keep the toolbar checked state in sync with the viewport mode."""
+        for m, act in self._mode_actions.items():
+            if act.isChecked() != (m == mode):
+                act.setChecked(m == mode)
+
+    def _on_delete_selection(self) -> None:
+        """Delete key: remove all selected atoms in one undo step."""
+        indices = sorted(self._structure.selected_indices, reverse=True)
+        if indices:
+            self._structure.delete_atoms(indices)
+
+    def _on_auto_bonds_toggled(self, checked: bool) -> None:
+        """Auto Detect Bonds action: re-derive connectivity (undoable)."""
+        mode = "auto" if checked else "manual"
+        if mode != self._structure.bond_mode:
+            self._structure.set_bond_mode(mode)
+        self._sync_auto_bonds_action()
+
+    def _sync_auto_bonds_action(self) -> None:
+        """Mirror the model's bond mode in the checkable action."""
+        self.act_auto_bonds.blockSignals(True)
+        self.act_auto_bonds.setChecked(self._structure.bond_mode == "auto")
+        self.act_auto_bonds.blockSignals(False)
+
+    def _on_detect_bonds(self) -> None:
+        """Detect Bonds button: one-shot connectivity refresh."""
+        if self._structure.n_atoms == 0:
+            return
+        self._structure.detect_bonds()
+        self._set_status(self.tr("Detected {} bonds").format(
+            len(self._structure.bonds)))
 
     def _update_status_bar(self) -> None:
         n = self._structure.n_atoms

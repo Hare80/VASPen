@@ -319,6 +319,130 @@ Files: {}</source>
         <source>a=— b=— c=—</source>
         <translation>a=— b=— c=—</translation>
     </message>
+    <message>
+        <source>Edit Toolbar</source>
+        <translation>编辑工具栏</translation>
+    </message>
+    <message>
+        <source>Select</source>
+        <translation>选择</translation>
+    </message>
+    <message>
+        <source>Add Atom</source>
+        <translation>添加原子</translation>
+    </message>
+    <message>
+        <source>Move</source>
+        <translation>移动</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>删除</translation>
+    </message>
+    <message>
+        <source>Create Bond</source>
+        <translation>创建键</translation>
+    </message>
+    <message>
+        <source>Select atoms (Ctrl/Shift for multi-select, Shift+drag box-select)</source>
+        <translation>选择原子（Ctrl/Shift 多选，Shift+拖动框选）</translation>
+    </message>
+    <message>
+        <source>Click empty space to add an atom</source>
+        <translation>点击空白处添加原子</translation>
+    </message>
+    <message>
+        <source>Drag an atom to move it (Esc cancels)</source>
+        <translation>拖动原子移动（Esc 取消）</translation>
+    </message>
+    <message>
+        <source>Click an atom or bond to delete it</source>
+        <translation>点击原子或键将其删除</translation>
+    </message>
+    <message>
+        <source>Click two atoms to create a bond</source>
+        <translation>依次点击两个原子创建键</translation>
+    </message>
+    <message>
+        <source>Delete Selection</source>
+        <translation>删除所选</translation>
+    </message>
+    <message>
+        <source>Element:</source>
+        <translation>元素：</translation>
+    </message>
+    <message>
+        <source>View</source>
+        <translation>视角</translation>
+    </message>
+    <message>
+        <source>Align the camera with a world axis</source>
+        <translation>将相机对准某个坐标轴方向</translation>
+    </message>
+    <message>
+        <source>Front (+z)</source>
+        <translation>正面 (+z)</translation>
+    </message>
+    <message>
+        <source>Back (−z)</source>
+        <translation>背面 (−z)</translation>
+    </message>
+    <message>
+        <source>Left (−x)</source>
+        <translation>左侧 (−x)</translation>
+    </message>
+    <message>
+        <source>Right (+x)</source>
+        <translation>右侧 (+x)</translation>
+    </message>
+    <message>
+        <source>Top (+y)</source>
+        <translation>顶部 (+y)</translation>
+    </message>
+    <message>
+        <source>Bottom (−y)</source>
+        <translation>底部 (−y)</translation>
+    </message>
+    <message>
+        <source>Atom {} added at ({:.3f}, {:.3f}, {:.3f}) Å</source>
+        <translation>已添加原子 {}，位置 ({:.3f}, {:.3f}, {:.3f}) Å</translation>
+    </message>
+    <message>
+        <source>Bond created: {}–{}</source>
+        <translation>已创建键：{}–{}</translation>
+    </message>
+    <message>
+        <source>Bond removed: {}–{}</source>
+        <translation>已删除键：{}–{}</translation>
+    </message>
+    <message>
+        <source>Bond {}–{} (order {})</source>
+        <translation>键 {}–{}（键级 {}）</translation>
+    </message>
+    <message>
+        <source>{} atoms selected</source>
+        <translation>已选择 {} 个原子</translation>
+    </message>
+    <message>
+        <source>&amp;Auto Detect Bonds</source>
+        <translation>自动判断成键(&amp;A)</translation>
+    </message>
+    <message>
+        <source>Automatically detect bonds whenever the structure changes</source>
+        <translation>结构变化时自动判断成键关系</translation>
+    </message>
+    <message>
+        <source>Detect &amp;Bonds</source>
+        <translation>判断成键(&amp;B)</translation>
+    </message>
+    <message>
+        <source>Re-detect all bonds from the current geometry</source>
+        <translation>按当前几何重新判断所有键</translation>
+    </message>
+    <message>
+        <source>Detected {} bonds</source>
+        <translation>已判断成键：{} 个</translation>
+    </message>
 </context>
 <context>
     <name>Viewport3D</name>
@@ -463,6 +587,14 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
         <source>Invalid Position</source>
         <translation>无效坐标</translation>
+    </message>
+    <message>
+        <source>Invalid Element</source>
+        <translation>无效元素</translation>
+    </message>
+    <message>
+        <source>Unknown element: {}</source>
+        <translation>未知元素：{}</translation>
     </message>
     <message>
         <source>Position must be a number.</source>

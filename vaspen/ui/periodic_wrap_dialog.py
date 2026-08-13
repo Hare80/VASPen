@@ -28,7 +28,7 @@ class PeriodicWrapDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._config = AppConfig()
-        self.padding: float = 10.0
+        self.padding: float = 5.0
         self.setWindowTitle(self.tr("Wrap in Periodic Cell"))
         self.setModal(True)
         self._build_ui()
@@ -49,7 +49,7 @@ class PeriodicWrapDialog(QDialog):
         self._padding_spin.setDecimals(2)
         self._padding_spin.setSingleStep(0.5)
         self._padding_spin.setSuffix(" Å")
-        default = self._config.wrap_padding if self._config.remember_wrap_padding else 10.0
+        default = self._config.wrap_padding if self._config.remember_wrap_padding else 5.0
         self._padding_spin.setValue(min(max(default, 0.5), 50.0))
         form.addRow(self.tr("Vacuum padding:"), self._padding_spin)
         layout.addLayout(form)

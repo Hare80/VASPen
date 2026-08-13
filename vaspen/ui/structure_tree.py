@@ -10,8 +10,9 @@ deleted via the context menu.
 from __future__ import annotations
 
 import numpy as np
+from ase.data import chemical_symbols
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QItemSelection, QItemSelectionModel, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.builder import StructureBuilder
 from vaspen.core.structure import StructureModel
-from vaspen.ui.viewport3d import element_color
+from vaspen.ui.viewport3d import element_text_color
 from vaspen.utils.logger import logger
 
 
@@ -55,7 +56,7 @@ class StructureTreePanel(QWidget):
         header.setSectionResizeMode(QHeaderView.Stretch)
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self._table.setEditTriggers(
             QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
         )
@@ -79,6 +80,7 @@ class StructureTreePanel(QWidget):
                 self._model.structure_modified.disconnect(self.refresh)
                 self._model.atom_selected.disconnect(self._on_model_selection)
                 self._model.selection_cleared.disconnect(self._on_selection_cleared)
+                self._model.selection_changed.disconnect(self._on_model_selection_changed)
             except (TypeError, RuntimeError):
                 pass  # not connected to this model
         self._model = model
@@ -86,6 +88,7 @@ class StructureTreePanel(QWidget):
         model.structure_modified.connect(self.refresh)
         model.atom_selected.connect(self._on_model_selection)
         model.selection_cleared.connect(self._on_selection_cleared)
+        model.selection_changed.connect(self._on_model_selection_changed)
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -131,8 +134,10 @@ class StructureTreePanel(QWidget):
                 self._table.setItem(i, 0, idx_item)
 
                 el_item = QTableWidgetItem(sym)
-                el_item.setFlags(el_item.flags() & ~Qt.ItemIsEditable)
-                base = element_color(sym)
+                # editable: double-click to change the element (validated
+                # in _on_cell_changed); text color is darkened for
+                # contrast on the light panel (white H would be invisible)
+                base = element_text_color(sym)
                 el_item.setForeground(QColor(
                     int(base[0] * 255), int(base[1] * 255), int(base[2] * 255)
                 ))
@@ -142,9 +147,10 @@ class StructureTreePanel(QWidget):
                     val_item = QTableWidgetItem(f"{positions[i, j]:.6f}")
                     self._table.setItem(i, 2 + j, val_item)
 
-            # Restore selection highlight
-            if model.selected_index is not None:
-                self._table.selectRow(model.selected_index)
+            # Restore selection highlight (multi-select aware)
+            self._select_rows([
+                r for r in model.selected_indices if 0 <= r < self._table.rowCount()
+            ])
         finally:
             self._refreshing = False
 
@@ -155,9 +161,10 @@ class StructureTreePanel(QWidget):
     def _on_selection_changed(self) -> None:
         if self._refreshing:
             return
-        row = self._table.currentRow()
-        if 0 <= row < self._model.n_atoms and row != self._model.selected_index:
-            self._model.select_atom(row)
+        rows = {i.row() for i in self._table.selectedIndexes()}
+        rows = {r for r in rows if 0 <= r < self._model.n_atoms}
+        if rows != self._model.selected_indices:
+            self._model.set_selection(rows)
 
     def _on_model_selection(self, index: int) -> None:
         if not self._refreshing and 0 <= index < self._table.rowCount():
@@ -167,6 +174,41 @@ class StructureTreePanel(QWidget):
                     self._table.selectRow(index)
                 finally:
                     self._refreshing = False
+
+    def _select_rows(self, rows) -> None:
+        """Replace the table selection with the given rows (one operation —
+        calling selectRow() repeatedly would replace the selection each
+        time, keeping only the last row in ExtendedSelection mode).
+
+        The selection spans every column: selectedRows() only reports
+        rows whose cells are ALL selected, and a programmatic select
+        does not get the SelectRows expansion that mouse clicks do.
+        """
+        n_cols = self._table.columnCount()
+        selection = QItemSelection()
+        for row in rows:
+            selection.select(
+                self._table.model().index(row, 0),
+                self._table.model().index(row, n_cols - 1),
+            )
+        self._table.selectionModel().select(
+            selection, QItemSelectionModel.ClearAndSelect)
+
+    def _on_model_selection_changed(self) -> None:
+        """Multi-select sync: mirror the model's selection set in the table."""
+        if self._refreshing:
+            return
+        sel = self._model.selected_indices
+        rows = {i.row() for i in self._table.selectedIndexes()}
+        if rows == sel:
+            return
+        self._refreshing = True
+        try:
+            self._select_rows(
+                [r for r in sorted(sel) if 0 <= r < self._table.rowCount()]
+            )
+        finally:
+            self._refreshing = False
 
     def _on_selection_cleared(self) -> None:
         if not self._refreshing:
@@ -181,11 +223,16 @@ class StructureTreePanel(QWidget):
     # ------------------------------------------------------------------
 
     def _on_cell_changed(self, row: int, col: int) -> None:
-        """Apply an edited x/y/z value (col 2..4) to the model."""
-        if self._refreshing or col < 2:
+        """Apply an edited Element (col 1) or x/y/z value (cols 2..4)."""
+        if self._refreshing:
             return
         item = self._table.item(row, col)
         if item is None:
+            return
+        if col == 1:
+            self._change_element(row, item)
+            return
+        if col < 2:
             return
         try:
             new_value = float(item.text())
@@ -201,6 +248,24 @@ class StructureTreePanel(QWidget):
         pos[col - 2] = new_value
         self._model.set_atom_position(row, pos)
         logger.debug("Atom %d moved to %s", row, pos)
+
+    def _change_element(self, row: int, item) -> None:
+        """Validate an edited element symbol and replace the atom."""
+        symbol = item.text().strip().capitalize()
+        if symbol not in chemical_symbols:
+            QMessageBox.warning(
+                self,
+                self.tr("Invalid Element"),
+                self.tr("Unknown element: {}").format(item.text()),
+            )
+            self.refresh()  # revert the bad text
+            return
+        try:
+            StructureBuilder.replace_element(self._model, row, symbol)
+        except Exception as e:  # noqa: BLE001 — mirror the xyz path
+            QMessageBox.warning(self, self.tr("Invalid Element"), str(e))
+            self.refresh()
+        logger.debug("Atom %d replaced with %s", row, symbol)
 
     def _on_context_menu(self, pos) -> None:
         row = self._table.rowAt(pos.y())

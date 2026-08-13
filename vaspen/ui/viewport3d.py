@@ -26,18 +26,20 @@ import math
 import numpy as np
 from ase import Atoms
 from ase.data import atomic_numbers, covalent_radii
-from ase.geometry import get_distances
 
+from vaspen.core.bonds import find_bonds, mic_vector
 from vaspen.utils.logger import logger
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
     QMatrix4x4,
     QPainter,
+    QPen,
     QSurfaceFormat,
 )
+from vaspen.ui.tools import ToolMode, make_tool
 from PySide6.QtOpenGL import (
     QOpenGLBuffer,
     QOpenGLFramebufferObject,
@@ -187,22 +189,6 @@ NEAR_FADE_END = 0.25
 SPHERE_SCALE = 0.60   # atom sphere radius = covalent radius × 0.60
 EDGE_SCALE = 1.04     # dark outline sphere drawn slightly larger behind
 BOND_RADIUS = 0.12    # bond cylinder radius (Angstrom)
-BOND_TOLERANCE = 1.07 # covalent bond if d < (r1 + r2) × tolerance
-BOND_MAX_LENGTH = 3.0 # global maximum bond / contact length
-MAX_BOND_RADIUS = 1.35  # cap covalent radius used for bond detection
-                        # (heavy metals like Ba=2.15 would otherwise bond
-                        # to everything)
-
-# Pauling electronegativity for non-metal detection (ionic-contact rule).
-# Pairs metal↔non-metal within BOND_MAX_LENGTH are drawn as contacts
-# (e.g. Ba–O 2.83 Å in perovskites), while metal–metal pairs are not.
-ELECTRONEGATIVITY: dict[str, float] = {
-    "H": 2.20, "He": 0.0, "B": 2.04, "C": 2.55, "N": 3.04, "O": 3.44,
-    "F": 3.98, "Ne": 0.0, "Si": 1.90, "P": 2.19, "S": 2.58, "Cl": 3.16,
-    "Ge": 2.01, "As": 2.18, "Se": 2.55, "Br": 2.96, "Kr": 3.00,
-    "Te": 2.10, "I": 2.66, "Xe": 2.60, "At": 2.20,
-}
-EN_NONMETAL_THRESHOLD = 2.0
 
 BACKGROUND_COLOR = (0.118, 0.118, 0.141)  # #1e1e24 dark
 
@@ -210,113 +196,30 @@ BACKGROUND_COLOR = (0.118, 0.118, 0.141)  # #1e1e24 dark
 CLICK_DRAG_PX = 4.0
 
 
-def _is_nonmetal(symbol: str) -> bool:
-    """True if the element is a non-metal (Pauling EN ≥ 2.0).
-
-    Unknown elements default to metallic behavior (EN < 2.0).
-    """
-    return ELECTRONEGATIVITY.get(symbol, 1.5) >= EN_NONMETAL_THRESHOLD
-
-
 def element_color(symbol: str) -> tuple[float, float, float]:
     """Return the Jmol RGB color (0-1) for an element symbol."""
     return JMOL_COLORS.get(symbol, DEFAULT_ATOM_COLOR)
 
 
+def element_text_color(symbol: str) -> tuple[float, float, float]:
+    """Element color darkened for TEXT on light panels.
+
+    The Jmol scheme has many near-white entries (H is pure white) that
+    are invisible as foreground text on a light table background. Scale
+    light colors down (preserving hue) so every element label has
+    contrast; dark colors pass through unchanged.
+    """
+    base = element_color(symbol)
+    luminance = 0.299 * base[0] + 0.587 * base[1] + 0.114 * base[2]
+    if luminance > 0.62:
+        factor = 0.62 / luminance
+        base = tuple(c * factor for c in base)
+    return base
+
+
 def _edge_color(color: tuple[float, float, float]) -> tuple[float, float, float]:
     """Derive a darker outline color from a base atom color."""
     return tuple(c * 0.45 for c in color)
-
-
-def _mic_draw_vector(
-    i: int,
-    j: int,
-    positions: np.ndarray,
-    cell: np.ndarray,
-    pbc: tuple[bool, bool, bool],
-) -> np.ndarray:
-    """Minimum-image vector from atom i to atom j for bond DRAWING.
-
-    Enumerates all 27 lattice translations and picks the shortest.
-    On exact half-cell ties (e.g. Ti–O = 2.0 Å in a 4.0 Å cell), both
-    images are equally short — prefer the one whose endpoint lies
-    INSIDE the home cell, so the bond connects to the displayed atom
-    instead of its periodic image outside the cell (which reads as a
-    bond "to the boundary").
-    """
-    d = positions[j] - positions[i]
-    inv_cell = np.linalg.inv(cell)
-
-    best_v: np.ndarray | None = None
-    best_len = float("inf")
-    for n1 in (-1, 0, 1):
-        for n2 in (-1, 0, 1):
-            for n3 in (-1, 0, 1):
-                # Only allow shifts along periodic directions
-                if (n1 != 0 and not pbc[0]) or \
-                   (n2 != 0 and not pbc[1]) or \
-                   (n3 != 0 and not pbc[2]):
-                    continue
-                shift = n1 * cell[0] + n2 * cell[1] + n3 * cell[2]
-                v = d + shift
-                length = float(np.linalg.norm(v))
-                if length < best_len - 1e-9:
-                    best_v, best_len = v, length
-                elif abs(length - best_len) <= 1e-9:
-                    # Tie — prefer endpoint inside the home cell
-                    frac = (positions[i] + v) @ inv_cell
-                    if np.all((frac >= 0.0) & (frac < 1.0)):
-                        best_v, best_len = v, length
-    return np.asarray(best_v, dtype=float)
-
-
-def _find_bonds(
-    positions: np.ndarray,
-    symbols: list[str],
-    cell: np.ndarray,
-    pbc: tuple[bool, bool, bool],
-) -> list[tuple[int, int, np.ndarray]]:
-    """Find covalent bonds between atoms, respecting periodic boundaries.
-
-    Args:
-        positions: Cartesian positions (N×3).
-        symbols: Element symbols (N).
-        cell: 3×3 cell matrix.
-        pbc: Periodic boundary flags.
-
-    Returns:
-        List of (i, j, vec) tuples where vec is the draw vector from
-        atom i to atom j (minimum-image with in-cell tie-breaking).
-    """
-    n = len(positions)
-    if n == 0:
-        return []
-
-    radii = np.array([
-        min(covalent_radii[atomic_numbers[s]], MAX_BOND_RADIUS)
-        for s in symbols
-    ])
-    nonmetals = [_is_nonmetal(s) for s in symbols]
-
-    # Pairwise distances with minimum-image convention.
-    # NOTE: ASE ≥3.29 returns (vectors (N,M,3), distances (N,M)) — order
-    # swapped relative to older versions.
-    _vecs, dists = get_distances(positions, positions, cell=cell, pbc=pbc)
-
-    bonds: list[tuple[int, int, np.ndarray]] = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            d = dists[i, j]
-            if d <= 0.3 or d > BOND_MAX_LENGTH:
-                continue
-            # Rule 1: covalent bond
-            covalent = d < (radii[i] + radii[j]) * BOND_TOLERANCE
-            # Rule 2: ionic contact between metal and non-metal
-            ionic = nonmetals[i] != nonmetals[j]
-            if covalent or ionic:
-                vec = _mic_draw_vector(i, j, positions, cell, pbc)
-                bonds.append((i, j, vec))
-    return bonds
 
 
 def _cell_edges(cell: np.ndarray) -> np.ndarray:
@@ -560,6 +463,14 @@ class Viewport3D(QOpenGLWidget):
     # Signals
     atom_clicked = Signal(int)      # user clicked an atom (index)
     background_clicked = Signal()   # user clicked empty space
+    bond_clicked = Signal(int)      # user clicked a bond (bond list index)
+    atoms_selected = Signal(list, str)      # indices + "replace"|"add"|"toggle"
+    atom_place_requested = Signal(object, object)  # world position, anchor index|None
+    atoms_moved = Signal(list, object)      # indices + new positions (K×3)
+    bond_created = Signal(int, int)         # atom indices
+    bond_removed = Signal(int, int)         # atom indices
+    delete_requested = Signal(str, int)     # "atom"|"bond" + index
+    mode_changed = Signal(object)           # new ToolMode
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -572,8 +483,21 @@ class Viewport3D(QOpenGLWidget):
         self._atom_edge = np.zeros((0, 4), dtype=np.float32)
         self._bond_verts = np.zeros((0, 3), dtype=np.float32)
         self._cell_verts: np.ndarray | None = None
-        self._selected_index: int | None = None
+        self._selected_indices: set[int] = set()
+        self._preview_indices: set[int] = set()
+        self._bonds: list = []          # Bond objects, same order as render
+        self._bond_ranges: list[tuple[int, int]] = []  # (first, count) vertex slices
+        self._rubber_rect = None        # QRectF | None (box selection)
+        self._ghost_pos = None          # np.ndarray | None (add-atom preview)
+        self._ghost_bond_from = None    # world pos of the ghost bond's anchor
+        self.current_element = "C"      # element of the atom being added
         self._data_dirty = False
+
+        # Interaction mode (tool dispatch — tools live in ui/tools.py)
+        self._tool_instances: dict = {}
+        self._mode = ToolMode.SELECT
+        self._active_tool = make_tool(ToolMode.SELECT, self)
+        self._tool_active = False       # True while the tool owns the press
 
         # Camera state (orbit camera, perspective projection)
         self._cam_center = np.zeros(3, dtype=np.float64)
@@ -617,7 +541,12 @@ class Viewport3D(QOpenGLWidget):
     # Public API
     # ------------------------------------------------------------------
 
-    def set_structure(self, atoms: Atoms | None, reset_view: bool = True) -> None:
+    def set_structure(
+        self,
+        atoms: Atoms | None,
+        reset_view: bool = True,
+        bonds: list | None = None,
+    ) -> None:
         """Replace the displayed structure and re-render.
 
         Args:
@@ -626,9 +555,12 @@ class Viewport3D(QOpenGLWidget):
                 (default, used when opening files). False preserves the
                 current camera (used for in-place edits such as surface
                 cuts and supercells).
+            bonds: Persistent bond list from the model (Bond objects);
+                auto-computed from connectivity when None (standalone use).
         """
         self._atoms = atoms
-        self._selected_index = None
+        self._selected_indices = set()
+        self._preview_indices = set()
 
         if atoms is None or len(atoms) == 0:
             self._atom_pos = np.zeros((0, 3), dtype=np.float32)
@@ -636,6 +568,8 @@ class Viewport3D(QOpenGLWidget):
             self._atom_color = np.zeros((0, 4), dtype=np.float32)
             self._atom_edge = np.zeros((0, 4), dtype=np.float32)
             self._bond_verts = np.zeros((0, 3), dtype=np.float32)
+            self._bonds = []
+            self._bond_ranges = []
             self._cell_verts = None
         else:
             positions = np.asarray(atoms.get_positions(), dtype=np.float32)
@@ -660,13 +594,29 @@ class Viewport3D(QOpenGLWidget):
             self._atom_color = np.asarray(colors, dtype=np.float32)
             self._atom_edge = np.asarray(edges, dtype=np.float32)
 
-            bonds = _find_bonds(positions, symbols, cell, pbc)
-            if bonds:
-                starts = np.asarray([positions[i] for i, _j, _v in bonds])
-                ends = np.asarray([positions[i] + v for i, _j, v in bonds])
-                self._bond_verts = _cylinder_verts(starts, ends, BOND_RADIUS)
-            else:
-                self._bond_verts = np.zeros((0, 3), dtype=np.float32)
+            bond_list = (bonds if bonds is not None
+                         else find_bonds(positions, symbols, cell, pbc))
+            self._bonds = bond_list
+            # Bake per bond so every bond keeps a vertex slice of its own
+            # (needed by the ID-color pick pass to draw individual bonds).
+            # Ranges stay aligned with bond indices even for zero-length
+            # bonds (drawing 0 verts is a no-op).
+            self._bond_ranges = []
+            pieces = []
+            offset = 0
+            for b in bond_list:
+                piece = _cylinder_verts(
+                    np.asarray([positions[b.i]], dtype=np.float64),
+                    np.asarray([positions[b.i] + mic_vector(
+                        b.i, b.j, positions, cell, pbc)], dtype=np.float64),
+                    BOND_RADIUS,
+                )
+                self._bond_ranges.append((offset, len(piece)))
+                offset += len(piece)
+                if len(piece):
+                    pieces.append(piece)
+            self._bond_verts = (np.concatenate(pieces) if pieces
+                                else np.zeros((0, 3), dtype=np.float32))
 
             self._cell_verts = _cell_edges(cell) if any(pbc) else None
 
@@ -679,8 +629,17 @@ class Viewport3D(QOpenGLWidget):
         self.update()
 
     def highlight_atom(self, index: int | None) -> None:
-        """Highlight the atom at index (None clears the highlight)."""
-        self._selected_index = index
+        """Highlight the atom at index (None clears) — legacy single API."""
+        self.set_highlight({index} if index is not None else None)
+
+    def set_highlight(self, indices) -> None:
+        """Set the selection highlight (iterable of atom indices)."""
+        self._selected_indices = set(indices) if indices else set()
+        self.update()
+
+    def set_preview_highlight(self, indices) -> None:
+        """Set a temporary highlight (e.g. CreateBond's first atom)."""
+        self._preview_indices = set(indices) if indices else set()
         self.update()
 
     def reset_view(self) -> None:
@@ -688,6 +647,25 @@ class Viewport3D(QOpenGLWidget):
         if self._atoms is not None and len(self._atoms) > 0:
             self._fit_camera()
             self.update()
+
+    def set_view_direction(
+        self,
+        azimuth: float,
+        elevation: float,
+        up: tuple[float, float, float] | None = None,
+    ) -> None:
+        """Point the camera along a preset direction (View menu).
+
+        Args:
+            azimuth, elevation: Camera angles in degrees.
+            up: Optional world-up override (needed for ±Y views where
+                the default up would be parallel to the view direction).
+        """
+        self._cam_azimuth = float(azimuth)
+        self._cam_elevation = float(elevation)
+        if up is not None:
+            self._cam_up = np.asarray(up, dtype=np.float64)
+        self.update()
 
     @property
     def gl_available(self) -> bool:
@@ -971,7 +949,7 @@ class Viewport3D(QOpenGLWidget):
         gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         for i in range(len(self._atom_pos)):
             scale = float(self._atom_radius[i])
-            if i == self._selected_index:
+            if i in self._selected_indices or i in self._preview_indices:
                 color = (*HIGHLIGHT_COLOR, 1.0)
                 edge = _edge_color(HIGHLIGHT_COLOR)
                 edge = (*edge, 1.0)
@@ -989,6 +967,20 @@ class Viewport3D(QOpenGLWidget):
             mvp = proj @ view @ _sphere_model(pos, scale)
             self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
             self._sphere_prog.setUniformValue("uColor", *color)
+            gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
+                              GL_UNSIGNED_INT, VoidPtr(0))
+
+        # --- Ghost atom (add-atom drag preview, semi-transparent) ---
+        if self._ghost_pos is not None:
+            z = atomic_numbers.get(self.current_element, 0)
+            ghost_radius = (
+                float(covalent_radii[z]) if 0 < z < len(covalent_radii) else 0.77
+            ) * SPHERE_SCALE
+            ghost_color = element_color(self.current_element)
+            mvp = proj @ view @ _sphere_model(
+                np.asarray(self._ghost_pos, dtype=np.float32), ghost_radius)
+            self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
+            self._sphere_prog.setUniformValue("uColor", *ghost_color, 0.55)
             gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
                               GL_UNSIGNED_INT, VoidPtr(0))
         gl.glDisable(GL_BLEND)
@@ -1027,6 +1019,23 @@ class Viewport3D(QOpenGLWidget):
         self._sphere_prog.release()
         self._flat_prog.release()
 
+        # Ghost bond preview (anchor → ghost atom, screen-space line)
+        if self._ghost_bond_from is not None and self._ghost_pos is not None:
+            a = self.project_to_screen(self._ghost_bond_from)
+            b = self.project_to_screen(self._ghost_pos)
+            if a is not None and b is not None:
+                painter = QPainter(self)
+                painter.setPen(QPen(QColor(255, 210, 90), 1.5, Qt.DashLine))
+                painter.drawLine(QPointF(a[0], a[1]), QPointF(b[0], b[1]))
+                painter.end()
+
+        # Rubber-band selection box (screen space, painted after GL)
+        if self._rubber_rect is not None:
+            painter = QPainter(self)
+            painter.setPen(QPen(QColor(255, 210, 90), 1, Qt.DashLine))
+            painter.drawRect(self._rubber_rect)
+            painter.end()
+
     def _paint_text(self, text: str) -> None:
         """Draw overlay text with QPainter (works inside paintGL)."""
         painter = QPainter(self)
@@ -1050,6 +1059,9 @@ class Viewport3D(QOpenGLWidget):
         self._press_pos = event.position()
         self._last_pos = event.position()
         self._dragged = False
+        if (event.button() == Qt.LeftButton and self._active_tool is not None
+                and self._active_tool.mouse_press(event, event.position())):
+            self._tool_active = True
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
@@ -1063,24 +1075,12 @@ class Viewport3D(QOpenGLWidget):
         if moved > CLICK_DRAG_PX:
             self._dragged = True
 
-        dpr = self.devicePixelRatioF()
-        fb_h = max(int(self.height() * dpr), 1)
-
-        if self._press_button == Qt.LeftButton:
-            # Orbit: drag right → azimuth up; drag up → elevation up
-            self._cam_azimuth -= dx * 0.5
-            self._cam_elevation = max(-89.9, min(89.9, self._cam_elevation + dy * 0.5))
+        if self._tool_active and self._press_button == Qt.LeftButton:
+            self._active_tool.mouse_move(event, pos)
+        elif self._press_button == Qt.LeftButton:
+            self.orbit(dx, dy)
         elif self._press_button in (Qt.RightButton, Qt.MiddleButton):
-            # Pan in the camera plane (MS-style right-drag pan):
-            # camera right/up in world space are rows 0/1 of the view
-            # matrix rotation part. Ortho: world-units-per-pixel is
-            # constant at 2·d / fb_h.
-            _proj, view = self._camera_matrices()
-            rot = view[:3, :3]
-            right = rot[0, :]
-            up = rot[1, :]
-            wpp = 2.0 * self._cam_distance / fb_h
-            self._cam_center = self._cam_center + (-dx) * wpp * right + dy * wpp * up
+            self.pan(dx, dy)
 
         self._last_pos = pos
         if self._dragged:
@@ -1088,18 +1088,31 @@ class Viewport3D(QOpenGLWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
-        if (event.button() == Qt.LeftButton and not self._dragged
+        if self._tool_active and event.button() == Qt.LeftButton:
+            self._active_tool.mouse_release(event, event.position())
+            self._tool_active = False
+        elif (event.button() == Qt.LeftButton and not self._dragged
                 and self._atoms is not None and len(self._atoms) > 0):
+            # Standalone fallback (no tool consumed the press): click
+            # selects — legacy behavior preserved for bare viewports.
             index = self._pick_atom(event.position())
             if index is not None:
-                self.highlight_atom(index)
+                self.set_highlight({index})
                 self.atom_clicked.emit(index)
             else:
-                self.highlight_atom(None)
+                self.set_highlight(None)
                 self.background_clicked.emit()
         self._press_button = None
         self._last_pos = None
         event.accept()
+
+    def keyPressEvent(self, event) -> None:
+        """Forward keys to the active tool (Esc cancels, etc.)."""
+        if (self._active_tool is not None
+                and self._active_tool.key_press(event)):
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def wheelEvent(self, event) -> None:
         delta = event.angleDelta().y()
@@ -1115,22 +1128,145 @@ class Viewport3D(QOpenGLWidget):
         event.accept()
 
     # ------------------------------------------------------------------
+    # Camera gestures (shared by the default navigation and tools)
+    # ------------------------------------------------------------------
+
+    def orbit(self, dx: float, dy: float) -> None:
+        """Orbit the camera: drag right → azimuth up; drag up → elevation up."""
+        self._cam_azimuth -= dx * 0.5
+        self._cam_elevation = max(-89.9, min(89.9, self._cam_elevation + dy * 0.5))
+        self.update()
+
+    def pan(self, dx: float, dy: float) -> None:
+        """Pan in the camera plane (MS-style right-drag pan).
+
+        Camera right/up in world space are rows 0/1 of the view matrix
+        rotation part. Ortho: world-units-per-pixel is constant at
+        2·distance / logical height.
+        """
+        _proj, view = self._camera_matrices()
+        rot = view[:3, :3]
+        right = rot[0, :]
+        up = rot[1, :]
+        wpp = 2.0 * self._cam_distance / max(self.height(), 1)
+        self._cam_center = self._cam_center + (-dx) * wpp * right + dy * wpp * up
+        self.update()
+
+    # ------------------------------------------------------------------
+    # Interaction modes & tool API
+    # ------------------------------------------------------------------
+
+    def set_mode(self, mode: ToolMode) -> None:
+        """Switch the active interaction mode (toolbar QActionGroup)."""
+        self._mode = mode
+        if mode not in self._tool_instances:
+            self._tool_instances[mode] = make_tool(mode, self)
+        self._active_tool = self._tool_instances[mode]
+        self.setCursor(self._active_tool.cursor())
+        self.mode_changed.emit(mode)
+
+    def mode(self) -> ToolMode:
+        """The currently active interaction mode."""
+        return self._mode
+
+    def cancel_active_tool(self) -> None:
+        """Reset the active tool's transient state.
+
+        Called when the structure changes so no tool keeps stale atom
+        indices or preview state across edits.
+        """
+        self._tool_active = False
+        if self._active_tool is not None:
+            self._active_tool.cancel()
+
+    def pick(self, pos):
+        """Atom or bond under the cursor: ("atom", i) | ("bond", k) | None."""
+        return self._pick(pos)
+
+    def screen_to_world(self, pos) -> np.ndarray:
+        """World point on the camera plane through _cam_center, under pos.
+
+        Ortho unprojection from widget (logical) pixels: the visible
+        half-height equals the camera distance, and the camera-plane
+        basis is right/up (rows 0/1 of the view rotation).
+        """
+        _proj, view = self._camera_matrices()
+        rot = view[:3, :3]
+        right = rot[0, :]
+        up = rot[1, :]
+        wpp = 2.0 * self._cam_distance / max(self.height(), 1)
+        px = (pos.x() - self.width() / 2.0) * wpp
+        py = (pos.y() - self.height() / 2.0) * wpp
+        return self._cam_center + px * right - py * up
+
+    def project_to_screen(self, world) -> np.ndarray | None:
+        """Project a world point to widget (logical) pixels; None if behind."""
+        proj, view = self._camera_matrices()
+        clip = proj @ view @ np.append(np.asarray(world, dtype=float), 1.0)
+        w = clip[3]
+        if w <= 0.0:
+            return None
+        ndc = clip[:3] / w
+        return np.array([
+            (ndc[0] + 1.0) / 2.0 * self.width(),
+            (1.0 - (ndc[1] + 1.0) / 2.0) * self.height(),
+        ])
+
+    def preview_atom_position(self, index: int, position: np.ndarray) -> None:
+        """Drag fast path: move the displayed atom without rebuilding bonds.
+
+        Atom spheres are drawn per-frame from _atom_pos with per-atom
+        model matrices, so this needs no buffer upload and no bond
+        recompute — the model is untouched until the drag commits.
+        """
+        if 0 <= index < len(self._atom_pos):
+            self._atom_pos[index] = np.asarray(position, dtype=np.float32)
+            self.update()
+
+    def preview_atom_positions(self, indices, positions) -> None:
+        """Drag fast path for several atoms (single repaint)."""
+        for idx, pos in zip(indices, positions):
+            if 0 <= idx < len(self._atom_pos):
+                self._atom_pos[idx] = np.asarray(pos, dtype=np.float32)
+        self.update()
+
+    def preview_ghost_atom(self, position: np.ndarray | None) -> None:
+        """Show/hide the semi-transparent ghost atom (add-atom drag)."""
+        self._ghost_pos = None if position is None else np.asarray(position, dtype=float)
+        self.update()
+
+    def preview_ghost_bond(self, anchor_position: np.ndarray | None) -> None:
+        """Show/hide the ghost bond line from the anchor to the ghost atom."""
+        self._ghost_bond_from = (
+            None if anchor_position is None
+            else np.asarray(anchor_position, dtype=float)
+        )
+        self.update()
+
+    def set_rubber_band(self, rect) -> None:
+        """Show/hide the box-selection rubber band (QRectF or None)."""
+        self._rubber_rect = rect
+        self.update()
+
+    # ------------------------------------------------------------------
     # Picking — ID-color framebuffer readback
     # ------------------------------------------------------------------
 
-    def _pick_atom(self, pos) -> int | None:
-        """Atom under the cursor, or None.
+    def _pick(self, pos) -> tuple[str, int] | None:
+        """Atom or bond under the cursor, or None.
 
         Renders the scene into an offscreen framebuffer with every atom
-        colored by its unique ID (bonds and cell omitted), then reads
-        back the pixel under the cursor. Uses the same camera matrices
-        as the on-screen pass, so the hit is exactly what the user sees.
+        and bond colored by a unique ID (cell omitted), then reads back
+        the pixel under the cursor. Uses the same camera matrices as the
+        on-screen pass, so the hit is exactly what the user sees. Bonds
+        are drawn first and atoms last, so atoms win depth ties at the
+        joints.
 
         Args:
             pos: Cursor position in logical widget pixels (y-down).
 
         Returns:
-            Atom index, or None for empty space / bond / cell.
+            ("atom", index) / ("bond", bond-list index), or None.
         """
         if (not self._gl_ready or self._gl_failed
                 or self._atoms is None or len(self._atom_pos) == 0):
@@ -1156,6 +1292,8 @@ class Viewport3D(QOpenGLWidget):
         # GL work outside paintGL requires an explicit makeCurrent —
         # QOpenGLWidget's context is only current during paintGL.
         self.makeCurrent()
+        if self._data_dirty:
+            self._upload_scene_buffers()
 
         self._pick_fbo.bind()
         gl.glViewport(0, 0, fb_w, fb_h)
@@ -1166,23 +1304,38 @@ class Viewport3D(QOpenGLWidget):
         # ID pass uses the UNLIT flat program: the lit sphere shader
         # multiplies colors by a lighting term < 1, which would truncate
         # the packed ID to zero in the 8-bit readback.
+        n = len(self._atom_pos)
         self._flat_prog.bind()
-        self._unit_vao.bind()
-        for i in range(len(self._atom_pos)):
-            scale = float(self._atom_radius[i])
-            iid = i + 1
-            color = (
+
+        def _id_color(iid: int) -> tuple[float, float, float, float]:
+            return (
                 float(iid & 0xFF) / 255.0,
                 float((iid >> 8) & 0xFF) / 255.0,
                 float((iid >> 16) & 0xFF) / 255.0,
                 1.0,
             )
+
+        # Bonds first (ID = n + k + 1), atom spheres last — atoms win
+        # depth ties at the joints.
+        if self._bond_ranges:
+            self._bond_vao.bind()
+            self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
+            for k, (first, count) in enumerate(self._bond_ranges):
+                if count == 0:
+                    continue
+                self._flat_prog.setUniformValue("uColor", *_id_color(n + k + 1))
+                gl.glDrawArrays(GL_TRIANGLES, first, count)
+            self._bond_vao.release()
+
+        self._unit_vao.bind()
+        for i in range(n):
+            scale = float(self._atom_radius[i])
             # Draw at the edge-sphere scale (1.04×) so picking matches the
             # visible silhouette — clicks on the dark outline ring of an
             # atom must hit it, not fall through to the background.
             mvp = proj @ view @ _sphere_model(self._atom_pos[i], scale * EDGE_SCALE)
             self._flat_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
-            self._flat_prog.setUniformValue("uColor", *color)
+            self._flat_prog.setUniformValue("uColor", *_id_color(i + 1))
             gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
                               GL_UNSIGNED_INT, VoidPtr(0))
         self._unit_vao.release()
@@ -1194,4 +1347,13 @@ class Viewport3D(QOpenGLWidget):
         self.doneCurrent()
 
         iid = int(buf[0]) | (int(buf[1]) << 8) | (int(buf[2]) << 16)
-        return (iid - 1) if iid > 0 else None
+        if iid == 0:
+            return None
+        if iid <= n:
+            return ("atom", iid - 1)
+        return ("bond", iid - n - 1)
+
+    def _pick_atom(self, pos) -> int | None:
+        """Atom index under the cursor, or None (legacy wrapper)."""
+        hit = self._pick(pos)
+        return hit[1] if hit is not None and hit[0] == "atom" else None
