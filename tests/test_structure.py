@@ -115,7 +115,7 @@ def test_undo_redo_delete_atom(model):
 
 
 def test_undo_replaces_derived_structure(model):
-    """Surface cut / supercell use replace_atoms — must be undoable."""
+    """Surface cleave / supercell use replace_atoms — must be undoable."""
     model.load_atoms(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]))
     model.replace_atoms(Atoms("Fe", positions=[[1, 1, 1]]))
     assert model.n_atoms == 1

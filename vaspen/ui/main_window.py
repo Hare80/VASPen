@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from ase.data import chemical_symbols
 
 from PySide6.QtCore import Qt, QSettings, QEvent, QTranslator
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QDragEnterEvent, QDropEvent
@@ -63,6 +62,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._config = AppConfig()
         self._structure = StructureModel()
+        # Non-modal surface dialog (kept alive while open; one at a time)
+        self._surface_dialog = None
 
         # Translator — owned by the window so the language can switch live
         self._translator = QTranslator(self)
@@ -210,8 +211,8 @@ class MainWindow(QMainWindow):
         self.act_gen_all.triggered.connect(self._on_generate_all)
 
         # ── Tools ──
-        self.act_surface = QAction(self.tr("C&ut Surface..."), self)
-        self.act_surface.setStatusTip(self.tr("Cut a surface/slab from the current structure"))
+        self.act_surface = QAction(self.tr("&Cleave Surface..."), self)
+        self.act_surface.setStatusTip(self.tr("Cleave a surface/slab from the current structure"))
         self.act_surface.triggered.connect(self._on_surface)
 
         self.act_supercell = QAction(self.tr("&Supercell..."), self)
@@ -442,6 +443,42 @@ class MainWindow(QMainWindow):
                 lambda checked, m=mode: self._viewport.set_mode(m) if checked else None
             )
             add_action(act)
+            if mode is ToolMode.ADD_ATOM:
+                # Element picker right of Add Atom — the add-atom
+                # workflow reads left-to-right: mode → element → click.
+                # QToolButton + InstantPopup (same pattern as the View
+                # button): a QComboBox popup glitched in the flow
+                # toolbar (appeared to expand multiple times).
+                self._element_label = QLabel(self.tr("Element:"))
+                flow.addWidget(self._element_label)
+                self._element_btn = QToolButton(self)
+                self._element_btn.setPopupMode(QToolButton.InstantPopup)
+                self._element_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+                self._element_menu = QMenu(self)
+                self._element_actions: list[QAction] = []
+                self._element_group = QActionGroup(self)
+                self._element_group.setExclusive(True)
+                for symbol in ("C", "H", "O", "N", "S", "P", "F", "Cl", "Si"):
+                    act = QAction(symbol, self)
+                    act.setCheckable(True)
+                    act.triggered.connect(
+                        lambda checked=False, s=symbol:
+                        self._set_current_element(s))
+                    self._element_group.addAction(act)
+                    self._element_menu.addAction(act)
+                    self._element_actions.append(act)
+                self._element_btn.setMenu(self._element_menu)
+                flow.addWidget(self._element_btn)
+                # Ellipsis button — opens the periodic table for any
+                # element outside the shortlist
+                self._element_more_btn = QToolButton(self)
+                self._element_more_btn.setText("…")
+                self._element_more_btn.setToolTip(self.tr(
+                    "Pick any element from the periodic table"))
+                self._element_more_btn.clicked.connect(self._on_pick_element)
+                flow.addWidget(self._element_more_btn)
+                self._current_element = "C"
+                self._set_current_element("C")
         # One-shot bond detection — useful while Auto Detect Bonds is off
         add_action(self.act_detect_bonds)
 
@@ -452,15 +489,6 @@ class MainWindow(QMainWindow):
                 lambda checked, m=mode: self._viewport.set_mode(m) if checked else None
             )
             add_action(act)
-
-        self._element_label = QLabel(self.tr("Element:"))
-        flow.addWidget(self._element_label)
-        self._element_combo = QComboBox(self)
-        self._element_combo.setEditable(False)
-        self._element_combo.addItems(chemical_symbols[1:])  # skip placeholder "X"
-        self._element_combo.setCurrentText("C")
-        self._element_combo.currentTextChanged.connect(self._on_element_changed)
-        flow.addWidget(self._element_combo)
 
         add_action(self.act_reset_view)
 
@@ -519,9 +547,23 @@ class MainWindow(QMainWindow):
         """Point the camera along a world-axis direction (View menu)."""
         self._viewport.set_view_direction(azimuth, elevation, up)
 
-    def _on_element_changed(self, symbol: str) -> None:
-        """Keep the viewport's ghost-atom element in sync with the combo."""
+    def _set_current_element(self, symbol: str) -> None:
+        """Set the active add-atom element; sync button text and checks."""
+        self._current_element = symbol
+        self._element_btn.setText(symbol)
+        for act in self._element_actions:
+            act.setChecked(act.text() == symbol)
         self._viewport.current_element = symbol
+
+    def _on_pick_element(self) -> None:
+        """Open the periodic table to pick any element (shortlist "…")."""
+        from vaspen.ui.periodic_table_dialog import PeriodicTableDialog
+
+        dlg = PeriodicTableDialog(self)
+        if dlg.exec() != PeriodicTableDialog.DialogCode.Accepted:
+            return
+        if dlg.selected_symbol:
+            self._set_current_element(dlg.selected_symbol)
 
     def _on_display_options(self) -> None:
         """Open the Display Options dialog (live preview, persisted on OK)."""
@@ -932,11 +974,72 @@ class MainWindow(QMainWindow):
 
     def _on_surface(self) -> None:
         from vaspen.ui.surface_dialog import SurfaceDialog
-        dlg = SurfaceDialog(self._structure, self)
-        if dlg.exec() == SurfaceDialog.Accepted and dlg.result_structure is not None:
+
+        if self._structure.n_atoms == 0:
+            QMessageBox.warning(
+                self,
+                self.tr("No Structure"),
+                self.tr("Load a bulk structure before cleaving a surface."),
+            )
+            return
+        if not self._structure.is_periodic:
+            QMessageBox.information(
+                self,
+                self.tr("Cleave Surface"),
+                self.tr("Cleaving a surface requires a periodic structure "
+                        "(a full-rank cell with periodic boundary "
+                        "conditions)."),
+            )
+            return
+
+        # Non-modal: the viewport stays rotatable while the dialog is
+        # open. Editing entry points are paused to prevent conflicts
+        # with the live preview (see _set_surface_editing_enabled).
+        dlg = SurfaceDialog(self._structure, self._viewport, self)
+        dlg.accepted.connect(lambda: self._apply_surface_result(dlg))
+        dlg.finished.connect(lambda _result: self._on_surface_dialog_finished(dlg))
+        self._surface_dialog = dlg
+        self._set_surface_editing_enabled(False)
+        self._viewport.cancel_active_tool()
+        dlg.show()
+
+    def _apply_surface_result(self, dlg) -> None:
+        """Apply the accepted slab to the model (one undo step)."""
+        if dlg.result_structure is not None:
             self._structure.replace_atoms(dlg.result_structure.atoms)
             self._structure.reset_filepath()  # never silently overwrite the bulk file
-            self._set_status(self.tr("Surface cut applied."))
+            self._set_status(self.tr("Cleaved surface applied."))
+
+    def _on_surface_dialog_finished(self, dlg) -> None:
+        """Re-enable editing entry points after the dialog closes."""
+        if self._surface_dialog is dlg:
+            self._surface_dialog = None
+            self._set_surface_editing_enabled(True)
+            self._update_edit_actions()  # undo/redo reflect the applied cut
+            dlg.deleteLater()
+
+    def _set_surface_editing_enabled(self, enabled: bool) -> None:
+        """Pause structure-editing entry points while the preview dialog is open.
+
+        Rotate/zoom/pan stay active (mouse handlers, not actions) so the
+        user can inspect the slab from any angle. Save/generate actions
+        stay enabled — the model is untouched during preview and the
+        periodic-wrap path is unreachable (the dialog requires is_periodic).
+        """
+        for act in (self.act_new, self.act_open, self.act_surface,
+                    self.act_supercell, self.act_edit_lattice,
+                    self.act_transform, self.act_symmetry,
+                    self.act_delete_selection, self.act_undo, self.act_redo,
+                    self.act_detect_bonds):
+            act.setEnabled(enabled)
+        for mode, act in self._mode_actions.items():
+            if mode is not ToolMode.SELECT:
+                act.setEnabled(enabled)
+        self._element_label.setEnabled(enabled)
+        self._element_btn.setEnabled(enabled)
+        self._element_more_btn.setEnabled(enabled)
+        self._dock_structure.setEnabled(enabled)
+        self._dock_props.setEnabled(enabled)
 
     def _on_supercell(self) -> None:
         from vaspen.core.builder import StructureBuilder
@@ -1069,8 +1172,8 @@ class MainWindow(QMainWindow):
         self.act_gen_potcar.setText(self.tr("Generate &POTCAR..."))
         self.act_gen_all.setText(self.tr("Generate &All Input Files..."))
         self.act_gen_all.setStatusTip(self.tr("Generate INCAR, KPOINTS, POSCAR, POTCAR at once"))
-        self.act_surface.setText(self.tr("C&ut Surface..."))
-        self.act_surface.setStatusTip(self.tr("Cut a surface/slab from the current structure"))
+        self.act_surface.setText(self.tr("&Cleave Surface..."))
+        self.act_surface.setStatusTip(self.tr("Cleave a surface/slab from the current structure"))
         self.act_supercell.setText(self.tr("&Supercell..."))
         self.act_supercell.setStatusTip(self.tr("Create a supercell"))
         self.act_edit_lattice.setText(self.tr("Edit &Lattice..."))
@@ -1128,6 +1231,8 @@ class MainWindow(QMainWindow):
             act.setStatusTip(tip)
         self.act_delete_selection.setText(self.tr("Delete Selection"))
         self._element_label.setText(self.tr("Element:"))
+        self._element_more_btn.setToolTip(self.tr(
+            "Pick any element from the periodic table"))
         self._view_dir_btn.setText(self.tr("View"))
         self._view_dir_btn.setToolTip(self.tr("Align the camera with a world axis"))
         self._update_recent_menu()
@@ -1235,7 +1340,7 @@ class MainWindow(QMainWindow):
         self._update_edit_actions()
 
     def _on_structure_modified(self) -> None:
-        """Structure changed (add/remove atoms, supercell, surface cut...)."""
+        """Structure changed (add/remove atoms, supercell, surface cleave...)."""
         # Tools must not keep stale indices/preview state across edits
         self._viewport.cancel_active_tool()
         # Keep the user's camera — in-place edits must not snap the view back
@@ -1330,7 +1435,7 @@ class MainWindow(QMainWindow):
                 if model.pbc[ax]:
                     frac[ax] %= 1.0
             pos = frac @ cell
-        symbol = self._element_combo.currentText()
+        symbol = self._current_element
         StructureBuilder.add_atom(model, symbol, pos)
         new_index = model.n_atoms - 1
         if anchor is not None and model.bond_mode == "manual":

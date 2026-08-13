@@ -521,7 +521,7 @@ class StructureModel(QObject):
     def reset_filepath(self) -> None:
         """Detach from the loaded file so the next Save forces Save As.
 
-        Call after deriving a new structure (surface cut, supercell) so
+        Call after deriving a new structure (surface cleave, supercell) so
         the original file is never silently overwritten.
         """
         self._filepath = None

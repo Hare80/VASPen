@@ -58,6 +58,39 @@ def si_bulk() -> Atoms:
 
 
 @pytest.fixture
+def srtio3() -> Atoms:
+    """Cubic SrTiO3 bulk (5 atoms, a=3.905 Å), pbc=True.
+
+    Non-polar surfaces ((100) etc.) dedup to ONE unique termination
+    (mirror cleavages are translation-equivalent when the slab is
+    centered) — used by the surface-dialog tests.
+    """
+    a = 3.905
+    return Atoms(
+        "SrTiO3",
+        cell=[a, a, a],
+        pbc=True,
+        positions=[
+            [0.0, 0.0, 0.0],          # Sr
+            [a / 2, a / 2, a / 2],    # Ti
+            [a / 2, a / 2, 0.0],      # O
+            [a / 2, 0.0, a / 2],      # O
+            [0.0, a / 2, a / 2],      # O
+        ],
+    )
+
+
+@pytest.fixture
+def gaas() -> Atoms:
+    """GaAs zincblende primitive cell (2 atoms, a=5.65 Å), pbc=True.
+
+    (111) is polar: two unique terminations (Ga- and As-terminated).
+    """
+    from ase.build import bulk
+    return bulk("GaAs", "zincblende", a=5.65)
+
+
+@pytest.fixture
 def water_molecule() -> Atoms:
     """H2O molecule: no cell, pbc=False."""
     from ase.build import molecule

@@ -7,6 +7,7 @@ import pytest
 from ase import Atoms
 from ase.io import read as ase_read
 from ase.io import write as ase_write
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from vaspen.core import file_io as fi
@@ -912,3 +913,123 @@ def test_supercell_disorder_warns(window, monkeypatch, disordered_atoms):
     n_clean = window._structure.n_atoms
     window._on_supercell()
     assert window._structure.n_atoms == n_clean * 8
+
+
+# ----------------------------------------------------------------------
+# Surface dialog (non-modal wiring)
+# ----------------------------------------------------------------------
+
+
+class _FakeSurfaceDialog(QObject):
+    """Stands in for the non-modal SurfaceDialog in UI flow tests."""
+
+    accepted = Signal()
+    finished = Signal(int)
+
+    def __init__(self, structure, viewport, parent=None):
+        super().__init__(parent)
+        self.result_structure = None
+        self.shown = False
+
+    def show(self):
+        self.shown = True
+
+
+def test_surface_dialog_modeless_wiring(window, monkeypatch, si_bulk):
+    from vaspen.core.structure import StructureModel
+    from vaspen.ui import surface_dialog as sd
+    from vaspen.ui.tools import ToolMode
+
+    window._structure.load_atoms(si_bulk)
+    monkeypatch.setattr(sd, "SurfaceDialog", _FakeSurfaceDialog)
+    window._on_surface()
+
+    dlg = window._surface_dialog
+    assert isinstance(dlg, _FakeSurfaceDialog)
+    assert dlg.shown is True
+    # structure-editing entry points are paused while the dialog lives
+    assert window.act_supercell.isEnabled() is False
+    assert window._mode_actions[ToolMode.ADD_ATOM].isEnabled() is False
+    assert window._element_label.isEnabled() is False
+    assert window._element_btn.isEnabled() is False
+    assert window._element_more_btn.isEnabled() is False
+    assert window._dock_structure.isEnabled() is False
+    assert window.act_reset_view.isEnabled() is True  # view-only stays live
+
+    slab = Atoms("Si2", positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                 cell=[10.0, 10.0, 10.0], pbc=True)
+    dlg.result_structure = StructureModel(slab)
+    dlg.accepted.emit()
+    assert window._structure.n_atoms == 2
+
+    dlg.finished.emit(0)
+    assert window._surface_dialog is None
+    assert window.act_supercell.isEnabled() is True
+    assert window._mode_actions[ToolMode.ADD_ATOM].isEnabled() is True
+    assert window._element_label.isEnabled() is True
+    assert window._element_btn.isEnabled() is True
+    assert window._element_more_btn.isEnabled() is True
+    assert window._dock_structure.isEnabled() is True
+
+
+def test_element_picker_next_to_add_atom(window):
+    """The element picker sits immediately right of the Add Atom button."""
+    flow = window._element_btn.parentWidget().layout()
+    add_atom_btn = window._edit_buttons[1]  # SELECT=0, ADD_ATOM=1
+    assert flow.indexOf(add_atom_btn) + 1 == flow.indexOf(window._element_label)
+    assert flow.indexOf(add_atom_btn) + 2 == flow.indexOf(window._element_btn)
+    assert flow.indexOf(add_atom_btn) + 3 == flow.indexOf(window._element_more_btn)
+
+
+def test_element_picker_shortlist_and_periodic_table(window, monkeypatch):
+    """Shortlist menu holds the 9 common elements (default C); the
+    ellipsis button opens the periodic table for any other element."""
+    from PySide6.QtWidgets import QDialog
+
+    assert window._element_btn.text() == "C"
+    assert window._current_element == "C"
+    assert [a.text() for a in window._element_actions] == [
+        "C", "H", "O", "N", "S", "P", "F", "Cl", "Si"]
+    assert window._element_actions[0].isChecked()
+
+    window._element_actions[2].trigger()  # pick O from the menu
+    assert window._current_element == "O"
+    assert window._element_btn.text() == "O"
+    assert window._viewport.current_element == "O"
+    assert window._element_actions[2].isChecked()
+
+    class _FakePT(QDialog):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.selected_symbol = None
+
+        def exec(self):
+            self.selected_symbol = "Au"
+            return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "vaspen.ui.periodic_table_dialog.PeriodicTableDialog", _FakePT)
+    window._on_pick_element()
+    assert window._current_element == "Au"
+    assert window._element_btn.text() == "Au"
+    assert window._viewport.current_element == "Au"
+    # "Au" is not in the shortlist — no menu item is checked
+    assert not any(a.isChecked() for a in window._element_actions)
+
+
+def test_surface_dialog_nonperiodic_guard(window, monkeypatch, water_molecule):
+    from vaspen.ui import surface_dialog as sd
+
+    window._structure.load_atoms(water_molecule)
+    infos = []
+    monkeypatch.setattr(
+        QMessageBox, "information",
+        staticmethod(lambda *a, **k: infos.append(a)))
+
+    def _boom(*a, **k):
+        raise AssertionError("dialog constructed for a non-periodic structure")
+    monkeypatch.setattr(sd, "SurfaceDialog", _boom)
+
+    window._on_surface()  # guard shows an info box, never constructs
+    assert len(infos) == 1
+    assert window._surface_dialog is None

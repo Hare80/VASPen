@@ -128,12 +128,12 @@
         <translation>工具(&amp;T)</translation>
     </message>
     <message>
-        <source>C&amp;ut Surface...</source>
-        <translation>切晶面(&amp;U)...</translation>
+        <source>&amp;Cleave Surface...</source>
+        <translation>解理表面(&amp;C)...</translation>
     </message>
     <message>
-        <source>Cut a surface/slab from the current structure</source>
-        <translation>从当前结构切出表面/平板</translation>
+        <source>Cleave a surface/slab from the current structure</source>
+        <translation>从当前结构解理表面/平板</translation>
     </message>
     <message>
         <source>&amp;Supercell...</source>
@@ -264,8 +264,20 @@ Files: {}</source>
         <translation>生成失败</translation>
     </message>
     <message>
-        <source>Surface cut applied.</source>
-        <translation>已应用表面切割。</translation>
+        <source>Cleaved surface applied.</source>
+        <translation>已应用解理表面。</translation>
+    </message>
+    <message>
+        <source>Cleave Surface</source>
+        <translation>解理表面</translation>
+    </message>
+    <message>
+        <source>Pick any element from the periodic table</source>
+        <translation>从元素周期表选择任意元素</translation>
+    </message>
+    <message>
+        <source>Cleaving a surface requires a periodic structure (a full-rank cell with periodic boundary conditions).</source>
+        <translation>解理表面需要周期结构（满秩晶胞且具有周期性边界条件）。</translation>
     </message>
     <message>
         <source>Supercell {}×{}×{} created.</source>
@@ -1298,6 +1310,22 @@ Continue?</source>
         <translation>标签基准字号；标签随缩放自适应</translation>
     </message>
     <message>
+        <source>Measurements</source>
+        <translation>测量</translation>
+    </message>
+    <message>
+        <source>Color:</source>
+        <translation>颜色：</translation>
+    </message>
+    <message>
+        <source>Font size:</source>
+        <translation>字号：</translation>
+    </message>
+    <message>
+        <source>Size of the measurement labels</source>
+        <translation>测量标签的字号</translation>
+    </message>
+    <message>
         <source>Effects</source>
         <translation>效果</translation>
     </message>
@@ -1328,6 +1356,89 @@ Continue?</source>
     <message>
         <source>Restore every setting to its default value</source>
         <translation>将所有设置恢复为默认值</translation>
+    </message>
+</context>
+<context>
+    <name>SurfaceDialog</name>
+    <message>
+        <source>Cleave Surface / Slab</source>
+        <translation>解理表面 / 平板</translation>
+    </message>
+    <message>
+        <source>Miller Indices</source>
+        <translation>米勒指数</translation>
+    </message>
+    <message>
+        <source>Layers:</source>
+        <translation>层数：</translation>
+    </message>
+    <message>
+        <source>Number of atomic layers in the slab.\nMore layers = thicker slab, more computational cost.</source>
+        <translation>平板中的原子层数。层数越多，平板越厚，计算成本越高。</translation>
+    </message>
+    <message>
+        <source>Vacuum:</source>
+        <translation>真空层：</translation>
+    </message>
+    <message>
+        <source>Vacuum thickness added above the slab.\nStandard: 10–15 Å for surface calculations.</source>
+        <translation>平板上方添加的真空层厚度。表面计算通常使用 10–15 Å。</translation>
+    </message>
+    <message>
+        <source>Termination</source>
+        <translation>终端面</translation>
+    </message>
+    <message>
+        <source>{i}/{n} — top: {top}, bottom: {bottom}</source>
+        <translation>{i}/{n} — 顶面：{top}，底面：{bottom}</translation>
+    </message>
+    <message>
+        <source>Top: {top}, bottom: {bottom}</source>
+        <translation>顶面：{top}，底面：{bottom}</translation>
+    </message>
+    <message>
+        <source>{n} atoms · {v} Å vacuum</source>
+        <translation>{n} 个原子 · 真空 {v} Å</translation>
+    </message>
+    <message>
+        <source>Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure editing is paused until you close this dialog.</source>
+        <translation>预览：主视图实时显示切面结构，可旋转/缩放查看。关闭此对话框前结构编辑已暂停。</translation>
+    </message>
+    <message>
+        <source>No Structure</source>
+        <translation>无结构</translation>
+    </message>
+    <message>
+        <source>Load a bulk structure before cleaving a surface.</source>
+        <translation>请先载入体相结构再解理表面。</translation>
+    </message>
+    <message>
+        <source>Invalid Miller Indices</source>
+        <translation>米勒指数无效</translation>
+    </message>
+    <message>
+        <source>At least one Miller index must be non-zero.</source>
+        <translation>至少一个米勒指数必须非零。</translation>
+    </message>
+    <message>
+        <source>Cleave Failed</source>
+        <translation>解理失败</translation>
+    </message>
+    <message>
+        <source>Could not create slab.</source>
+        <translation>无法创建切面。</translation>
+    </message>
+    <message>
+        <source>Could not create slab:\n{}</source>
+        <translation>无法创建切面：\n{}</translation>
+    </message>
+    <message>
+        <source>Supercell (a×b):</source>
+        <translation>超胞（a×b）：</translation>
+    </message>
+    <message>
+        <source>In-plane supercell size (a × b). The vacuum direction (c) is never expanded.</source>
+        <translation>面内超胞尺寸（a × b）。真空层方向（c）不扩展。</translation>
     </message>
 </context>
 </TS>
