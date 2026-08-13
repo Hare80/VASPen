@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from ase import Atoms
 
-from vaspen.core.structure import StructureModel
+from vaspen.core.structure import StructureModel, wrap_in_padded_cell
 
 
 class _SignalCounter:
@@ -153,3 +153,89 @@ def test_save_roundtrip(tmp_path, model):
     assert (out).exists()
     assert model.filepath == str(out)
     assert model.is_dirty is False
+
+
+# ----------------------------------------------------------------------
+# Non-periodic → periodic wrapping
+# ----------------------------------------------------------------------
+
+def test_wrap_in_padded_cell_bbox_and_padding():
+    padding = 10.0
+    atoms = Atoms("H2O", positions=[[5, 2, 3], [6, 3, 3], [5.5, 2.5, 4]])
+    original_positions = atoms.get_positions().copy()
+
+    wrapped = wrap_in_padded_cell(atoms, padding)
+
+    low, high = original_positions.min(axis=0), original_positions.max(axis=0)
+    extent = high - low
+    expected_side = extent + 2 * padding
+    assert np.allclose(np.diag(wrapped.get_cell()[:]), expected_side)
+    assert tuple(wrapped.pbc) == (True, True, True)
+    # exactly `padding` vacuum on every face
+    new_low = wrapped.get_positions().min(axis=0)
+    new_high = wrapped.get_positions().max(axis=0)
+    assert np.allclose(new_low, padding)
+    assert np.allclose(new_high, extent + padding)
+    # bounding-box center coincides with the cell center
+    assert np.allclose((new_low + new_high) / 2, expected_side / 2)
+    # input atoms untouched
+    assert np.allclose(atoms.get_positions(), original_positions)
+    assert atoms.get_cell().rank == 0
+    assert not atoms.pbc.any()
+
+
+def test_wrap_in_padded_cell_single_atom():
+    wrapped = wrap_in_padded_cell(Atoms("H", positions=[[0, 0, 0]]), 10.0)
+    assert np.allclose(np.diag(wrapped.get_cell()[:]), [20, 20, 20])
+    assert np.allclose(wrapped.get_positions()[0], [10, 10, 10])
+
+
+def test_wrap_in_padded_cell_flat_molecule():
+    """Zero-extent axis must still produce a full-rank cell."""
+    wrapped = wrap_in_padded_cell(
+        Atoms("H2", positions=[[0, 0, 5], [0.74, 0, 5]]), 10.0)
+    cell = wrapped.get_cell()[:]
+    assert wrapped.get_cell().rank == 3
+    assert np.allclose(np.diag(cell)[2], 20.0)  # flat axis: only padding
+    assert np.allclose(wrapped.get_positions()[:, 2].min(), 10.0)
+
+
+def test_wrap_in_padded_cell_validation():
+    with pytest.raises(ValueError):
+        wrap_in_padded_cell(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]), 0.0)
+    with pytest.raises(ValueError):
+        wrap_in_padded_cell(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]), -1.0)
+    with pytest.raises(ValueError):
+        wrap_in_padded_cell(Atoms(), 10.0)
+
+
+def test_make_periodic_emits_modified_and_preserves_filepath(model):
+    model.load_atoms(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]), "mol.xyz")
+    model.select_atom(1)
+    modified = _counter(model, "structure_modified")
+
+    model.make_periodic(10.0)
+
+    assert modified.count == 1
+    assert model.is_periodic is True
+    assert model.is_dirty is True
+    assert model.filepath == "mol.xyz"
+    assert model.selected_index == 1  # atom indices unchanged
+
+
+def test_make_periodic_undo_restores_molecule(model):
+    atoms = Atoms("H2O", positions=[[5, 2, 3], [6, 3, 3], [5.5, 2.5, 4]])
+    original = atoms.get_positions().copy()
+    model.load_atoms(atoms)
+    model.make_periodic(10.0)
+    side_lengths = np.diag(model.cell).copy()
+    assert model.is_periodic is True
+
+    model.undo()
+    assert model.is_periodic is False
+    assert model.atoms.get_cell().rank == 0
+    assert np.allclose(model.positions, original)
+
+    model.redo()
+    assert model.is_periodic is True
+    assert np.allclose(np.diag(model.cell), side_lengths)

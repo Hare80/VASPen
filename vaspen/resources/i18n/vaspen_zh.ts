@@ -315,6 +315,10 @@ Files: {}</source>
         <source>a={:.2f} b={:.2f} c={:.2f}  α={:.1f}° β={:.1f}° γ={:.1f}°</source>
         <translation>a={:.2f} b={:.2f} c={:.2f}  α={:.1f}° β={:.1f}° γ={:.1f}°</translation>
     </message>
+    <message>
+        <source>a=— b=— c=—</source>
+        <translation>a=— b=— c=—</translation>
+    </message>
 </context>
 <context>
     <name>Viewport3D</name>
@@ -526,6 +530,29 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
         <source>Gaussian Cube</source>
         <translation>Gaussian Cube</translation>
+    </message>
+    <message>
+        <source>Cannot save a non-periodic structure in {} format: a unit cell is required.</source>
+        <translation>无法以 {} 格式保存非周期性结构：需要晶胞。</translation>
+    </message>
+</context>
+<context>
+    <name>PeriodicWrapDialog</name>
+    <message>
+        <source>Wrap in Periodic Cell</source>
+        <translation>包裹为周期性晶胞</translation>
+    </message>
+    <message>
+        <source>The structure is not periodic. VASPen will create a periodic cell around it with vacuum padding on each side.</source>
+        <translation>当前结构不是周期性的。VASPen 将在其周围创建一个带真空层的周期性晶胞。</translation>
+    </message>
+    <message>
+        <source>Vacuum padding:</source>
+        <translation>真空层厚度：</translation>
+    </message>
+    <message>
+        <source>Remember this value</source>
+        <translation>记住此值</translation>
     </message>
 </context>
 </TS>

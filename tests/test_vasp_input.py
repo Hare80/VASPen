@@ -242,3 +242,28 @@ def test_generate_all_inputs_element_order_consistent(tmp_path):
     assert "ENCUT = 400" in files["INCAR"]
     assert "Gamma" in files["KPOINTS"]
     assert "9 9 9" in files["KPOINTS"]  # cell [3,3,3], KSPACING 0.04 → ceil(8.33)
+
+
+# ----------------------------------------------------------------------
+# Non-periodic structures: wrap first, then generate
+# ----------------------------------------------------------------------
+
+def test_generate_all_after_make_periodic(water_molecule):
+    """After make_periodic, POSCAR/KPOINTS generation must not crash."""
+    model = StructureModel()
+    model.load_atoms(water_molecule)
+    model.make_periodic(10.0)
+
+    files = generate_all_inputs(model, incar_preset="scf", kpoints_mode="automatic")
+
+    poscar_lines = files["POSCAR"].splitlines()
+    assert len(poscar_lines) >= 6  # comment + scaling + 3 lattice vectors
+    # the 3 lattice-vector lines are numeric
+    assert all(
+        len(line.split()) == 3 for line in poscar_lines[2:5]
+    )
+    mesh_line = [line for line in files["KPOINTS"].splitlines()
+                 if len(line.split()) == 3 and line.split()[0].isdigit()]
+    assert mesh_line, files["KPOINTS"]
+    n1, n2, n3 = (int(x) for x in mesh_line[0].split())
+    assert n1 >= 1 and n2 >= 1 and n3 >= 1

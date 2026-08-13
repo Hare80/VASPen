@@ -14,8 +14,46 @@ from typing import Any
 import numpy as np
 from ase import Atoms
 from ase.io import read as ase_read
-from ase.io import write as ase_write
 from PySide6.QtCore import QObject, Signal
+
+from vaspen.core.file_io import FileIO
+
+
+def wrap_in_padded_cell(atoms: Atoms, padding: float) -> Atoms:
+    """Return a copy of ``atoms`` inside an orthogonal padded periodic cell.
+
+    The new cell is diagonal with each side length = bounding-box extent
+    along that axis + 2*padding; atoms are shifted so the bounding-box
+    center coincides with the cell center (guaranteeing exactly ``padding``
+    of vacuum on every face); pbc is set to (True, True, True). The input
+    Atoms object is not modified.
+
+    Args:
+        atoms: Molecule-like structure (any cell/pbc; only positions are used).
+        padding: Vacuum padding on each side of the bounding box, in Angstrom.
+
+    Returns:
+        New Atoms with the padded cell, centered, pbc=(True, True, True).
+
+    Raises:
+        ValueError: If atoms is empty or padding is not a positive number.
+    """
+    if len(atoms) == 0:
+        raise ValueError("Cannot wrap an empty structure.")
+    if not np.isfinite(padding) or padding <= 0:
+        raise ValueError(f"Padding must be a positive number, got {padding}.")
+
+    positions = np.asarray(atoms.get_positions(), dtype=float)
+    low = positions.min(axis=0)
+    high = positions.max(axis=0)
+    side_lengths = (high - low) + 2.0 * float(padding)
+
+    wrapped = atoms.copy()
+    wrapped.set_cell(np.diag(side_lengths))
+    wrapped.set_pbc(True)
+    # Shift so the bounding-box center coincides with the cell center.
+    wrapped.translate(side_lengths / 2.0 - (low + high) / 2.0)
+    return wrapped
 
 
 class StructureModel(QObject):
@@ -115,12 +153,17 @@ class StructureModel(QObject):
             filepath: Destination path. Uses the loaded path if None.
             fmt: ASE format string (e.g. 'vasp', 'cif', 'xyz').
                  Auto-detected from extension if None.
+
+        Raises:
+            ValueError: If no filepath is available, the extension is not
+                supported, or a non-periodic structure is saved to a
+                periodic format (vasp/cif).
         """
         path = Path(filepath) if filepath else Path(self._filepath) if self._filepath else None
         if path is None:
             raise ValueError("No filepath specified and no file loaded.")
 
-        ase_write(str(path), self._atoms, format=fmt)
+        FileIO.write(str(path), self._atoms, fmt=fmt)
         self._filepath = str(path)
         self._dirty = False
 
@@ -182,6 +225,16 @@ class StructureModel(QObject):
     def pbc(self) -> tuple[bool, bool, bool]:
         """Periodic boundary conditions."""
         return tuple(self._atoms.get_pbc())
+
+    @property
+    def is_periodic(self) -> bool:
+        """True if the structure has a full-rank 3D cell and at least one periodic axis.
+
+        A surface slab (pbc partially True) counts as periodic; a molecule
+        in a vacuum box (pbc all False) does not. Wrapped in bool() because
+        Cell.rank is a numpy integer and ``==`` yields a numpy bool.
+        """
+        return bool(self._atoms.get_cell().rank == 3 and self._atoms.pbc.any())
 
     # ------------------------------------------------------------------
     # Selection
@@ -266,6 +319,30 @@ class StructureModel(QObject):
         """Set the unit cell (3x3 matrix)."""
         self._push_undo()
         self._atoms.set_cell(cell)
+        self._dirty = True
+        self.structure_modified.emit()
+
+    def make_periodic(self, padding: float) -> None:
+        """Wrap the structure into a padded periodic cell (vacuum box).
+
+        Undoable: pushes the current state onto the undo stack and emits
+        structure_modified. Atom indices (and thus the selection) are
+        preserved; the filepath is NOT changed. Intended for molecule-like
+        structures; do not call on slabs (pbc partially True) — it rebuilds
+        the cell from the atom bounding box.
+
+        Args:
+            padding: Vacuum padding on each side of the bounding box, in Angstrom.
+
+        Raises:
+            ValueError: If the structure is empty or padding is not positive.
+        """
+        if len(self._atoms) == 0:
+            raise ValueError("Cannot wrap an empty structure.")
+        if not np.isfinite(padding) or padding <= 0:
+            raise ValueError(f"Padding must be a positive number, got {padding}.")
+        self._push_undo()
+        self._atoms = wrap_in_padded_cell(self._atoms, float(padding))
         self._dirty = True
         self.structure_modified.emit()
 

@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt, QSettings, QEvent, QTranslator
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QMainWindow,
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from vaspen.core.structure import StructureModel
-from vaspen.core.file_io import FileIO
+from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
 from vaspen.ui.structure_tree import StructureTreePanel
 from vaspen.ui.viewport3d import Viewport3D
 from vaspen.utils.config import AppConfig
@@ -343,11 +344,39 @@ class MainWindow(QMainWindow):
                 self.tr("Could not open file:\n{}").format(str(e)),
             )
 
+    def _ensure_periodic_for(self, target_fmt: str) -> bool:
+        """Ensure the model is periodic when the target format requires it.
+
+        If the model is molecule-like and the target format is vasp-family or
+        cif, shows the wrap dialog and converts the model in place (undoable).
+        Slabs (partially periodic) pass through untouched — re-boxing them
+        would destroy their lattice.
+
+        Args:
+            target_fmt: ASE format name ("vasp", "cif", "xyz", ...) or "".
+
+        Returns:
+            True if saving may proceed, False if the user cancelled.
+        """
+        if not target_fmt or target_fmt not in PERIODIC_FORMATS:
+            return True
+        if self._structure.is_periodic or self._structure.n_atoms == 0:
+            return True  # empty structures fall through to FileIO's error
+        from vaspen.ui.periodic_wrap_dialog import PeriodicWrapDialog
+
+        dlg = PeriodicWrapDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return False
+        self._structure.make_periodic(dlg.padding)
+        return True
+
     def _on_save(self) -> None:
         """Save the current structure."""
         fp = self._structure.filepath
         if fp:
             try:
+                if not self._ensure_periodic_for(resolve_format(fp) or ""):
+                    return
                 self._structure.save(fp)
                 self._set_status(self.tr("Saved: {}").format(fp))
             except Exception as e:
@@ -366,6 +395,8 @@ class MainWindow(QMainWindow):
         )
         if filepath:
             try:
+                if not self._ensure_periodic_for(resolve_format(filepath) or ""):
+                    return
                 self._structure.save(filepath)
                 self._config.add_recent_file(filepath)
                 self._config.last_directory = str(Path(filepath).parent)
@@ -384,6 +415,8 @@ class MainWindow(QMainWindow):
         )
         if filepath:
             try:
+                if not self._ensure_periodic_for("vasp"):
+                    return
                 self._structure.save(filepath, fmt="vasp")
                 self._set_status(self.tr("Exported POSCAR: {}").format(filepath))
             except Exception as e:
@@ -410,6 +443,11 @@ class MainWindow(QMainWindow):
 
     def _on_generate_all(self) -> None:
         from vaspen.core.vasp_input import generate_all_inputs
+
+        # VASP input files require a periodic structure (POSCAR lattice +
+        # KPOINTS mesh); offer the wrap dialog for molecules first.
+        if not self._ensure_periodic_for("vasp"):
+            return
 
         potcar_path = self._config.potcar_library_path
         if not potcar_path:
@@ -703,13 +741,16 @@ class MainWindow(QMainWindow):
             self.tr("Atoms: {}  |  {}").format(n, self._structure.chemical_formula)
         )
         if self._structure.n_atoms > 0:
-            a, b, c = self._structure.cell_lengths
-            alpha, beta, gamma = self._structure.cell_angles
-            self._cell_label.setText(
-                self.tr("a={:.2f} b={:.2f} c={:.2f}  α={:.1f}° β={:.1f}° γ={:.1f}°").format(
-                    a, b, c, alpha, beta, gamma
+            if self._structure.is_periodic:
+                a, b, c = self._structure.cell_lengths
+                alpha, beta, gamma = self._structure.cell_angles
+                self._cell_label.setText(
+                    self.tr("a={:.2f} b={:.2f} c={:.2f}  α={:.1f}° β={:.1f}° γ={:.1f}°").format(
+                        a, b, c, alpha, beta, gamma
+                    )
                 )
-            )
+            else:
+                self._cell_label.setText(self.tr("a=— b=— c=—"))
 
     def _set_status(self, message: str) -> None:
         self._status_label.setText(message)

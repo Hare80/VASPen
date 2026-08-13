@@ -51,6 +51,7 @@ VASPen/
 │   │   ├── potcar_dialog.py    # Pseudopotential selection + POTCAR concatenation
 │   │   ├── surface_dialog.py   # Miller index input, vacuum, slab preview
 │   │   ├── settings_dialog.py  # Preferences (paths, language, defaults)
+│   │   ├── periodic_wrap_dialog.py  # Vacuum padding dialog before saving molecules to periodic formats
 │   │   └── about_dialog.py     # About dialog
 │   ├── core/
 │   │   ├── __init__.py
@@ -316,7 +317,7 @@ PyVista was also considered (VTK-based) but is heavier and harder to embed in Qt
 | Decision | Value | Notes |
 |----------|-------|-------|
 | Projection | **Orthographic** (default) | Perspective rejected by user ("看着有点歪") |
-| Default view on open | c-axis top-down fit (VESTA convention: b up, a left); molecules get 45°/30° isometric | `_fit_camera()` |
+| Default view on open | c-axis top-down fit (VESTA convention: b up, a left); molecules get 45°/30° isometric; periodic fit anchors on the **geometric cell center** (not the atom centroid) and frames the whole cell, corners included | `_fit_camera()` |
 | Reset View | Toolbar button + View menu → `reset_view()` → re-fit | Added 2026-08-13 |
 | In-place edits (supercell/surface/add/delete) | **Camera preserved** — `set_structure(reset_view=False)` | Far plane is computed per-frame from current atom positions so no clipping |
 | Zoom | **Completely free** (VESTA-style, decided 2026-08-13) | No wall/atom limits; camera may pass through frame and atoms. Floor 1e-3 only to avoid singular view math. (Earlier wall-limited zoom was rejected as too strict.) |
@@ -329,6 +330,14 @@ PyVista was also considered (VTK-based) but is heavier and harder to embed in Qt
 ### 7.4 Why QSettings for configuration?
 
 `QSettings` is Qt's built-in persistent key-value store. It automatically picks the right backend (Windows registry, Linux `~/.config/`, macOS plist). No extra dependency needed.
+
+### 7.5 Non-periodic → periodic wrap policy (settled 2026-08-13)
+
+- **Structure file formats** — resolved through the module-level `resolve_format()` in file_io.py, not ASE's glob matching: extensionless `POSCAR`/`CONTCAR` (any case) and `.poscar`/`.contcar` map to `vasp` on every platform. `FileIO.read` also fixes ASE's CIF reader never setting pbc (cif + full-rank cell → pbc=True); scoped to cif only so xyz molecules round-trip unchanged. The Save As filter advertises `*.vasp *.poscar *.contcar POSCAR CONTCAR` as one VASP entry.
+- **Saving a molecule to a periodic format** (vasp-family / cif) converts the **model in place** (方案 B, MS-style): `MainWindow._ensure_periodic_for()` shows `PeriodicWrapDialog` (vacuum padding, default **10 Å**, range 0.5–50, "remember" checkbox → `periodic_wrap_padding` / `remember_wrap_padding` in QSettings). On OK, `StructureModel.make_periodic(padding)` wraps: cell = diag(bbox extent + 2×padding), atoms shifted so bbox center = cell center (exactly `padding` vacuum on every face), pbc=(T,T,T). Undoable, emits `structure_modified`, camera preserved, filepath NOT reset. Cancel aborts the save.
+- The same flow runs before **Generate All Input Files** (POSCAR + KPOINTS mesh need a cell). Saving to xyz never triggers it.
+- **Slabs** (pbc partially True with a full-rank cell) count as periodic and are never re-boxed. `is_periodic` = `cell.rank == 3 and pbc.any()` (structure.py).
+- **`FileIO.write` stays pure** (no dialogs, no mutation): saving a rank-<3 cell to vasp/cif raises a translatable `ValueError` before any file is created — the UI wrap makes this unreachable in normal flow.
 
 ---
 

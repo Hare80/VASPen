@@ -41,6 +41,51 @@ EXTENSION_DISPLAY_NAMES: dict[str, str] = {
     ".cube": "Gaussian Cube",
 }
 
+# Formats whose file content inherently represents a periodic structure
+PERIODIC_FORMATS: frozenset[str] = frozenset({"vasp", "cif"})
+
+# Canonical ASE format name per extension. Explicit mapping makes
+# .poscar/.contcar work on all platforms — ASE's own glob matching
+# (*POSCAR*/*CONTCAR*) is case-sensitive on Linux.
+FORMAT_BY_SUFFIX: dict[str, str] = {
+    ".vasp": "vasp", ".poscar": "vasp", ".contcar": "vasp",
+    ".cif": "cif", ".xyz": "xyz", ".extxyz": "extxyz",
+    ".xsf": "xsf", ".pdb": "pdb", ".json": "json",
+    ".cube": "cube", ".traj": "traj", ".db": "db",
+}
+
+# Extensionless basenames recognized as VASP structure files
+VASP_BASENAMES: frozenset[str] = frozenset({"poscar", "contcar"})
+
+
+def resolve_format(filepath: str | Path) -> str | None:
+    """Return the canonical ASE format name for a path, or None.
+
+    Extensionless basenames POSCAR/CONTCAR (any case) resolve to "vasp",
+    so the canonical VASP filenames open and save on every platform.
+    """
+    path = Path(filepath)
+    ext = path.suffix.lower()
+    if ext:
+        return FORMAT_BY_SUFFIX.get(ext)
+    if path.stem.lower() in VASP_BASENAMES:
+        return "vasp"
+    return None
+
+
+def _normalize_pbc(atoms: Atoms, fmt: str | None) -> Atoms:
+    """Mark structures with a full 3D cell as periodic (mutates in place).
+
+    The ASE CIF reader never sets pbc (ase/io/cif.py), so VASPen rendered
+    opened CIF crystals as molecules without a cell frame. The vasp reader
+    already sets pbc=True. Scoped to cif only: for xyz a stored cell with
+    explicit pbc=False (e.g. a molecule in a vacuum box) must round-trip
+    unchanged.
+    """
+    if fmt == "cif" and atoms.get_cell().rank == 3 and not atoms.pbc.any():
+        atoms.pbc = True
+    return atoms
+
 
 class FileIO:
     """Registry-based file reader/writer for structure files.
@@ -95,9 +140,15 @@ class FileIO:
             Filter string like ``"Structure files (*.cif *.xyz);;All files (*)"``.
         """
         exts = cls.supported_write_formats() if for_writing else cls.supported_read_formats()
-        patterns = " ".join(f"*{e}" for e in exts)
+        patterns = " ".join(f"*{e}" for e in exts) + " POSCAR CONTCAR"
         filters = [_tr("Structure files") + f" ({patterns})"]
         for ext in exts:
+            if ext in (".poscar", ".contcar"):
+                continue  # covered by the combined VASP entry below
+            if ext == ".vasp":
+                # Canonical VASP filenames are extensionless
+                filters.append(_tr("POSCAR / CONTCAR (VASP)") + " (*.vasp *.poscar *.contcar POSCAR CONTCAR)")
+                continue
             label = _tr(EXTENSION_DISPLAY_NAMES.get(ext, ext.upper()))
             filters.append(f"{label} (*{ext})")
         filters.append(_tr("All files") + " (*)")
@@ -125,14 +176,23 @@ class FileIO:
         """
         path = Path(filepath)
         ext = path.suffix.lower()
-        if ext not in cls._readers:
+        fmt = resolve_format(path)
+        if ext not in cls._readers and fmt != "vasp":
             raise ValueError(
                 f"Unsupported file extension: {ext}. "
                 f"Supported: {cls.supported_read_formats()}"
             )
         if not path.exists():
             raise FileNotFoundError(f"File not found: {filepath}")
-        return cls._readers[ext](str(path))
+        if fmt == "vasp":
+            # Explicit format: works for extensionless POSCAR/CONTCAR and
+            # .poscar/.contcar on every platform (do NOT force "xyz" —
+            # ASE's extxyz reader preserves Lattice/pbc keys).
+            from ase.io import read as ase_read
+            atoms = ase_read(str(path), format="vasp")
+        else:
+            atoms = cls._readers[ext](str(path))
+        return _normalize_pbc(atoms, fmt)
 
     @classmethod
     def write(cls, filepath: str | Path, atoms: Atoms, fmt: str | None = None) -> None:
@@ -147,19 +207,34 @@ class FileIO:
             ValueError: If the file extension is not registered.
         """
         path = Path(filepath)
+        ext = path.suffix.lower()
         if fmt is not None:
+            target = fmt
+        else:
+            resolved = resolve_format(path)
+            if ext not in cls._writers and resolved != "vasp":
+                raise ValueError(
+                    f"Unsupported file extension: {ext}. "
+                    f"Supported: {cls.supported_write_formats()}"
+                )
+            target = resolved
+        if target in PERIODIC_FORMATS and atoms.get_cell().rank < 3:
+            # Guard BEFORE any file is created: ASE's vasp writer raises a
+            # raw RuntimeError here, and its cif writer silently writes a
+            # cell-less CIF. The UI wraps molecules first (see
+            # MainWindow._ensure_periodic_for).
+            raise ValueError(_tr(
+                "Cannot save a non-periodic structure in {} format: a unit cell is required."
+            ).format(target))
+        if target == "vasp":
+            from ase.io import write as ase_write
+            ase_write(str(path), atoms, format="vasp")
+        elif fmt is not None:
             # Explicit format request bypasses the extension registry
             from ase.io import write as ase_write
             ase_write(str(path), atoms, format=fmt)
-            return
-        ext = path.suffix.lower()
-        if ext not in cls._writers:
-            raise ValueError(
-                f"Unsupported file extension: {ext}. "
-                f"Supported: {cls.supported_write_formats()}"
-            )
-        self_ = cls._writers[ext]
-        self_(str(path), atoms)
+        else:
+            cls._writers[ext](str(path), atoms)
 
 
 # ------------------------------------------------------------------

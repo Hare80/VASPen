@@ -702,9 +702,15 @@ class Viewport3D(QOpenGLWidget):
         """Center the camera on the structure and reset orientation.
 
         Uses the bounding-sphere radius (max atom distance from the
-        centroid) — the half-extent is NOT enough: corner atoms of a
+        center) — the half-extent is NOT enough: corner atoms of a
         cubic cell sit at extent/2 × √3 from the center and would fall
         outside the view.
+
+        Periodic structures anchor on the geometric cell center, not
+        the atom centroid, and the fitted radius covers the cell
+        corners as well: a padded vacuum box (or a slab with vacuum)
+        is much larger than its atoms, so framing on atoms alone left
+        the cell frame lopsided and spilling out of the viewport.
 
         Orientation: periodic structures default to a top-down view
         along the crystallographic c axis (c out of the screen, b up,
@@ -714,8 +720,16 @@ class Viewport3D(QOpenGLWidget):
         positions = self._atom_pos
         if len(positions) == 0:
             return
-        self._cam_center = positions.mean(axis=0).astype(np.float64)
-        radii = np.linalg.norm(positions - self._cam_center, axis=1)
+        if self._has_cell:
+            # Cell parallelepiped starts at the origin → center = (a+b+c)/2.
+            self._cam_center = self._cell.sum(axis=0) / 2.0
+            ref = np.concatenate(
+                [positions - self._cam_center,
+                 self._cell_verts - self._cam_center], axis=0)
+        else:
+            self._cam_center = positions.mean(axis=0).astype(np.float64)
+            ref = positions - self._cam_center
+        radii = np.linalg.norm(ref, axis=1)
         self._fit_radius = (
             max(float(radii.max()), 1.0)
             + float(self._atom_radius.max())
@@ -781,11 +795,21 @@ class Viewport3D(QOpenGLWidget):
         # intentionally not re-fit, so _fit_radius is stale and a fixed
         # margin would clip far atoms into a cross-section. Zooming out
         # could never recover that, hence the per-frame computation.
-        if len(self._atom_pos) > 0:
+        # The cell-frame corners are included too: for a molecule in a
+        # padded vacuum box (or a slab with vacuum) they extend far
+        # beyond the atoms, and omitting them clipped the frame's back
+        # corners like an invisible wall.
+        if len(self._atom_pos) > 0 or self._cell_verts is not None:
+            centered = []
+            if len(self._atom_pos) > 0:
+                centered.append(self._atom_pos - self._cam_center)
+            if self._cell_verts is not None:
+                centered.append(self._cell_verts - self._cam_center)
             extent = float(
-                np.linalg.norm(self._atom_pos - self._cam_center, axis=1).max()
+                np.linalg.norm(np.concatenate(centered, axis=0), axis=1).max()
             )
-            extent += float(self._atom_radius.max())
+            if len(self._atom_pos) > 0:
+                extent += float(self._atom_radius.max())
         else:
             extent = self._fit_radius
         far = self._cam_distance + extent + 5.0

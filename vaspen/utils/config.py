@@ -70,6 +70,29 @@ class AppConfig:
         self.set("potcar_library_path", value)
 
     @property
+    def wrap_padding(self) -> float:
+        """Remembered vacuum padding for the periodic-wrap dialog (Angstrom)."""
+        try:
+            return float(self.get("periodic_wrap_padding", 10.0))
+        except (TypeError, ValueError):
+            return 10.0
+
+    @wrap_padding.setter
+    def wrap_padding(self, value: float) -> None:
+        self.set("periodic_wrap_padding", float(value))
+
+    @property
+    def remember_wrap_padding(self) -> bool:
+        """Whether the wrap dialog should default to the remembered padding."""
+        # QSettings on Windows returns bools as the string "false" —
+        # bool("false") is True, so compare the string form.
+        return str(self.get("remember_wrap_padding", False)).lower() in ("true", "1")
+
+    @remember_wrap_padding.setter
+    def remember_wrap_padding(self, value: bool) -> None:
+        self.set("remember_wrap_padding", bool(value))
+
+    @property
     def recent_files(self) -> list[str]:
         return self.get("recent_files", []) or []
 

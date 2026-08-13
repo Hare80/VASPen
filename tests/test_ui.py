@@ -3,6 +3,9 @@
 import numpy as np
 import pytest
 from ase import Atoms
+from ase.io import read as ase_read
+from ase.io import write as ase_write
+from PySide6.QtWidgets import QDialog, QMessageBox
 
 from vaspen.core import file_io as fi
 from vaspen.ui.main_window import MainWindow
@@ -13,6 +16,17 @@ def window(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     return w
+
+
+class _FakeWrapDialog:
+    """Stands in for PeriodicWrapDialog in UI flow tests."""
+
+    def __init__(self, parent=None, accept=True, padding=12.0):
+        self.padding = padding
+        self.accept_flag = accept
+
+    def exec(self):
+        return QDialog.DialogCode.Accepted if self.accept_flag else QDialog.DialogCode.Rejected
 
 
 def test_main_window_launch(window):
@@ -129,6 +143,63 @@ def test_reset_view_action_restores_default_camera(window, monkeypatch):
     assert abs(view._cam_elevation) < 1e-6
 
 
+def test_far_plane_covers_cell_frame_for_padded_molecule(window, monkeypatch):
+    """Regression: the far plane used to cover only atom positions. For a
+    molecule wrapped in a padded vacuum box the cell corners extend far
+    beyond the atoms, so the frame's back corners were far-plane-clipped
+    ("blocked by an invisible face" when looking at a corner)."""
+    from ase.build import molecule
+    from vaspen.core.structure import wrap_in_padded_cell
+    from vaspen.ui import viewport3d as vp
+
+    captured = {}
+
+    def fake_ortho(left, right, bottom, top, near, far):
+        captured["far"] = far
+        return np.eye(4)
+
+    monkeypatch.setattr(vp, "_ortho", fake_ortho)
+
+    wrapped = wrap_in_padded_cell(molecule("H2O"), 10.0)
+    view = window._viewport
+    view.resize(800, 600)
+    view.set_structure(wrapped)
+    view._camera_matrices()
+
+    required = view._cam_distance + float(
+        np.linalg.norm(view._cell_verts - view._cam_center, axis=1).max()
+    ) + 5.0
+    assert captured["far"] >= required - 1e-6
+
+
+def test_fit_camera_anchors_on_cell_center_and_covers_frame(window):
+    """Regression: _fit_camera used to anchor on the atom centroid and fit
+    only atom positions — for a molecule in a padded vacuum box the view
+    looked off-center and the cell frame overflowed the viewport."""
+    from ase.build import molecule
+    from vaspen.core.structure import wrap_in_padded_cell
+
+    wrapped = wrap_in_padded_cell(molecule("H2O"), 10.0)
+    view = window._viewport
+    view.resize(800, 600)
+    view.set_structure(wrapped)  # reset_view=True → _fit_camera
+
+    cell = np.asarray(wrapped.get_cell().array, dtype=np.float64)
+    center = cell.sum(axis=0) / 2.0
+    assert np.allclose(view._cam_center, center)
+    corner_radius = float(np.linalg.norm(
+        np.asarray(view._cell_verts, dtype=np.float64) - center, axis=1).max())
+    # ortho half-height = cam_distance = 1.35 × fit_radius — must cover corners
+    assert view._cam_distance >= corner_radius * 1.35 - 1e-6
+
+    # non-periodic molecules still anchor on the atom centroid
+    mol = molecule("H2O")
+    view.set_structure(mol)
+    assert np.allclose(view._cam_center, mol.get_positions().mean(axis=0))
+    assert abs(view._cam_azimuth - 45.0) < 1e-6
+    assert abs(view._cam_elevation - 30.0) < 1e-6
+
+
 def test_free_zoom_passes_through_cell_wall(window, monkeypatch):
     """Regression: zoom is completely free (user decision 2026-08-13) —
     the previous wall-limited floor clamped the camera at the cell wall."""
@@ -142,13 +213,15 @@ def test_free_zoom_passes_through_cell_wall(window, monkeypatch):
 
     class FakeWheel:
         def angleDelta(self):
-            return QPoint(0, 120 * 40)  # 40 zoom-in ticks
+            return QPoint(0, 120 * 60)  # 60 zoom-in ticks
 
         def accept(self):
             pass
 
     view.wheelEvent(FakeWheel())
-    # 0.9^40 ≈ 0.015 — far below any cell-wall limit (was ~10 for this cell)
+    # 0.9^60 ≈ 0.0018 × initial ~12.7 (cell-corner fit) ≈ 0.02 — far inside
+    # the cell (wall at 5 along the view axis); the old wall-limited floor
+    # clamped the camera at the cell wall
     assert view._cam_distance < 0.05
 
 
@@ -195,3 +268,167 @@ def test_undo_action_enabled_after_edit(window, monkeypatch):
     window.act_undo.trigger()
     assert window._structure.n_atoms == 2
     assert window.act_redo.isEnabled()
+
+
+# ----------------------------------------------------------------------
+# Non-periodic → periodic wrapping (UI flow)
+# ----------------------------------------------------------------------
+
+def _patch_save_paths(monkeypatch, dest, dialog):
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(dest), "")),
+    )
+    monkeypatch.setattr(
+        "vaspen.ui.periodic_wrap_dialog.PeriodicWrapDialog", dialog
+    )
+
+
+def test_save_as_molecule_to_poscar_wraps(window, monkeypatch, water_molecule, tmp_path):
+    window._structure.load_atoms(water_molecule)
+    dest = tmp_path / "mol.POSCAR"
+    _patch_save_paths(monkeypatch, dest,
+                      lambda parent=None: _FakeWrapDialog(accept=True, padding=12.0))
+    undo_before = len(window._structure._undo_stack)
+
+    window._on_save_as()
+
+    extent = (water_molecule.get_positions().max(axis=0)
+              - water_molecule.get_positions().min(axis=0))
+    assert window._structure.is_periodic is True
+    assert np.allclose(np.diag(window._structure.cell), extent + 24.0)
+    assert dest.exists()
+    assert window._structure.filepath.endswith("mol.POSCAR")
+    assert window._structure.is_dirty is False
+    assert len(window._structure._undo_stack) == undo_before + 1
+
+
+def test_save_as_molecule_cancel_aborts(window, monkeypatch, water_molecule, tmp_path):
+    window._structure.load_atoms(water_molecule)
+    dest = tmp_path / "mol.POSCAR"
+    _patch_save_paths(monkeypatch, dest,
+                      lambda parent=None: _FakeWrapDialog(accept=False))
+    undo_before = len(window._structure._undo_stack)
+
+    window._on_save_as()
+
+    assert not dest.exists()
+    assert window._structure.is_periodic is False
+    assert window._structure.is_dirty is False
+    assert len(window._structure._undo_stack) == undo_before
+
+
+def test_save_molecule_to_xyz_no_dialog(window, monkeypatch, water_molecule, tmp_path):
+    """xyz is non-periodic — saving a molecule must not show the wrap dialog."""
+
+    class _ExplodingDialog:
+        def __init__(self, parent=None):
+            raise AssertionError("wrap dialog must not appear for xyz targets")
+
+    window._structure.load_atoms(water_molecule)
+    dest = tmp_path / "mol.xyz"
+    _patch_save_paths(monkeypatch, dest, _ExplodingDialog)
+
+    window._on_save_as()
+
+    assert dest.exists()
+    assert window._structure.is_periodic is False
+
+
+def test_export_poscar_wraps_molecule(window, monkeypatch, water_molecule, tmp_path):
+    window._structure.load_atoms(water_molecule)
+    dest = tmp_path / "POSCAR"
+    _patch_save_paths(monkeypatch, dest,
+                      lambda parent=None: _FakeWrapDialog(accept=True, padding=15.0))
+
+    window._on_export_poscar()
+
+    extent = (water_molecule.get_positions().max(axis=0)
+              - water_molecule.get_positions().min(axis=0))
+    loaded = ase_read(str(dest), format="vasp")
+    assert np.allclose(np.diag(loaded.get_cell()[:]), extent + 30.0, atol=1e-4)
+    assert window._structure.is_periodic is True
+
+
+def test_generate_all_wraps_molecule(window, monkeypatch, water_molecule, tmp_path):
+    window._structure.load_atoms(water_molecule)
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.question",
+        staticmethod(lambda *a, **k: QMessageBox.Yes),
+    )
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.information",
+        staticmethod(lambda *a, **k: None),
+    )
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QFileDialog.getExistingDirectory",
+        staticmethod(lambda *a, **k: str(tmp_path)),
+    )
+    monkeypatch.setattr(
+        "vaspen.ui.periodic_wrap_dialog.PeriodicWrapDialog",
+        lambda parent=None: _FakeWrapDialog(accept=True, padding=10.0),
+    )
+
+    window._on_generate_all()
+
+    for name in ("INCAR", "KPOINTS", "POSCAR"):
+        content = (tmp_path / name).read_text()
+        assert content.strip(), name
+    poscar_lines = (tmp_path / "POSCAR").read_text().splitlines()
+    assert len(poscar_lines) >= 6  # comment + scaling + 3 lattice vectors
+    assert window._structure.is_periodic is True
+
+
+def test_wrap_dialog_uses_remembered_padding(qtbot):
+    from vaspen.ui.periodic_wrap_dialog import PeriodicWrapDialog
+    from vaspen.utils.config import AppConfig
+
+    config = AppConfig()
+    config.remember_wrap_padding = True
+    config.wrap_padding = 7.5
+
+    dlg = PeriodicWrapDialog()
+    qtbot.addWidget(dlg)
+    assert abs(dlg._padding_spin.value() - 7.5) < 1e-9
+    assert dlg._remember_check.isChecked()
+
+    dlg._padding_spin.setValue(9.0)
+    dlg._remember_check.setChecked(False)
+    dlg._on_accept()
+    assert abs(config.wrap_padding - 9.0) < 1e-9
+    assert config.remember_wrap_padding is False
+
+
+def test_open_real_poscar_shows_cell(window, qtbot, si_bulk, tmp_path):
+    path = tmp_path / "POSCAR"
+    ase_write(str(path), si_bulk)
+
+    window._open_file(str(path))
+
+    assert tuple(window._structure.pbc) == (True, True, True)
+    assert window._viewport._has_cell is True
+    assert window._viewport._cell_verts is not None
+
+
+def test_open_real_cif_shows_cell(window, qtbot, si_bulk, tmp_path):
+    """Regression: ASE's CIF reader drops pbc — opened crystals must show a cell."""
+    path = tmp_path / "bulk.cif"
+    ase_write(str(path), si_bulk)
+
+    window._open_file(str(path))
+
+    assert tuple(window._structure.pbc) == (True, True, True)
+    assert window._viewport._has_cell is True
+
+
+def test_status_bar_dash_for_molecule(window, monkeypatch, water_molecule, si_bulk):
+    monkeypatch.setattr(fi.FileIO, "read",
+                        classmethod(lambda cls, p: water_molecule))
+    window._open_file("fake.xyz")
+    assert "—" in window._cell_label.text()
+
+    monkeypatch.setattr(fi.FileIO, "read", classmethod(lambda cls, p: si_bulk))
+    window._open_file("fake2.vasp")
+    # si_bulk is the fcc primitive cell (a = 5.43/√2 ≈ 3.84, α=60°)
+    assert "a=3.84" in window._cell_label.text()
+    assert "—" not in window._cell_label.text()

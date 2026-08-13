@@ -93,4 +93,30 @@
 (File → Open, or drag-and-drop)</translation>
     </message>
 </context>
+<context>
+    <name>FileIO</name>
+    <message>
+        <source>Cannot save a non-periodic structure in {} format: a unit cell is required.</source>
+        <translation>Cannot save a non-periodic structure in {} format: a unit cell is required.</translation>
+    </message>
+</context>
+<context>
+    <name>PeriodicWrapDialog</name>
+    <message>
+        <source>Wrap in Periodic Cell</source>
+        <translation>Wrap in Periodic Cell</translation>
+    </message>
+    <message>
+        <source>The structure is not periodic. VASPen will create a periodic cell around it with vacuum padding on each side.</source>
+        <translation>The structure is not periodic. VASPen will create a periodic cell around it with vacuum padding on each side.</translation>
+    </message>
+    <message>
+        <source>Vacuum padding:</source>
+        <translation>Vacuum padding:</translation>
+    </message>
+    <message>
+        <source>Remember this value</source>
+        <translation>Remember this value</translation>
+    </message>
+</context>
 </TS>
