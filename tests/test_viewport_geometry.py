@@ -1,8 +1,16 @@
 """Pure-geometry tests for the viewport's cylinder baker (no GL)."""
 
 import numpy as np
+import pytest
 
-from vaspen.ui.viewport3d import _cylinder_verts
+from vaspen.ui.viewport3d import (
+    _center_fade,
+    _cylinder_verts,
+    _effective_alphas,
+    _look_at,
+    _split_opaque_transparent,
+    _view_depths,
+)
 
 
 def test_cylinder_vertex_layout_is_pos_normal_color():
@@ -88,3 +96,61 @@ def test_cylinder_zero_length_returns_empty():
         radius=0.1,
     )
     assert verts.shape == (0, 9)
+
+
+# ----------------------------------------------------------------------
+# Transparency pass classification helpers (pure numpy, no GL)
+# ----------------------------------------------------------------------
+
+def test_view_depths_positive_in_front():
+    """Depth = distance along the camera view axis (matches the shader's
+    vViewDepth = -viewPos.z convention)."""
+    view = _look_at(np.array([0.0, 0.0, 10.0]), np.zeros(3),
+                    np.array([0.0, 1.0, 0.0]))
+    depths = _view_depths(view, np.array([[0.0, 0.0, 0.0],
+                                          [0.0, 0.0, 5.0]]))
+    assert depths == pytest.approx([10.0, 5.0])
+
+
+def test_center_fade_matches_glsl_smoothstep():
+    assert _center_fade(np.array([2.0]))[0] == pytest.approx(1.0)
+    assert _center_fade(np.array([0.25]))[0] == pytest.approx(0.0)
+    # midpoint of the fade band (0.25, 0.8) → smoothstep = 0.5
+    assert _center_fade(np.array([0.525]))[0] == pytest.approx(0.5)
+    f = _center_fade(np.array([0.3, 0.4, 0.5]))
+    assert (np.diff(f) > 0).all()  # monotonic
+
+
+def test_effective_alpha_composition():
+    """override alpha × global opacity × center fade, clamped 0-1."""
+    eff = _effective_alphas(np.array([1.0, 0.5]), 0.5,
+                            np.array([2.0, 2.0]))
+    assert eff == pytest.approx([0.5, 0.25])
+    eff = _effective_alphas(np.array([1.0]), 1.5, np.array([2.0]))
+    assert eff[0] == pytest.approx(1.0)  # clamped
+
+
+def test_split_opaque_transparent_sorts_far_to_near():
+    depths = np.array([1.0, 3.0, 2.0, 5.0])
+    eff = np.array([0.5, 1.0, 0.25, 1.0])
+    opaque, trans = _split_opaque_transparent(depths, eff)
+    assert opaque.tolist() == [1, 3]   # index order preserved
+    assert trans.tolist() == [2, 0]    # depth 2.0 before 1.0
+
+
+def test_split_all_opaque_returns_empty_transparent():
+    """The default scene (opacity 1, no overrides, normal distance)
+    stays on the old single-pass code path."""
+    depths = np.array([1.0, 3.0, 2.0])
+    eff = np.array([1.0, 1.0, 1.0])
+    opaque, trans = _split_opaque_transparent(depths, eff)
+    assert opaque.tolist() == [0, 1, 2]
+    assert len(trans) == 0
+
+
+def test_split_global_opacity_zero_all_transparent():
+    depths = np.array([1.0, 3.0, 2.0])
+    eff = _effective_alphas(np.ones(3), 0.0, depths)
+    opaque, trans = _split_opaque_transparent(depths, eff)
+    assert len(opaque) == 0
+    assert trans.tolist() == [1, 2, 0]  # far → near

@@ -84,6 +84,7 @@ class DisplayOptionsDialog(QDialog):
         self._grad_top = self._settings.gradient_top
         self._grad_bottom = self._settings.gradient_bottom
         self._cell_color = self._settings.cell_color
+        self._measurement_color = self._settings.measurement_color
         self._row_grid: QGridLayout | None = None
 
         self.setWindowTitle(self.tr("Display Options"))
@@ -110,6 +111,7 @@ class DisplayOptionsDialog(QDialog):
         vbox.addWidget(self._build_atoms_group())
         vbox.addWidget(self._build_colors_group())
         vbox.addWidget(self._build_overlay_group())
+        vbox.addWidget(self._build_measurements_group())
         vbox.addWidget(self._build_effects_group())
         vbox.addStretch(1)
         scroll.setWidget(container)
@@ -299,6 +301,26 @@ class DisplayOptionsDialog(QDialog):
         vbox.addLayout(row2)
         return group
 
+    def _build_measurements_group(self) -> QGroupBox:
+        group = QGroupBox(self.tr("Measurements"))
+        vbox = QVBoxLayout(group)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(self.tr("Color:")))
+        self._measurement_swatch = self._make_swatch(
+            self._on_measurement_color_picked)
+        row.addWidget(self._measurement_swatch)
+        row.addWidget(QLabel(self.tr("Font size:")))
+        self._measurement_size_spin = QSpinBox()
+        self._measurement_size_spin.setRange(8, 28)
+        self._measurement_size_spin.setSuffix(" pt")
+        self._measurement_size_spin.setToolTip(
+            self.tr("Size of the measurement labels"))
+        self._measurement_size_spin.valueChanged.connect(self._on_changed)
+        row.addWidget(self._measurement_size_spin)
+        row.addStretch(1)
+        vbox.addLayout(row)
+        return group
+
     def _build_effects_group(self) -> QGroupBox:
         group = QGroupBox(self.tr("Effects"))
         vbox = QVBoxLayout(group)
@@ -429,6 +451,10 @@ class DisplayOptionsDialog(QDialog):
         self._cell_corners_check.setChecked(rs.show_cell_corners)
         self._corner_size_spin.setValue(rs.corner_label_size)
 
+        self._measurement_color = rs.measurement_color
+        self._set_swatch_color(self._measurement_swatch, self._measurement_color)
+        self._measurement_size_spin.setValue(rs.measurement_label_size)
+
         self._gamma_slider.setValue(round(rs.gamma / 0.05))
 
     def _set_choice(self, btn: QToolButton, key: str) -> None:
@@ -477,6 +503,8 @@ class DisplayOptionsDialog(QDialog):
         rs.show_axes = self._axes_check.isChecked()
         rs.show_cell_corners = self._cell_corners_check.isChecked()
         rs.corner_label_size = self._corner_size_spin.value()
+        rs.measurement_color = self._measurement_color
+        rs.measurement_label_size = self._measurement_size_spin.value()
         rs.gamma = self._gamma_slider.value() * 0.05
         return rs
 
@@ -609,6 +637,17 @@ class DisplayOptionsDialog(QDialog):
             return
         self._cell_color = (color.redF(), color.greenF(), color.blueF())
         self._set_swatch_color(self._cell_swatch, self._cell_color)
+        self._apply()
+
+    def _on_measurement_color_picked(self) -> None:
+        color = QColorDialog.getColor(
+            QColor.fromRgbF(*self._measurement_color), self)
+        if not color.isValid():
+            return
+        self._measurement_color = (
+            color.redF(), color.greenF(), color.blueF())
+        self._set_swatch_color(
+            self._measurement_swatch, self._measurement_color)
         self._apply()
 
     def _on_grad_top_picked(self) -> None:

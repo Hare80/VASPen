@@ -81,7 +81,7 @@ def test_add_atom_tool_places_combo_element(window, monkeypatch, si_bulk):
     view = window._viewport
     view.set_mode(ToolMode.ADD_ATOM)
     view._pick = lambda pos: None  # click on empty space
-    window._element_combo.setCurrentText("Fe")
+    window._set_current_element("Fe")
 
     n_before = window._structure.n_atoms
     _click(view)
@@ -102,7 +102,7 @@ def test_add_atom_click_on_atom_grows_bonded_atom(window, monkeypatch):
     _load(window, monkeypatch, molecule("H2O"))
     view = window._viewport
     view.set_mode(ToolMode.ADD_ATOM)
-    window._element_combo.setCurrentText("H")
+    window._set_current_element("H")
     view._pick = lambda pos: ("atom", 0)  # the O atom
 
     n_before = window._structure.n_atoms
@@ -444,7 +444,7 @@ def test_add_atom_drag_snaps_to_ideal_bond_length(window, monkeypatch):
     _load(window, monkeypatch, atoms)  # non-periodic: no wrapping
     view = window._viewport
     view.set_mode(ToolMode.ADD_ATOM)
-    window._element_combo.setCurrentText("H")
+    window._set_current_element("H")
     view._pick = lambda pos: ("atom", 0)
 
     n_before = window._structure.n_atoms
@@ -607,7 +607,7 @@ def test_add_atom_drag_creates_bond_in_manual_mode(window, monkeypatch):
     window._structure.set_bond_mode("manual")
     view = window._viewport
     view.set_mode(ToolMode.ADD_ATOM)
-    window._element_combo.setCurrentText("H")
+    window._set_current_element("H")
     view._pick = lambda pos: ("atom", 1)
 
     n_before = window._structure.n_atoms
@@ -1012,7 +1012,7 @@ def test_add_atom_placement_is_screen_outward(window, monkeypatch):
     _load(window, monkeypatch, molecule("H2O"))
     view = window._viewport
     view.set_mode(ToolMode.ADD_ATOM)
-    window._element_combo.setCurrentText("H")
+    window._set_current_element("H")
     view._pick = lambda pos: ("atom", 0)  # the O atom
 
     _proj, view_mat = view._camera_matrices()
@@ -1330,3 +1330,77 @@ def test_rotate_action_is_on_toolbar(window):
     rotate_btns = [b for b in buttons
                    if b.defaultAction() is window._mode_actions.get(ToolMode.ROTATE)]
     assert len(rotate_btns) == 1
+
+
+def test_measurement_style_defaults_black(window):
+    """Measurement pen is pure black and the font is 12 pt by default
+    (user decision 2026-08-14)."""
+    view = window._viewport
+    assert view._measurement_pen().color().getRgbF()[:3] == pytest.approx(
+        (0.0, 0.0, 0.0))
+    assert view._measurement_font().pointSize() == 12
+
+
+def test_measurement_style_follows_settings(window):
+    view = window._viewport
+    rs = view.render_settings()
+    rs.measurement_color = (0.0, 0.5, 1.0)
+    rs.measurement_label_size = 18
+    view.set_render_settings(rs)
+
+    # QColor quantizes to 8-bit internally — compare with a slack
+    assert view._measurement_pen().color().getRgbF()[:3] == pytest.approx(
+        (0.0, 0.5, 1.0), abs=1e-3)
+    assert view._measurement_font().pointSize() == 18
+
+
+def test_measurement_text_includes_element_and_index(window, monkeypatch):
+    """Measurement texts name the involved atoms as element + 1-based
+    index (structure-tree convention, user decision 2026-08-14)."""
+    # non-collinear chain so angle/dihedral are geometrically defined
+    atoms = Atoms("FeNiFeO",
+                  positions=[[0, 0, 0], [1, 0, 0], [2, 0.5, 0], [2, 0.5, 1]])
+    _load(window, monkeypatch, atoms)
+    mgr = window._measurement_manager
+
+    mgr.add("distance", [0, 1])
+    _kind, _idx, text = mgr.payload()[0]
+    assert text.startswith("Fe1–Ni2: ")
+    assert "Å" in text
+
+    mgr.add("angle", [0, 1, 2])
+    text2 = mgr.payload()[1][2]
+    # the apex (2nd pick) sits in the middle, matching the line geometry
+    assert text2.startswith("Fe1–Ni2–Fe3: ")
+    assert "°" in text2
+
+    mgr.add("dihedral", [0, 1, 2, 3])
+    assert mgr.payload()[2][2].startswith("Fe1–Ni2–Fe3–O4: ")
+
+
+def test_measurement_numbering_follows_tree_after_deletion(window, monkeypatch):
+    """The 1-based numbers re-resolve to the structure tree's Index
+    column after atoms are deleted."""
+    atoms = Atoms("FeNiFeO",
+                  positions=[[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]])
+    _load(window, monkeypatch, atoms)
+    mgr = window._measurement_manager
+    mgr.add("distance", [2, 3])  # Fe3–O4
+    assert mgr.payload()[0][2].startswith("Fe3–O4")
+
+    window._structure.delete_atom(0)  # Fe(id2)→row2, O(id3)→row3
+    assert mgr.payload()[0][2].startswith("Fe2–O3")
+
+
+def test_measurement_panel_row_shows_atoms(window, monkeypatch):
+    """The Measurements dock lists the same element+index text."""
+    atoms = Atoms("FeNi", positions=[[0, 0, 0], [1, 0, 0]])
+    _load(window, monkeypatch, atoms)
+    window._measurement_manager.add("distance", [0, 1])
+
+    panel = window._measurement_panel
+    rows = [panel._list.item(i).text()
+            for i in range(panel._list.count())]
+    assert len(rows) == 1
+    assert rows[0].startswith("Distance: Fe1–Ni2: ")
+    assert rows[0].endswith("Å")

@@ -19,6 +19,7 @@ from vaspen.core.structure import StructureModel
 from vaspen.ui.display_options_dialog import DisplayOptionsDialog
 from vaspen.ui.lattice_dialog import LatticeDialog
 from vaspen.ui.supercell_dialog import SupercellDialog
+from vaspen.ui.surface_dialog import SurfaceDialog
 from vaspen.ui.symmetry_dialog import SymmetryDialog
 from vaspen.ui.transform_dialog import TransformDialog
 from vaspen.utils.config import AppConfig
@@ -38,6 +39,9 @@ class _FakeViewport:
         self.rendered.append((atoms, reset_view, bonds))
 
     def set_highlight(self, indices):
+        pass
+
+    def set_bond_highlight(self, indices):
         pass
 
     def set_render_settings(self, rs):
@@ -558,3 +562,192 @@ def test_symmetry_dialog_clean_no_warning(qtbot, monkeypatch, si_bulk):
     qtbot.addWidget(dlg)
     dlg._on_symmetrize()
     assert dlg.result_atoms is not None
+
+
+def test_display_options_measurement_controls(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    assert dlg._measurement_size_spin.minimum() == 8
+    assert dlg._measurement_size_spin.maximum() == 28
+
+    dlg._measurement_color = (0.1, 0.2, 0.3)
+    dlg._apply()
+    rs = view.render_settings_calls[-1]
+    assert rs.measurement_color == pytest.approx((0.1, 0.2, 0.3))
+
+    dlg._measurement_size_spin.setValue(20)
+    rs = view.render_settings_calls[-1]
+    assert rs.measurement_label_size == 20
+    assert rs.label_size == 12  # element labels untouched
+
+
+def test_display_options_measurement_accept_persists(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._measurement_color = (0.0, 0.5, 1.0)
+    dlg._measurement_size_spin.setValue(18)
+    dlg._on_accept()
+
+    cfg = AppConfig()
+    assert cfg.render_settings.measurement_color == pytest.approx(
+        (0.0, 0.5, 1.0))
+    assert cfg.render_settings.measurement_label_size == 18
+
+
+def test_display_options_measurement_reset_defaults(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._measurement_color = (1.0, 0.0, 0.0)
+    dlg._measurement_size_spin.setValue(24)
+    dlg._on_reset_defaults()
+
+    rs = view.render_settings_calls[-1]
+    assert rs.measurement_color == (0.0, 0.0, 0.0)
+    assert rs.measurement_label_size == 12
+
+
+# ----------------------------------------------------------------------
+# Surface dialog (non-modal, live preview, termination selection)
+# ----------------------------------------------------------------------
+
+
+def test_surface_dialog_opens_with_preview(qtbot, srtio3):
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    assert len(view.rendered) == 1  # preview pushed on open
+    atoms, reset_view, bonds = view.rendered[-1]
+    assert reset_view is False
+    assert bonds is None  # auto-detected — model bond indices are invalid
+    assert len(atoms) > 0
+    assert tuple(atoms.get_pbc()) == (True, True, True)
+
+
+def test_surface_dialog_termination_combo_and_preview_switch(qtbot, gaas):
+    """GaAs (111) is polar: two unique terminations (Ga / As faces)."""
+    model = StructureModel(gaas)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)  # default Miller (1,1,1)
+    qtbot.addWidget(dlg)
+
+    combo = dlg._termination_combo
+    assert combo.count() == 2
+    items = [combo.itemText(i) for i in range(combo.count())]
+    assert any("Ga" in t and "As" in t for t in items)
+    assert any(t.startswith("1/2") for t in items)
+    assert any(t.startswith("2/2") for t in items)
+
+    rendered_before = len(view.rendered)
+    combo.setCurrentIndex(1)
+    assert len(view.rendered) == rendered_before + 1
+    assert np.allclose(view.rendered[-1][0].get_positions(),
+                       dlg._slab_infos[1].atoms.get_positions())
+
+
+def test_surface_dialog_param_change_debounced(qtbot, srtio3):
+    """Parameter spins debounce through a 150 ms timer before recompute."""
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    n_before = len(view.rendered)
+    dlg._layers_spin.setValue(5)
+    dlg._vacuum_spin.setValue(20.0)
+    assert len(view.rendered) == n_before  # still debounced
+    qtbot.wait(250)
+    assert len(view.rendered) == n_before + 1  # one recompute for both spins
+
+
+def test_surface_dialog_termination_switch_reuses_cache(qtbot, gaas):
+    model = StructureModel(gaas)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    key = dlg._cache_key
+    dlg._termination_combo.setCurrentIndex(1)
+    dlg._termination_combo.setCurrentIndex(0)
+    assert dlg._cache_key == key  # no recompute — cached SlabInfo list
+
+
+def test_surface_dialog_accept_sets_result(qtbot, gaas):
+    model = StructureModel(gaas)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    dlg._termination_combo.setCurrentIndex(1)
+    dlg._on_accept()
+    assert dlg.result_structure is not None
+    assert np.allclose(dlg.result_structure.atoms.get_positions(),
+                       dlg._slab_infos[1].atoms.get_positions())
+    # model untouched until MainWindow applies the result
+    assert np.allclose(model.positions, gaas.get_positions())
+
+
+def test_surface_dialog_reject_restores_viewport(qtbot, srtio3):
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    dlg.reject()
+    atoms, reset_view, bonds = view.rendered[-1]
+    assert reset_view is False
+    assert np.allclose(atoms.get_positions(), model.positions)
+    assert bonds is not None  # the model's own bond list
+
+
+def test_surface_dialog_zero_miller_warns(qtbot, srtio3, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        "vaspen.ui.surface_dialog.QMessageBox.warning",
+        staticmethod(lambda *a, **k: warnings.append(a)))
+
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    dlg._h_spin.setValue(0)
+    dlg._k_spin.setValue(0)
+    dlg._l_spin.setValue(0)
+    dlg._ensure_slabs()
+
+    assert not dlg._ok_button.isEnabled()
+    assert dlg._hint.text() != ""
+    assert dlg._termination_combo.count() == 0
+
+    dlg._on_accept()  # no slab to accept — warns and stays open
+    assert dlg.result_structure is None
+    assert len(warnings) == 1
+
+
+def test_surface_dialog_supercell_expands_preview(qtbot, gaas):
+    model = StructureModel(gaas)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    base_n = dlg._slab_infos[0].n_atoms
+    assert len(view.rendered[-1][0]) == base_n  # 1x1 default
+
+    key = dlg._cache_key
+    dlg._supercell_a_spin.setValue(2)
+    assert dlg._cache_key == key  # no SlabGenerator recompute (repeat only)
+    assert len(view.rendered[-1][0]) == 2 * base_n
+
+    dlg._supercell_b_spin.setValue(2)
+    assert len(view.rendered[-1][0]) == 4 * base_n
+    assert str(4 * base_n) in dlg._status_label.text()
+
+    dlg._on_accept()
+    assert dlg.result_structure is not None
+    assert dlg.result_structure.n_atoms == 4 * base_n
+    assert model.n_atoms == len(gaas)  # model untouched until applied

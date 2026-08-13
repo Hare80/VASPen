@@ -86,19 +86,29 @@ class MeasurementManager(QObject):
         self.changed.emit()
 
     def payload(self) -> list[tuple[str, list[int], str]]:
-        """Display payload for the viewport: (kind, indices, value text)."""
+        """Display payload for the viewport: (kind, indices, value text).
+
+        The text prefixes the involved atoms as element + 1-based index
+        (matching the structure tree's Index column, user decision
+        2026-08-14), e.g. "Fe1–Ni3: 2.503 Å". Indices are the current
+        model indices re-resolved by sync_with_model, so the numbers
+        follow the tree after edits/deletions.
+        """
         atoms = self._model.atoms
+        sym = self._model.symbols
         out = []
         for item, idx in self._resolved:
+            names = [f"{sym[i]}{i + 1}" for i in idx]
+            atoms_part = "–".join(names)
             if item.kind == "distance":
                 value = measure.distance(atoms, idx[0], idx[1])
-                text = f"{value:.3f} Å"
+                text = f"{atoms_part}: {value:.3f} Å"
             elif item.kind == "angle":
                 value = measure.angle(atoms, idx[0], idx[1], idx[2])
-                text = f"{value:.2f}°"
+                text = f"{atoms_part}: {value:.2f}°"
             else:
                 value = measure.dihedral(atoms, idx[0], idx[1], idx[2], idx[3])
-                text = f"{value:.2f}°"
+                text = f"{atoms_part}: {value:.2f}°"
             out.append((item.kind, idx, text))
         return out
 

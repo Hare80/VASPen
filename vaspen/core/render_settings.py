@@ -164,6 +164,12 @@ class RenderSettings:
     show_cell_corners: bool = False  # O/A/B/C labels at the cell corners
     label_size: int = 12             # element labels
     corner_label_size: int = 12      # cell-corner labels (independent)
+    # Measurement annotations (dashed lines + labels). Pure black on any
+    # background (user decision 2026-08-14); the halo already adapts.
+    measurement_color: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # Fixed point size — deliberately NOT zoom-scaled like element
+    # labels, so measurements stay readable while navigating.
+    measurement_label_size: int = 12
 
     @classmethod
     def default(cls) -> "RenderSettings":

@@ -436,6 +436,67 @@ def _to_qmatrix(m: np.ndarray) -> QMatrix4x4:
     return QMatrix4x4(*np.ascontiguousarray(m, dtype=np.float64).reshape(16).tolist())
 
 
+def _smoothstep(edge0: float, edge1: float, x: np.ndarray) -> np.ndarray:
+    """GLSL smoothstep for numpy arrays (edge0 < edge1)."""
+    t = np.clip((x - edge0) / (edge1 - edge0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _view_depths(view: np.ndarray, positions: np.ndarray) -> np.ndarray:
+    """View-space depth (positive in front of the camera) for N world
+    positions.
+
+    Matches the shader's ``vViewDepth = -viewPos.z`` convention: the
+    third row of the ``_look_at`` view matrix maps world → view z, so
+    points in front of the camera come out negative and are negated.
+    """
+    z = positions @ view[2, :3] + view[2, 3]
+    return -z
+
+
+def _center_fade(depths: np.ndarray) -> np.ndarray:
+    """Near-camera fade evaluated at the sphere CENTER view depth.
+
+    Mirrors the shader's smoothstep(NEAR_FADE_END, NEAR_FADE_START,
+    vViewDepth). Used ONLY for opaque/transparent pass classification —
+    the shader still applies the true per-fragment fade.
+    """
+    return _smoothstep(NEAR_FADE_END, NEAR_FADE_START, depths)
+
+
+def _effective_alphas(
+    alphas: np.ndarray,
+    global_opacity: float,
+    depths: np.ndarray,
+) -> np.ndarray:
+    """Effective alpha = per-primitive alpha × global opacity × center
+    fade, clamped to 0-1.
+
+    Classification predictor only — the drawn alpha still comes from
+    uColor.a × uOpacity × the per-fragment fade in the shader.
+    """
+    return np.clip(alphas * global_opacity * _center_fade(depths), 0.0, 1.0)
+
+
+def _split_opaque_transparent(
+    depths: np.ndarray,
+    effective_alphas: np.ndarray,
+    eps: float = 1e-6,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split primitive indices into (opaque, transparent_sorted).
+
+    Opaque indices keep ascending index order (np.nonzero guarantees
+    it — under depth testing their order is irrelevant, and keeping it
+    makes the all-opaque path identical to the pre-transparency code).
+    Transparent indices are sorted by descending view depth = far to
+    near, the correct blend order when depth writes are disabled.
+    """
+    opaque = np.nonzero(effective_alphas >= 1.0 - eps)[0]
+    trans = np.nonzero(effective_alphas < 1.0 - eps)[0]
+    trans = trans[np.argsort(-depths[trans], kind="stable")]
+    return opaque, trans
+
+
 # Identity model matrix — bonds are baked in world space already.
 _IDENTITY = _to_qmatrix(np.eye(4, dtype=np.float32))
 
@@ -717,7 +778,7 @@ class Viewport3D(QOpenGLWidget):
             reset_view: If True, fit the camera to the structure
                 (default, used when opening files). False preserves the
                 current camera (used for in-place edits such as surface
-                cuts and supercells).
+                cleaving and supercells).
             bonds: Persistent bond list from the model (Bond objects);
                 auto-computed from connectivity when None (standalone use).
         """
@@ -1360,9 +1421,23 @@ class Viewport3D(QOpenGLWidget):
             self._rebuild_cell_frame_verts()
             self._upload_cell_buffer()
 
-        # --- Atom spheres (edge pass, then body pass) ---
-        # Blending is on so the near-distance fade in the shader
-        # actually fades instead of showing the raw cross-section.
+        # --- Atom spheres: opaque pass, then a transparent pass ---
+        # Each primitive is classified by effective alpha (element
+        # override × global opacity × center fade). Opaque primitives
+        # draw first with depth writes ON — the old behavior, byte for
+        # byte when everything is opaque. Transparent primitives draw
+        # afterwards with depth writes OFF, sorted back-to-front, so
+        # they blend over the cell frame (it stays visible through
+        # them) and atoms behind show through the ones in front. (The
+        # old fixed-order pass wrote depth for every sphere: a nearer
+        # low-alpha atom hid the atom behind it, which read as an
+        # opaque pale ball — and it depended on the camera angle.)
+        atom_depths = _view_depths(view, self._atom_pos)
+        atom_eff = _effective_alphas(
+            self._atom_color[:, 3], rs.atom_opacity, atom_depths)
+        opaque_atoms, trans_atoms = _split_opaque_transparent(
+            atom_depths, atom_eff)
+
         self._sphere_prog.bind()
         self._sphere_prog.setUniformValue("uView", _to_qmatrix(view))
         u = self._u_loc
@@ -1387,10 +1462,9 @@ class Viewport3D(QOpenGLWidget):
         # Specular highlights apply to all atoms uniformly (the old
         # metals-only distinction was removed by user decision).
         spec_on = 1.0 if rs.specular_enabled else 0.0
-        self._unit_vao.bind()
-        gl.glEnable(GL_BLEND)
-        gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-        for i in range(len(self._atom_pos)):
+
+        def _draw_atom(i: int) -> None:
+            """One atom sphere with the current program/uniforms."""
             scale = float(self._atom_radius[i])
             if i in self._selected_indices or i in self._preview_indices:
                 # highlight keeps the element's opacity override
@@ -1409,58 +1483,81 @@ class Viewport3D(QOpenGLWidget):
             gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
                               GL_UNSIGNED_INT, VoidPtr(0))
 
-        # --- Ghost atom (add-atom drag preview, semi-transparent) ---
-        if self._ghost_pos is not None:
-            z = atomic_numbers.get(self.current_element, 0)
-            ghost_radius = (
-                float(covalent_radii[z]) if 0 < z < len(covalent_radii) else 0.77
-            ) * rs.sphere_scale
-            ghost_color = self._effective_atom_color(self.current_element)
-            model = _sphere_model(
-                np.asarray(self._ghost_pos, dtype=np.float32), ghost_radius)
-            mvp = proj @ view @ model
-            self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
-            self._sphere_prog.setUniformValue("uModel", _to_qmatrix(model))
-            self._sphere_prog.setUniformValue("uColor", *ghost_color[:3], 0.55)
-            gl.glUniform1f(u["uSpecPerAtom"], spec_on)
-            gl.glUniform1f(u["uUseVtxColor"], 0.0)
-            gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
-                              GL_UNSIGNED_INT, VoidPtr(0))
+        self._unit_vao.bind()
+        gl.glEnable(GL_BLEND)
+        gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        for i in opaque_atoms:
+            _draw_atom(int(i))
 
         # --- Bonds (lit cylinders; selected bonds highlighted) ---
-        # Drawn with the sphere program inside the blended block: the
-        # radial normals give them VESTA-style shading and the near
-        # fade applies to them too. Bond vertices are world-space, so
-        # the model matrix is the identity.
+        # Opaque bonds first; transparent bonds join the transparent
+        # pass below. Drawn with the sphere program: the radial normals
+        # give them VESTA-style shading and the near fade applies to
+        # them too. Bond vertices are world-space, so the model matrix
+        # is the identity.
+        trans_bonds = np.empty(0, dtype=np.int64)
+        bond_depths = np.zeros(len(self._bond_ranges), dtype=np.float64)
         if self._bond_n_verts > 0 and self._show_bonds:
-            self._bond_vao.bind()
-            self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
-            self._sphere_prog.setUniformValue("uModel", _IDENTITY)
-            gl.glUniform1f(u["uSpecPerAtom"], 0.5 * spec_on)
-            use_vtx = 1.0 if rs.bonds_by_element else 0.0
             # Bonds fade together with their atoms: per-element opacity
             # overrides produce per-bond alphas (mean of the two atoms);
             # a uniform scene stays a single draw call.
             bond_alphas = self._bond_alphas()
-            if self._selected_bonds or bond_alphas is not None:
-                # per-bond colors: amber for selected, gray otherwise
-                for k, (first, count) in enumerate(self._bond_ranges):
-                    if count == 0:
-                        continue
-                    if k in self._selected_bonds:
-                        self._sphere_prog.setUniformValue(
-                            "uColor", *HIGHLIGHT_COLOR, 1.0)
-                        gl.glUniform1f(u["uUseVtxColor"], 0.0)
-                    else:
-                        alpha = 1.0 if bond_alphas is None else float(bond_alphas[k])
-                        self._sphere_prog.setUniformValue(
-                            "uColor", 0.55, 0.55, 0.55, alpha)
-                        gl.glUniform1f(u["uUseVtxColor"], use_vtx)
-                    gl.glDrawArrays(GL_TRIANGLES, first, count)
+            base = (np.ones(len(self._bond_ranges), dtype=np.float64)
+                    if bond_alphas is None else bond_alphas)
+            mids = np.empty((len(self._bond_ranges), 3), dtype=np.float64)
+            for k, (first, count) in enumerate(self._bond_ranges):
+                if count == 0:
+                    mids[k] = np.nan  # never drawn → classified opaque
+                else:
+                    # world-space midpoint (the lateral offsets of the
+                    # cylinder rings cancel; minimum-image vectors are
+                    # already baked into the vertices)
+                    mids[k] = self._bond_verts[first:first + count, :3].mean(axis=0)
+            bond_depths = _view_depths(view, mids)
+            bond_depths[np.isnan(bond_depths)] = 1e9
+            bond_eff = _effective_alphas(base, rs.atom_opacity, bond_depths)
+            opaque_bonds, trans_bonds = _split_opaque_transparent(
+                bond_depths, bond_eff)
+            use_vtx = 1.0 if rs.bonds_by_element else 0.0
+
+            def _draw_bond(k: int) -> None:
+                """One bond cylinder with the current program/uniforms."""
+                first, count = self._bond_ranges[k]
+                if count == 0:
+                    return
+                self._sphere_prog.setUniformValue(
+                    "uMVP", _to_qmatrix(proj @ view))
+                self._sphere_prog.setUniformValue("uModel", _IDENTITY)
+                gl.glUniform1f(u["uSpecPerAtom"], 0.5 * spec_on)
+                if k in self._selected_bonds:
+                    self._sphere_prog.setUniformValue(
+                        "uColor", *HIGHLIGHT_COLOR, 1.0)
+                    gl.glUniform1f(u["uUseVtxColor"], 0.0)
+                else:
+                    alpha = 1.0 if bond_alphas is None else float(bond_alphas[k])
+                    self._sphere_prog.setUniformValue(
+                        "uColor", 0.55, 0.55, 0.55, alpha)
+                    gl.glUniform1f(u["uUseVtxColor"], use_vtx)
+                gl.glDrawArrays(GL_TRIANGLES, first, count)
+
+            self._bond_vao.bind()
+            self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
+            self._sphere_prog.setUniformValue("uModel", _IDENTITY)
+            gl.glUniform1f(u["uSpecPerAtom"], 0.5 * spec_on)
+            if len(opaque_bonds) == len(self._bond_ranges):
+                # all bonds opaque — exactly the old code path
+                if self._selected_bonds or bond_alphas is not None:
+                    # per-bond colors: amber for selected, gray otherwise
+                    for k, _range in enumerate(self._bond_ranges):
+                        _draw_bond(k)
+                else:
+                    self._sphere_prog.setUniformValue(
+                        "uColor", 0.55, 0.55, 0.55, 1.0)
+                    gl.glUniform1f(u["uUseVtxColor"], use_vtx)
+                    gl.glDrawArrays(GL_TRIANGLES, 0, self._bond_n_verts)
             else:
-                self._sphere_prog.setUniformValue("uColor", 0.55, 0.55, 0.55, 1.0)
-                gl.glUniform1f(u["uUseVtxColor"], use_vtx)
-                gl.glDrawArrays(GL_TRIANGLES, 0, self._bond_n_verts)
+                for k in opaque_bonds:
+                    _draw_bond(int(k))
             self._bond_vao.release()
         gl.glDisable(GL_BLEND)
         self._unit_vao.release()
@@ -1487,13 +1584,70 @@ class Viewport3D(QOpenGLWidget):
             gl.glDisable(GL_BLEND)
             self._cell_vao.release()
 
-        # --- Measurement lines (dashed amber; drawn on TOP of the model
+        # --- Transparent pass (atoms + bonds + ghost) ---
+        # Depth-TESTED against the opaque scene (and the cell frame),
+        # but depth WRITES OFF and sorted back-to-front: transparent
+        # spheres blend over the frame instead of hiding it, and atoms
+        # behind show through the ones in front.
+        if len(trans_atoms) or len(trans_bonds) or self._ghost_pos is not None:
+            prims: list[tuple[float, int, int]] = []  # (depth, kind, index)
+            for i in trans_atoms:
+                prims.append((float(atom_depths[i]), 0, int(i)))
+            for k in trans_bonds:
+                prims.append((float(bond_depths[k]), 1, int(k)))
+            if self._ghost_pos is not None:
+                gp = np.asarray(self._ghost_pos, dtype=np.float32)
+                prims.append(
+                    (float(_view_depths(view, gp.reshape(1, 3))[0]), 2, 0))
+            prims.sort(key=lambda t: t[0], reverse=True)  # far → near
+
+            self._sphere_prog.bind()
+            gl.glEnable(GL_BLEND)
+            gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            gl.glDepthMask(False)
+            for _depth, kind, idx in prims:
+                if kind == 0:
+                    self._unit_vao.bind()
+                    _draw_atom(idx)
+                elif kind == 1:
+                    self._bond_vao.bind()
+                    _draw_bond(idx)
+                else:
+                    # Ghost atom (add-atom drag preview, semi-transparent)
+                    z = atomic_numbers.get(self.current_element, 0)
+                    ghost_radius = (
+                        float(covalent_radii[z])
+                        if 0 < z < len(covalent_radii) else 0.77
+                    ) * rs.sphere_scale
+                    ghost_color = self._effective_atom_color(
+                        self.current_element)
+                    model = _sphere_model(
+                        np.asarray(self._ghost_pos, dtype=np.float32),
+                        ghost_radius)
+                    mvp = proj @ view @ model
+                    self._unit_vao.bind()
+                    self._sphere_prog.setUniformValue(
+                        "uMVP", _to_qmatrix(mvp))
+                    self._sphere_prog.setUniformValue(
+                        "uModel", _to_qmatrix(model))
+                    self._sphere_prog.setUniformValue(
+                        "uColor", *ghost_color[:3], 0.55)
+                    gl.glUniform1f(u["uSpecPerAtom"], spec_on)
+                    gl.glUniform1f(u["uUseVtxColor"], 0.0)
+                    gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
+                                      GL_UNSIGNED_INT, VoidPtr(0))
+            gl.glDepthMask(True)
+            gl.glDisable(GL_BLEND)
+            self._bond_vao.release()
+            self._unit_vao.release()
+
+        # --- Measurement lines (dashed; drawn on TOP of the model
         # — depth test disabled so sticks never hide them) ---
         if len(self._meas_verts) > 0:
             self._flat_prog.bind()
             self._meas_vao.bind()
             self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
-            self._flat_prog.setUniformValue("uColor", 1.0, 0.85, 0.0, 0.95)
+            self._flat_prog.setUniformValue("uColor", *rs.measurement_color, 1.0)
             gl.glDisable(GL_DEPTH_TEST)
             gl.glEnable(GL_BLEND)
             gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -1514,10 +1668,8 @@ class Viewport3D(QOpenGLWidget):
             if s is None:
                 continue
             painter = QPainter(self)
-            painter.setPen(QColor(255, 214, 90))
-            font = QFont(self.font())
-            font.setPointSize(9)
-            painter.setFont(font)
+            painter.setPen(self._measurement_pen())
+            painter.setFont(self._measurement_font())
             self._draw_halo_text(painter, QPointF(s[0] + 8.0, s[1] - 6.0), text)
             painter.end()
 
@@ -1602,6 +1754,21 @@ class Viewport3D(QOpenGLWidget):
                     painter.drawText(pos + QPointF(dx, dy), text)
         painter.setPen(fill)
         painter.drawText(pos, text)
+
+    def _measurement_pen(self) -> QPen:
+        """QPen for measurement labels (user-adjustable color)."""
+        return QPen(QColor.fromRgbF(*self._render_settings.measurement_color))
+
+    def _measurement_font(self) -> QFont:
+        """Font for measurement labels — fixed point size.
+
+        Deliberately NOT zoom-scaled like the element labels: an
+        annotation stays readable at any camera distance (matches the
+        pre-options behavior; only the size itself is now adjustable).
+        """
+        font = QFont(self.font())
+        font.setPointSize(self._render_settings.measurement_label_size)
+        return font
 
     def _draw_outlined_text(
         self,

@@ -192,3 +192,27 @@ def test_atom_opacity_roundtrip():
     assert rs2.atom_opacity == pytest.approx(0.35)
     assert rs2.label_size == 18
     assert rs2.show_cell_corners is True
+
+
+def test_measurement_defaults():
+    rs = RenderSettings.default()
+    assert rs.measurement_color == (0.0, 0.0, 0.0)  # pure black (2026-08-14)
+    assert rs.measurement_label_size == 12
+
+
+def test_measurement_roundtrip():
+    rs = RenderSettings.default()
+    rs.measurement_color = (0.1, 0.2, 0.3)
+    rs.measurement_label_size = 20
+    rs2 = RenderSettings.from_dict(rs.to_dict())
+    assert rs2.measurement_color == (0.1, 0.2, 0.3)
+    assert rs2.measurement_label_size == 20
+    # old persisted JSONs (missing keys) fall back to the black defaults
+    rs3 = RenderSettings.from_dict({"gamma": 2.0})
+    assert rs3.measurement_color == (0.0, 0.0, 0.0)
+    assert rs3.measurement_label_size == 12
+    # garbage values fall back too
+    rs4 = RenderSettings.from_dict({"measurement_color": "nope",
+                                    "measurement_label_size": "x"})
+    assert rs4.measurement_color == (0.0, 0.0, 0.0)
+    assert rs4.measurement_label_size == 12
