@@ -540,6 +540,14 @@ Files: {}</source>
         <translation>在原子上显示元素标签</translation>
     </message>
     <message>
+        <source>Display &amp;Options...</source>
+        <translation>显示选项(&amp;O)...</translation>
+    </message>
+    <message>
+        <source>Background, lighting, colors and effects</source>
+        <translation>背景、光照、颜色与效果设置</translation>
+    </message>
+    <message>
         <source>Select &amp;All</source>
         <translation>全选(&amp;A)</translation>
     </message>
@@ -689,6 +697,20 @@ Labels: G=Gamma, X, M, R, K, L, W, etc.</source>
         <source># {}</source>
         <translation># {}</translation>
     </message>
+    <message>
+        <source>Partial Occupancy</source>
+        <translation>部分占据</translation>
+    </message>
+    <message>
+        <source>This structure has partial occupancy (disorder).
+The VASP POSCAR format does not support fractional occupancy — the saved file will contain only the dominant species per site and the composition information will be lost.
+
+Continue saving?</source>
+        <translation>该结构存在部分占据（无序）。
+VASP POSCAR 格式不支持分数占据——保存的文件每个位置将只包含主占元素，组分信息将丢失。
+
+是否继续保存？</translation>
+    </message>
 </context>
 <context>
     <name>StructureTreePanel</name>
@@ -719,6 +741,14 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
         <source>Delete Atom</source>
         <translation>删除原子</translation>
+    </message>
+    <message>
+        <source>Composition: {}</source>
+        <translation>组分：{}</translation>
+    </message>
+    <message>
+        <source>Vacancy</source>
+        <translation>空位</translation>
     </message>
     <message>
         <source>Invalid Position</source>
@@ -900,6 +930,14 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <source>Velocity:</source>
         <translation>速度：</translation>
     </message>
+    <message>
+        <source>Composition</source>
+        <translation>组分</translation>
+    </message>
+    <message>
+        <source>Vacancy</source>
+        <translation>空位</translation>
+    </message>
 </context>
 <context>
     <name>LatticeDialog</name>
@@ -1024,6 +1062,233 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
         <source>Could not symmetrize the structure.</source>
         <translation>无法对称化该结构。</translation>
+    </message>
+</context>
+<context>
+    <name>DisplayOptionsDialog</name>
+    <message>
+        <source>Display Options</source>
+        <translation>显示选项</translation>
+    </message>
+    <message>
+        <source>Background</source>
+        <translation>背景</translation>
+    </message>
+    <message>
+        <source>Dark</source>
+        <translation>深色</translation>
+    </message>
+    <message>
+        <source>Light</source>
+        <translation>浅色</translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation>自定义</translation>
+    </message>
+    <message>
+        <source>Gradient</source>
+        <translation>渐变</translation>
+    </message>
+    <message>
+        <source>Top:</source>
+        <translation>上：</translation>
+    </message>
+    <message>
+        <source>Bottom:</source>
+        <translation>下：</translation>
+    </message>
+    <message>
+        <source>Pick a color</source>
+        <translation>选择颜色</translation>
+    </message>
+    <message>
+        <source>Lighting</source>
+        <translation>光照</translation>
+    </message>
+    <message>
+        <source>Azimuth</source>
+        <translation>方位角</translation>
+    </message>
+    <message>
+        <source>Elevation</source>
+        <translation>仰角</translation>
+    </message>
+    <message>
+        <source>Ambient</source>
+        <translation>环境光</translation>
+    </message>
+    <message>
+        <source>Diffuse</source>
+        <translation>漫反射</translation>
+    </message>
+    <message>
+        <source>Specular</source>
+        <translation>高光</translation>
+    </message>
+    <message>
+        <source>Shininess</source>
+        <translation>光泽度</translation>
+    </message>
+    <message>
+        <source>Fill light</source>
+        <translation>补光</translation>
+    </message>
+    <message>
+        <source>Headlight (light follows camera)</source>
+        <translation>头灯（光照跟随相机）</translation>
+    </message>
+    <message>
+        <source>Specular highlights</source>
+        <translation>高光</translation>
+    </message>
+    <message>
+        <source>Glossy highlights on all atoms (on/off)</source>
+        <translation>所有原子的光泽高光（开/关）</translation>
+    </message>
+    <message>
+        <source>Atoms &amp; Bonds</source>
+        <translation>原子与键</translation>
+    </message>
+    <message>
+        <source>Style:</source>
+        <translation>样式：</translation>
+    </message>
+    <message>
+        <source>Ball &amp; Stick</source>
+        <translation>球棍模型</translation>
+    </message>
+    <message>
+        <source>Space Filling (CPK)</source>
+        <translation>空间填充（CPK）</translation>
+    </message>
+    <message>
+        <source>Wireframe</source>
+        <translation>线框模型</translation>
+    </message>
+    <message>
+        <source>Sphere size</source>
+        <translation>球体尺寸</translation>
+    </message>
+    <message>
+        <source>Bond radius</source>
+        <translation>键半径</translation>
+    </message>
+    <message>
+        <source>Atom opacity</source>
+        <translation>原子不透明度</translation>
+    </message>
+    <message>
+        <source>Overall atom transparency; bonds fade together with their atoms (0 = fully transparent)</source>
+        <translation>原子整体透明度；键随原子一起淡出（0 = 完全透明）</translation>
+    </message>
+    <message>
+        <source>Bonds colored by element</source>
+        <translation>键按元素着色</translation>
+    </message>
+    <message>
+        <source>Show unit cell</source>
+        <translation>显示晶胞</translation>
+    </message>
+    <message>
+        <source>Cell line width:</source>
+        <translation>晶胞线宽：</translation>
+    </message>
+    <message>
+        <source>Cell line width</source>
+        <translation>晶胞线宽</translation>
+    </message>
+    <message>
+        <source>Show labels</source>
+        <translation>显示标签</translation>
+    </message>
+    <message>
+        <source>Colors</source>
+        <translation>颜色</translation>
+    </message>
+    <message>
+        <source>Scheme:</source>
+        <translation>配色方案：</translation>
+    </message>
+    <message>
+        <source>Jmol (default)</source>
+        <translation>Jmol（默认）</translation>
+    </message>
+    <message>
+        <source>Metal / Non-metal</source>
+        <translation>金属 / 非金属</translation>
+    </message>
+    <message>
+        <source>Periodic table blocks (s/p/d/f)</source>
+        <translation>周期表分区（s/p/d/f）</translation>
+    </message>
+    <message>
+        <source>Add element…</source>
+        <translation>添加元素…</translation>
+    </message>
+    <message>
+        <source>Reset all overrides</source>
+        <translation>重置全部覆盖</translation>
+    </message>
+    <message>
+        <source>Axes &amp; Labels</source>
+        <translation>坐标轴与标签</translation>
+    </message>
+    <message>
+        <source>Orientation axes indicator</source>
+        <translation>方向轴指示器</translation>
+    </message>
+    <message>
+        <source>Cell corner labels (O/A/B/C)</source>
+        <translation>晶胞顶点标签（O/A/B/C）</translation>
+    </message>
+    <message>
+        <source>Corner label size:</source>
+        <translation>顶点标签字号：</translation>
+    </message>
+    <message>
+        <source>Size of the O/A/B/C cell corner labels</source>
+        <translation>晶胞顶点 O/A/B/C 标签的字号</translation>
+    </message>
+    <message>
+        <source>Label size:</source>
+        <translation>标签字号：</translation>
+    </message>
+    <message>
+        <source>Base label size; labels scale with the zoom</source>
+        <translation>标签基准字号；标签随缩放自适应</translation>
+    </message>
+    <message>
+        <source>Effects</source>
+        <translation>效果</translation>
+    </message>
+    <message>
+        <source>Gamma</source>
+        <translation>伽马</translation>
+    </message>
+    <message>
+        <source>Opacity</source>
+        <translation>不透明度</translation>
+    </message>
+    <message>
+        <source>Element</source>
+        <translation>元素</translation>
+    </message>
+    <message>
+        <source>Color</source>
+        <translation>颜色</translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation>重置</translation>
+    </message>
+    <message>
+        <source>Reset to Defaults</source>
+        <translation>恢复默认设置</translation>
+    </message>
+    <message>
+        <source>Restore every setting to its default value</source>
+        <translation>将所有设置恢复为默认值</translation>
     </message>
 </context>
 </TS>

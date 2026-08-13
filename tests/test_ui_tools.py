@@ -835,9 +835,10 @@ def test_multi_bonds_use_thinner_radius(window, monkeypatch):
 
     calls = []
 
-    def fake_cylinder(starts, ends, radius, segments=12, lateral_offset=0.0):
+    def fake_cylinder(starts, ends, radius, segments=12, lateral_offset=0.0,
+                      color_i=None, color_j=None):
         calls.append((radius, lateral_offset))
-        return np.zeros((0, 3), dtype=np.float32)
+        return np.zeros((0, 9), dtype=np.float32)
 
     monkeypatch.setattr(vp, "_cylinder_verts", fake_cylinder)
     atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
@@ -1108,12 +1109,13 @@ def test_bond_bake_uses_current_structure_cell(window):
     assert view._pbc == (True, True, True)
     assert np.allclose(view._cell, fe.get_cell().array)
     # every baked stick is a short nearest-neighbor tube, not a
-    # box-diagonal spanning the cell
+    # box-diagonal spanning the cell (vertices are pos+normal+color —
+    # compare positions only)
     for first, count in view._bond_ranges:
         if count == 0:
             continue
-        start = view._bond_verts[first]
-        end = view._bond_verts[first + count - 1]
+        start = view._bond_verts[first, :3]
+        end = view._bond_verts[first + count - 1, :3]
         assert np.linalg.norm(end - start) < 2.7
 
 
@@ -1276,8 +1278,7 @@ def test_esc_cancels_box_select(window, monkeypatch):
 def test_rotate_action_is_on_toolbar(window):
     """Regression: the Rotate mode must be registered in BOTH the mode
     actions AND the edit toolbar (it was once missing from the latter)."""
-    from PySide6.QtWidgets import QToolBar
-
-    actions = window._edit_toolbar.actions()
-    rotate_acts = [a for a in actions if a is window._mode_actions.get(ToolMode.ROTATE)]
-    assert len(rotate_acts) == 1
+    buttons = window._edit_buttons
+    rotate_btns = [b for b in buttons
+                   if b.defaultAction() is window._mode_actions.get(ToolMode.ROTATE)]
+    assert len(rotate_btns) == 1

@@ -26,7 +26,7 @@ from ase.io import read as ase_read
 from PySide6.QtCore import QObject, Signal
 
 from vaspen.core.bonds import Bond, find_bonds
-from vaspen.core.file_io import FileIO
+from vaspen.core.file_io import FileIO, extract_occupancy
 
 
 def wrap_in_padded_cell(atoms: Atoms, padding: float) -> Atoms:
@@ -145,6 +145,10 @@ class StructureModel(QObject):
         self._bond_mode: str = "manual"  # "auto" | "manual"
         self._atom_ids: list[int] = []
         self._next_id: int = 0
+        # Per-atom site compositions for partially-occupied (disordered)
+        # structures; None when the structure has no occupancy data.
+        # Derived from atoms.info['occupancy'] at load time.
+        self._occupancy: list[dict[str, float]] | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -197,6 +201,7 @@ class StructureModel(QObject):
         path = Path(filepath)
         atoms = ase_read(str(path))
         self._atoms = atoms
+        self._occupancy = extract_occupancy(atoms)
         self._filepath = str(path)
         self._dirty = False
         self._selected_indices = set()
@@ -212,6 +217,7 @@ class StructureModel(QObject):
         through FileIO.
         """
         self._atoms = atoms
+        self._occupancy = extract_occupancy(atoms)
         if filepath is not None:
             self._filepath = str(Path(filepath))
         self._dirty = False
@@ -255,7 +261,50 @@ class StructureModel(QObject):
 
     @property
     def chemical_formula(self) -> str:
-        return self._atoms.get_chemical_formula()
+        if self._occupancy is None:
+            return self._atoms.get_chemical_formula()
+        # Disordered structure: fractional coefficients from the site
+        # composition (only occupied species; e.g. "Fe1.3Ni0.5Co0.2").
+        parts = []
+        for sym, total in self.composition():
+            coeff = f"{total:.2f}".rstrip("0").rstrip(".")
+            parts.append(sym + coeff)
+        return "".join(parts)
+
+    @property
+    def occupancy(self) -> list[dict[str, float]] | None:
+        """Per-atom site compositions ({symbol: occupancy}), or None.
+
+        Only populated for partially-occupied (disordered) structures;
+        uniform single-species occupancy reads as None.
+        """
+        return (list(self._occupancy)
+                if self._occupancy is not None else None)
+
+    @property
+    def has_disorder(self) -> bool:
+        """True when the structure has partial (fractional) occupancy."""
+        return self._occupancy is not None
+
+    def composition(self) -> list[tuple[str, float]]:
+        """Overall composition as (symbol, total occupancy) pairs.
+
+        Each merged atom represents one expanded lattice site, so the
+        per-atom site compositions sum to the full-cell composition
+        (symmetry multiplicities included). Sorted by descending total,
+        ties by symbol. The deficit against ``n_atoms`` is vacancy.
+
+        Raises:
+            RuntimeError: If called on a structure without occupancy
+                data (``has_disorder`` is False).
+        """
+        if self._occupancy is None:
+            raise RuntimeError("Structure has no occupancy data.")
+        totals: dict[str, float] = {}
+        for comp in self._occupancy:
+            for sym, occ in comp.items():
+                totals[sym] = totals.get(sym, 0.0) + occ
+        return sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
 
     @property
     def cell(self) -> np.ndarray:
@@ -447,10 +496,27 @@ class StructureModel(QObject):
         """
         self._push_undo()
         self._atoms = new_atoms
+        self._clear_occupancy()
         self._dirty = True
         self._selected_indices = set()
         self._reset_derived_state()
         self.structure_modified.emit()
+
+    def _clear_occupancy(self) -> None:
+        """Drop occupancy data after a structure mutation.
+
+        Disordered (partially-occupied) structures are display-only: any
+        structural edit makes the site composition invalid, and ASE's own
+        mutation routines corrupt the info (``Atoms.extend`` zero-fills
+        ``spacegroup_kinds``, ``make_supercell`` drops ``info``) — a
+        desynced occupancy dict would later crash or corrupt the CIF
+        writer. Clearing keeps the atoms in a consistent state.
+        """
+        if "occupancy" in self._atoms.info:
+            del self._atoms.info["occupancy"]
+        if "spacegroup_kinds" in self._atoms.arrays:
+            del self._atoms.arrays["spacegroup_kinds"]
+        self._occupancy = None
 
     def reset_filepath(self) -> None:
         """Detach from the loaded file so the next Save forces Save As.
@@ -535,6 +601,10 @@ class StructureModel(QObject):
         restored state are dropped silently).
         """
         self._atoms = snapshot.atoms
+        # The snapshot's atoms carry the pre-edit occupancy info (ASE
+        # copy preserves info + arrays) — recompute the cache so undoing
+        # an edit restores the composition display too.
+        self._occupancy = extract_occupancy(snapshot.atoms)
         self._bonds = list(snapshot.bonds)
         self._bond_mode = snapshot.bond_mode
         self._atom_ids = list(snapshot.atom_ids)
@@ -677,6 +747,7 @@ class StructureModel(QObject):
             other = other._atoms
         self._push_undo()
         self._atoms.extend(other)
+        self._clear_occupancy()
         self._atom_ids.extend(range(self._next_id, self._next_id + len(other)))
         self._next_id += len(other)
         self._dirty = True
@@ -770,6 +841,7 @@ class StructureModel(QObject):
         for d in deleted:
             del self._atoms[d]
             del self._atom_ids[d]
+        self._clear_occupancy()
 
         self._dirty = True
         if became_empty and not self._selected_indices:

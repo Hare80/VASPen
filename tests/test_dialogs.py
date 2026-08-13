@@ -7,24 +7,50 @@ import numpy as np
 import pytest
 from ase import Atoms
 
+from vaspen.core.render_settings import (
+    BACKGROUND_DARK,
+    BACKGROUND_LIGHT,
+    GRADIENT_DARK_BOTTOM,
+    GRADIENT_DARK_TOP,
+    GRADIENT_LIGHT_BOTTOM,
+    GRADIENT_LIGHT_TOP,
+)
 from vaspen.core.structure import StructureModel
+from vaspen.ui.display_options_dialog import DisplayOptionsDialog
 from vaspen.ui.lattice_dialog import LatticeDialog
 from vaspen.ui.supercell_dialog import SupercellDialog
 from vaspen.ui.symmetry_dialog import SymmetryDialog
 from vaspen.ui.transform_dialog import TransformDialog
+from vaspen.utils.config import AppConfig
 
 
 class _FakeViewport:
-    """Records set_structure calls for LatticeDialog previews."""
+    """Records set_structure/set_render_settings calls for dialog previews."""
 
     def __init__(self) -> None:
         self.rendered: list = []  # (atoms, reset_view, bonds)
+        from vaspen.core.render_settings import RenderSettings
+
+        self._rs = RenderSettings.default()
+        self.render_settings_calls: list = []
 
     def set_structure(self, atoms, reset_view=False, bonds=None):
         self.rendered.append((atoms, reset_view, bonds))
 
     def set_highlight(self, indices):
         pass
+
+    def set_render_settings(self, rs):
+        from vaspen.core.render_settings import RenderSettings
+
+        self._rs = RenderSettings.from_dict(rs.to_dict())
+        self.render_settings_calls.append(self._rs)
+
+    def render_settings(self):
+        return self._rs
+
+    def structure_symbols(self) -> list[str]:
+        return ["Fe", "O"]
 
 
 @pytest.fixture
@@ -253,3 +279,183 @@ def test_transform_dialog_periodic_scope_selection_keeps_cell(qtbot, si_bulk):
     assert not np.allclose(out.get_positions()[1], si_bulk.get_positions()[1])
     frac = out.get_scaled_positions()
     assert np.all((frac >= 0.0) & (frac < 1.0))
+
+
+# ----------------------------------------------------------------------
+# Display Options dialog
+# ----------------------------------------------------------------------
+
+
+def test_display_options_live_preview(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    # initial control population fires several applies; snapshot the count
+    n = len(view.render_settings_calls)
+    assert n >= 1
+
+    dlg._amb_slider.setValue(80)  # 0.80
+    assert len(view.render_settings_calls) == n + 1
+    assert view.render_settings_calls[-1].ambient == pytest.approx(0.80)
+
+    dlg._headlight_check.setChecked(True)
+    assert view.render_settings_calls[-1].headlight is True
+    dlg._az_slider.setValue(60)
+    assert view.render_settings_calls[-1].light_azimuth == 60
+
+
+def test_display_options_reject_restores(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._gamma_slider.setValue(round(3.0 / 0.05))
+    dlg.reject()
+
+    restored = view.render_settings_calls[-1]
+    assert restored.gamma == pytest.approx(2.2)  # original value back
+
+
+def test_display_options_accept_persists(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._bg_light_radio.setChecked(True)
+    dlg._gamma_slider.setValue(round(1.8 / 0.05))
+    dlg._on_accept()
+
+    cfg = AppConfig()
+    assert cfg.render_settings.background_color == BACKGROUND_LIGHT
+    assert cfg.render_settings.gamma == pytest.approx(1.8)
+
+
+def test_display_options_bg_preset_swaps_gradient(qtbot):
+    """Switching light → dark → light swaps the untouched gradient
+    presets along with the background."""
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    # default is LIGHT now; go dark first
+    dlg._bg_dark_radio.setChecked(True)
+    rs = view.render_settings_calls[-1]
+    assert rs.background_color == BACKGROUND_DARK
+    assert rs.gradient_top == GRADIENT_DARK_TOP
+
+    # and back to light
+    dlg._bg_light_radio.setChecked(True)
+    rs = view.render_settings_calls[-1]
+    assert rs.background_color == BACKGROUND_LIGHT
+    assert rs.gradient_top == GRADIENT_LIGHT_TOP
+    assert rs.gradient_bottom == GRADIENT_LIGHT_BOTTOM
+
+
+def test_display_options_element_override(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    assert dlg._row_swatch_for("Fe") is not None  # structure element rows
+
+    dlg._on_element_opacity("Fe", 40)
+    rs = view.render_settings_calls[-1]
+    assert rs.atom_colors["Fe"][3] == pytest.approx(0.4)
+
+    dlg._on_element_reset("Fe")
+    assert "Fe" not in view.render_settings_calls[-1].atom_colors
+
+
+def test_display_options_scheme_changes_effective_color(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._scheme_btn._actions["metal_nonmetal"].trigger()
+
+    rs = view.render_settings_calls[-1]
+    assert rs.color_scheme == "metal_nonmetal"
+
+
+def test_display_options_reset_defaults(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._amb_slider.setValue(90)
+    dlg._style_btn._actions["wireframe"].trigger()
+    dlg._on_reset_defaults()
+
+    rs = view.render_settings_calls[-1]
+    assert rs.ambient == pytest.approx(0.75)
+    assert rs.style == "ball_stick"
+    assert rs.gamma == pytest.approx(2.2)
+
+
+def test_display_options_specular_and_cell_controls(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+
+    dlg._spec_check.setChecked(False)
+    assert view.render_settings_calls[-1].specular_enabled is False
+
+    dlg._cell_width_slider.setValue(3)
+    assert view.render_settings_calls[-1].cell_line_width == pytest.approx(3.0)
+
+    dlg._cell_color = (1.0, 0.0, 0.0)
+    dlg._apply()
+    assert view.render_settings_calls[-1].cell_color == (1.0, 0.0, 0.0)
+
+
+def test_display_options_style_button_is_menu_based(qtbot):
+    """The style selector is a QToolButton+QMenu, not a QComboBox
+    (the combo popup reopened repeatedly inside the scroll area)."""
+    from PySide6.QtWidgets import QComboBox, QToolButton
+
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    assert isinstance(dlg._style_btn, QToolButton)
+    assert not isinstance(dlg._style_btn, QComboBox)
+    assert isinstance(dlg._scheme_btn, QToolButton)
+    assert set(dlg._style_btn._actions) == {"ball_stick", "cpk", "wireframe"}
+
+
+def test_display_options_atom_opacity_slider(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    n = len(view.render_settings_calls)
+
+    dlg._opacity_slider.setValue(0)  # fully transparent
+    assert len(view.render_settings_calls) == n + 1
+    assert view.render_settings_calls[-1].atom_opacity == pytest.approx(0.0)
+
+    dlg._opacity_slider.setValue(65)
+    assert view.render_settings_calls[-1].atom_opacity == pytest.approx(0.65)
+
+
+def test_display_options_corner_labels_checkbox(qtbot):
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._cell_corners_check.setChecked(True)
+    assert view.render_settings_calls[-1].show_cell_corners is True
+    # the feature was renamed from "Cell axis labels (a/b/c)"
+    assert "O/A/B/C" in dlg._cell_corners_check.text()
+
+
+def test_display_options_corner_label_size_independent(qtbot):
+    """Corner labels have their own size — decoupled from element labels."""
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    dlg._corner_size_spin.setValue(20)
+    rs = view.render_settings_calls[-1]
+    assert rs.corner_label_size == 20
+    assert rs.label_size == 12  # element labels unchanged
+
+
+def test_display_options_ambient_slider_goes_to_2(qtbot):
+    """Ambient/diffuse can be over-brightened (max 2.0) for white bg."""
+    view = _FakeViewport()
+    dlg = DisplayOptionsDialog(view)
+    qtbot.addWidget(dlg)
+    assert dlg._amb_slider.maximum() == 200
+    dlg._amb_slider.setValue(150)
+    assert view.render_settings_calls[-1].ambient == pytest.approx(1.50)

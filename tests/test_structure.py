@@ -580,3 +580,50 @@ def test_set_geometry_positions_only():
     m.set_geometry([[3.0, 3.0, 3.0]])
     assert np.allclose(m.positions[0], [3.0, 3.0, 3.0])
     assert np.allclose(m.cell_lengths, [4.0, 4.0, 4.0])
+
+
+# ----------------------------------------------------------------------
+# Partial occupancy (disordered structures)
+# ----------------------------------------------------------------------
+
+def test_disordered_composition_and_formula(disordered_atoms):
+    """load_atoms extracts the site compositions; the formula uses
+    fractional coefficients and the composition lists all species."""
+    model = StructureModel()
+    model.load_atoms(disordered_atoms)
+    assert model.has_disorder
+    assert model.composition() == [("Fe", 2.05), ("Ni", 0.5), ("Co", 0.2)]
+    assert model.chemical_formula == "Fe2.05Ni0.5Co0.2"
+    # per-atom site compositions follow the merged atom order
+    assert model.occupancy[0] == {"Fe": 0.5, "Ni": 0.5}
+    assert model.occupancy[1] == {"Fe": 0.8, "Co": 0.2}
+    assert model.occupancy[2] == {"Fe": 0.75}
+
+
+def test_plain_structure_has_no_disorder():
+    model = StructureModel(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]))
+    assert not model.has_disorder
+    assert model.occupancy is None
+    assert model.chemical_formula == "H2"
+
+
+def test_edit_clears_disorder_undo_restores(disordered_atoms):
+    """Structural edits clear the occupancy data (disordered structures
+    are display-only); undoing restores it from the snapshot."""
+    model = StructureModel()
+    model.load_atoms(disordered_atoms)
+    assert model.has_disorder
+
+    model.extend_atoms(Atoms("H"))
+    assert not model.has_disorder
+    assert "occupancy" not in model.atoms.info
+    assert "spacegroup_kinds" not in model.atoms.arrays
+
+    model.undo()
+    assert model.has_disorder
+    assert model.composition()[0] == ("Fe", 2.05)
+
+    model.delete_atom(0)
+    assert not model.has_disorder
+    model.undo()
+    assert model.has_disorder

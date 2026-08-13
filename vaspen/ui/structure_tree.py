@@ -35,6 +35,28 @@ from vaspen.ui.viewport3d import element_text_color
 from vaspen.utils.logger import logger
 
 
+def composition_text(
+    comp: list[tuple[str, float]],
+    n_sites: int,
+    translate,
+) -> str:
+    """MS-style composition line: ``"Fe 65.0% · Ni 25.0% · Vacancy 10.0%"``.
+
+    Shared by the structure tree (overall composition) and the atom
+    properties panel (single-site composition).
+
+    Args:
+        comp: (symbol, total occupancy) pairs, sorted.
+        n_sites: Number of sites/atoms the totals are over.
+        translate: Callable resolving "Vacancy" in the UI language.
+    """
+    parts = [f"{sym} {occ / n_sites * 100:.1f}%" for sym, occ in comp]
+    vacancy = n_sites - sum(occ for _, occ in comp)
+    if vacancy > 1e-9:
+        parts.append(f"{translate('Vacancy')} {vacancy / n_sites * 100:.1f}%")
+    return " · ".join(parts)
+
+
 class StructureTreePanel(QWidget):
     """Left-dock panel: cell parameters + atom table."""
 
@@ -142,12 +164,17 @@ class StructureTreePanel(QWidget):
             else:
                 a, b, c = model.cell_lengths
                 alpha, beta, gamma = model.cell_angles
-                self._cell_label.setText(
-                    self.tr("Formula: {}\na = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å\n"
-                            "α = {:.2f}°   β = {:.2f}°   γ = {:.2f}°").format(
+                text = self.tr(
+                    "Formula: {}\na = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å\n"
+                    "α = {:.2f}°   β = {:.2f}°   γ = {:.2f}°").format(
                         model.chemical_formula, a, b, c, alpha, beta, gamma
                     )
-                )
+                if model.has_disorder:
+                    # MS-style composition line (element percentages)
+                    text += "\n" + self.tr("Composition: {}").format(
+                        composition_text(model.composition(), model.n_atoms,
+                                         self.tr))
+                self._cell_label.setText(text)
 
             # Atom table
             symbols = model.symbols

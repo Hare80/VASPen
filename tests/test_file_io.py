@@ -148,3 +148,123 @@ def test_read_extensionless_unknown_raises(tmp_path):
         FileIO.read(str(tmp_path / "README"))
     with pytest.raises(ValueError, match="Unsupported file extension"):
         FileIO.write(str(tmp_path / "out.nope"), Atoms("H"))
+
+
+# ----------------------------------------------------------------------
+# Partial occupancy (disordered structures)
+# ----------------------------------------------------------------------
+
+from tests.conftest import DISORDERED_CIF  # noqa: E402
+
+
+def test_sanitize_cif_occupancy():
+    """'?'/'.' occupancy tokens become 1.0; '0.5(2)' keeps its prefix;
+    other loops and columns are untouched."""
+    from vaspen.core.file_io import _sanitize_cif_occupancy
+
+    cif = """data_x
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_occupancy
+Fe1 Fe 0.0 ?
+Ni1 Ni 0.5 0.5(2)
+O1 O 0.25 .
+loop_
+_other_tag
+_other2
+v1 v2
+"""
+    out = _sanitize_cif_occupancy(cif)
+    assert "Fe1 Fe 0.0 1.0" in out
+    assert "Ni1 Ni 0.5 0.5" in out
+    assert "O1 O 0.25 1.0" in out
+    assert "v1 v2" in out  # other loops untouched
+
+
+def test_cif_unknown_occupancy_reads(tmp_path):
+    """Regression: ASE crashed on '?' occupancy with a str/float
+    comparison (ase/spacegroup/xtal.py). FileIO sanitizes it to 1.0."""
+    from vaspen.core.file_io import extract_occupancy
+
+    cif = DISORDERED_CIF.replace("Fe1 Fe 0.0 0.0 0.0 0.5",
+                                 "Fe1 Fe 0.0 0.0 0.0 ?")
+    path = tmp_path / "unknown_occ.cif"
+    path.write_text(cif, encoding="utf-8")
+    atoms = FileIO.read(str(path))
+    occ = extract_occupancy(atoms)
+    assert occ is not None
+    assert occ[0]["Fe"] == 1.0  # '?' normalized to full occupation
+
+
+def test_cif_mixed_occupancy_preserves_info(tmp_path, disordered_atoms):
+    """Co-located species merge into one atom per site; the full
+    composition survives in info['occupancy'] + spacegroup_kinds."""
+    from vaspen.core.file_io import extract_occupancy
+
+    path = tmp_path / "disordered.cif"
+    FileIO.write(str(path), disordered_atoms)
+    loaded = FileIO.read(str(path))
+    occ = extract_occupancy(loaded)
+    assert occ is not None
+    totals = {}
+    for comp in occ:
+        for sym, o in comp.items():
+            totals[sym] = totals.get(sym, 0.0) + o
+    assert totals == {"Fe": 2.05, "Ni": 0.5, "Co": 0.2}
+
+
+def test_xyz_roundtrip_preserves_occupancy(tmp_path, disordered_atoms):
+    """ASE 3.29 routes .xyz through extxyz — the occupancy info is
+    serialized as a _JSON comment and must survive the round trip."""
+    from vaspen.core.file_io import extract_occupancy
+
+    path = tmp_path / "disordered.xyz"
+    FileIO.write(str(path), disordered_atoms)
+    loaded = FileIO.read(str(path))
+    occ = extract_occupancy(loaded)
+    assert occ == extract_occupancy(disordered_atoms)
+
+
+def test_extract_occupancy_uniform_is_none():
+    """An occupancy column of all 1.0 is not disorder."""
+    import io as _io
+
+    from vaspen.core.file_io import extract_occupancy
+
+    cif = """data_x
+_cell_length_a 3.60
+_cell_length_b 3.60
+_cell_length_c 3.60
+_cell_angle_alpha 90
+_cell_angle_beta 90
+_cell_angle_gamma 90
+_symmetry_space_group_name_H-M 'P 1'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+Fe1 Fe 0.0 0.0 0.0 1.0
+O1 O 0.5 0.5 0.5 1.0
+"""
+    atoms = ase_read(_io.StringIO(cif), format="cif")
+    assert extract_occupancy(atoms) is None
+
+
+def test_extract_occupancy_vacancy():
+    """A single partially-occupied species is a vacancy, not None."""
+    import io as _io
+
+    from vaspen.core.file_io import extract_occupancy
+
+    cif = DISORDERED_CIF.replace(
+        "Fe1 Fe 0.0 0.0 0.0 0.5\nNi1 Ni 0.0 0.0 0.0 0.5\n",
+        "Fe1 Fe 0.0 0.0 0.0 0.5\n")
+    atoms = ase_read(_io.StringIO(cif), format="cif")
+    occ = extract_occupancy(atoms)
+    assert occ is not None
+    assert occ[0] == {"Fe": 0.5}

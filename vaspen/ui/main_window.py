@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
+    QSizePolicy,
     QStatusBar,
     QToolBar,
     QToolButton,
@@ -67,6 +68,11 @@ class MainWindow(QMainWindow):
         self._create_toolbar()
         self._create_status_bar()
         self._create_central_widget()
+        # Persisted render settings MUST be applied before the edit
+        # toolbar wires its display-style menu check states (they derive
+        # their initial values from the viewport settings — the old
+        # hardcoded states would clobber the user's saved preferences).
+        self._viewport.set_render_settings(self._config.render_settings)
         self._create_edit_toolbar()
         self._create_dock_widgets()
         self._connect_signals()
@@ -168,6 +174,11 @@ class MainWindow(QMainWindow):
         self.act_show_labels = QAction(self.tr("Atom &Labels"), self)
         self.act_show_labels.setCheckable(True)
         self.act_show_labels.setStatusTip(self.tr("Show element labels on atoms"))
+
+        self.act_display_options = QAction(self.tr("Display &Options..."), self)
+        self.act_display_options.setStatusTip(
+            self.tr("Background, lighting, colors and effects"))
+        self.act_display_options.triggered.connect(self._on_display_options)
 
         # ── Calculate ──
         self.act_gen_incar = QAction(self.tr("Generate &INCAR..."), self)
@@ -337,6 +348,8 @@ class MainWindow(QMainWindow):
         self._menu_view.addAction(self.act_show_cell)
         self._menu_view.addAction(self.act_show_labels)
         self._menu_view.addSeparator()
+        self._menu_view.addAction(self.act_display_options)
+        self._menu_view.addSeparator()
         self._menu_lang = self._menu_view.addMenu(self.tr("&Language"))
         self._menu_lang.addAction(self.act_lang_en)
         self._menu_lang.addAction(self.act_lang_zh)
@@ -385,9 +398,26 @@ class MainWindow(QMainWindow):
 
     def _create_edit_toolbar(self) -> None:
         """3D editing toolbar: interaction modes, element picker, view tools."""
-        self._edit_toolbar = QToolBar(self.tr("Edit Toolbar"), self)
-        self._edit_toolbar.setObjectName("edit_toolbar")
-        self._edit_toolbar.setMovable(False)
+        # Buttons live in a FlowLayout container: when the toolbar gets
+        # too long the overflowing buttons WRAP to the next row instead
+        # of collapsing into the "»" extension chevron. The container is
+        # added via addToolBar(area, widget) so it STRETCHES across the
+        # full window width (a plain QToolBar.addWidget would leave the
+        # container at its size-hint width and wrap every button onto
+        # its own row).
+        from vaspen.ui.flow_layout import FlowLayout
+
+        container = QWidget(self)
+        flow = FlowLayout(container, margin=0, h_spacing=2, v_spacing=2)
+        self._edit_buttons: list[QToolButton] = []
+
+        def add_action(act: QAction) -> None:
+            btn = QToolButton(container)
+            btn.setDefaultAction(act)
+            btn.setAutoRaise(True)
+            btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            self._edit_buttons.append(btn)
+            flow.addWidget(btn)
 
         # Interaction modes (exclusive)
         for mode in (ToolMode.SELECT, ToolMode.ADD_ATOM, ToolMode.MOVE_ATOM,
@@ -396,31 +426,28 @@ class MainWindow(QMainWindow):
             act.toggled.connect(
                 lambda checked, m=mode: self._viewport.set_mode(m) if checked else None
             )
-            self._edit_toolbar.addAction(act)
+            add_action(act)
         # One-shot bond detection — useful while Auto Detect Bonds is off
-        self._edit_toolbar.addAction(self.act_detect_bonds)
+        add_action(self.act_detect_bonds)
 
-        self._edit_toolbar.addSeparator()
         for mode in (ToolMode.MEASURE_DISTANCE, ToolMode.MEASURE_ANGLE,
                      ToolMode.MEASURE_TORSION):
             act = self._mode_actions[mode]
             act.toggled.connect(
                 lambda checked, m=mode: self._viewport.set_mode(m) if checked else None
             )
-            self._edit_toolbar.addAction(act)
+            add_action(act)
 
-        self._edit_toolbar.addSeparator()
         self._element_label = QLabel(self.tr("Element:"))
-        self._edit_toolbar.addWidget(self._element_label)
+        flow.addWidget(self._element_label)
         self._element_combo = QComboBox(self)
         self._element_combo.setEditable(False)
         self._element_combo.addItems(chemical_symbols[1:])  # skip placeholder "X"
         self._element_combo.setCurrentText("C")
         self._element_combo.currentTextChanged.connect(self._on_element_changed)
-        self._edit_toolbar.addWidget(self._element_combo)
+        flow.addWidget(self._element_combo)
 
-        self._edit_toolbar.addSeparator()
-        self._edit_toolbar.addAction(self.act_reset_view)
+        add_action(self.act_reset_view)
 
         self._view_dir_btn = QToolButton(self)
         self._view_dir_btn.setText(self.tr("View"))
@@ -443,23 +470,34 @@ class MainWindow(QMainWindow):
             )
             self._view_dir_menu.addAction(action)
         self._view_dir_btn.setMenu(self._view_dir_menu)
-        self._edit_toolbar.addWidget(self._view_dir_btn)
+        flow.addWidget(self._view_dir_btn)
 
-        self._edit_toolbar.addSeparator()
-        self._edit_toolbar.addAction(self.act_undo)
-        self._edit_toolbar.addAction(self.act_redo)
-        self.addToolBar(self._edit_toolbar)
+        add_action(self.act_undo)
+        add_action(self.act_redo)
 
-        # Display style wiring (the viewport exists at this point)
+        # A plain widget bar above the viewport (NOT a QToolBar — the
+        # toolbar area sizes toolbars to their content, which would
+        # leave the flow layout ~180px wide and wrap every button onto
+        # its own row). Expanding policy makes it span the full width.
+        container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._edit_toolbar = container
+        self._central_layout.insertWidget(0, container)
+
+        # Display style wiring (the viewport exists at this point).
+        # Initial check states come from the (persisted) viewport
+        # settings, not hardcoded values.
         for style, act in self._style_actions.items():
             act.toggled.connect(
                 lambda checked, s=style: self._viewport.set_structure_style(s)
                 if checked else None
             )
-        self._style_actions["ball_stick"].setChecked(True)
+        rs = self._viewport.render_settings()
+        self._style_actions[rs.style].setChecked(True)
         self.act_show_cell.toggled.connect(self._viewport.set_show_cell)
-        self.act_show_cell.setChecked(True)
+        self.act_show_cell.setChecked(rs.show_cell)
         self.act_show_labels.toggled.connect(self._viewport.set_show_labels)
+        self.act_show_labels.setChecked(rs.show_labels)
 
     def _set_view_direction(self, azimuth: float, elevation: float,
                             up: tuple[float, float, float] | None = None) -> None:
@@ -469,6 +507,24 @@ class MainWindow(QMainWindow):
     def _on_element_changed(self, symbol: str) -> None:
         """Keep the viewport's ghost-atom element in sync with the combo."""
         self._viewport.current_element = symbol
+
+    def _on_display_options(self) -> None:
+        """Open the Display Options dialog (live preview, persisted on OK)."""
+        from vaspen.ui.display_options_dialog import DisplayOptionsDialog
+
+        dlg = DisplayOptionsDialog(self._viewport, self)
+        dlg.exec()
+        # Re-sync the View menu with the viewport (the dialog may have
+        # changed style / cell / labels; both paths are idempotent).
+        self._sync_display_menu()
+
+    def _sync_display_menu(self) -> None:
+        """Mirror the viewport's render settings into the View menu."""
+        rs = self._viewport.render_settings()
+        for style, act in self._style_actions.items():
+            act.setChecked(style == rs.style)
+        self.act_show_cell.setChecked(rs.show_cell)
+        self.act_show_labels.setChecked(rs.show_labels)
 
     # ------------------------------------------------------------------
     # Status Bar
@@ -491,8 +547,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _create_central_widget(self) -> None:
-        self._viewport = Viewport3D(self)
-        self.setCentralWidget(self._viewport)
+        # The central area hosts the viewport plus the wrapping edit
+        # bar above it (a plain widget bar — the QToolBar area sizes
+        # toolbars to their content and cannot host a full-width
+        # wrapping layout).
+        self._central_container = QWidget(self)
+        self._central_layout = QVBoxLayout(self._central_container)
+        self._central_layout.setContentsMargins(0, 0, 0, 0)
+        self._central_layout.setSpacing(0)
+        self._viewport = Viewport3D(self._central_container)
+        self._central_layout.addWidget(self._viewport, 1)
+        self.setCentralWidget(self._central_container)
 
     # ------------------------------------------------------------------
     # Dock Widgets
@@ -641,12 +706,40 @@ class MainWindow(QMainWindow):
         self._structure.make_periodic(dlg.padding)
         return True
 
+    def _confirm_disorder_poscar_save(self) -> bool:
+        """Warn before saving a partially-occupied structure to VASP.
+
+        The POSCAR format has no occupancy field — the saved file will
+        contain only the dominant species per site and the composition
+        information is lost. Requires the user's confirmation (settled
+        policy 2026-08-14: warn, do not block).
+        """
+        if not self._structure.has_disorder:
+            return True
+        reply = QMessageBox.warning(
+            self,
+            self.tr("Partial Occupancy"),
+            self.tr(
+                "This structure has partial occupancy (disorder).\n"
+                "The VASP POSCAR format does not support fractional "
+                "occupancy — the saved file will contain only the "
+                "dominant species per site and the composition "
+                "information will be lost.\n\n"
+                "Continue saving?"),
+            QMessageBox.Save | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        return reply == QMessageBox.Save
+
     def _on_save(self) -> None:
         """Save the current structure."""
         fp = self._structure.filepath
         if fp:
             try:
                 if not self._ensure_periodic_for(resolve_format(fp) or ""):
+                    return
+                if (resolve_format(fp) == "vasp"
+                        and not self._confirm_disorder_poscar_save()):
                     return
                 self._structure.save(fp)
                 self._set_status(self.tr("Saved: {}").format(fp))
@@ -668,6 +761,9 @@ class MainWindow(QMainWindow):
             try:
                 if not self._ensure_periodic_for(resolve_format(filepath) or ""):
                     return
+                if (resolve_format(filepath) == "vasp"
+                        and not self._confirm_disorder_poscar_save()):
+                    return
                 self._structure.save(filepath)
                 self._config.add_recent_file(filepath)
                 self._config.last_directory = str(Path(filepath).parent)
@@ -687,6 +783,8 @@ class MainWindow(QMainWindow):
         if filepath:
             try:
                 if not self._ensure_periodic_for("vasp"):
+                    return
+                if not self._confirm_disorder_poscar_save():
                     return
                 self._structure.save(filepath, fmt="vasp")
                 self._set_status(self.tr("Exported POSCAR: {}").format(filepath))
@@ -718,6 +816,9 @@ class MainWindow(QMainWindow):
         # VASP input files require a periodic structure (POSCAR lattice +
         # KPOINTS mesh); offer the wrap dialog for molecules first.
         if not self._ensure_periodic_for("vasp"):
+            return
+        # POSCAR cannot carry fractional occupancy — confirm first.
+        if not self._confirm_disorder_poscar_save():
             return
 
         potcar_path = self._config.potcar_library_path
@@ -899,6 +1000,9 @@ class MainWindow(QMainWindow):
         self.act_show_cell.setStatusTip(self.tr("Show or hide the unit cell frame"))
         self.act_show_labels.setText(self.tr("Atom &Labels"))
         self.act_show_labels.setStatusTip(self.tr("Show element labels on atoms"))
+        self.act_display_options.setText(self.tr("Display &Options..."))
+        self.act_display_options.setStatusTip(
+            self.tr("Background, lighting, colors and effects"))
         self.act_gen_incar.setText(self.tr("Generate &INCAR..."))
         self.act_gen_kpoints.setText(self.tr("Generate &KPOINTS..."))
         self.act_gen_potcar.setText(self.tr("Generate &POTCAR..."))

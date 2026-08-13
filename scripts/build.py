@@ -26,6 +26,19 @@ def build_pyinstaller() -> None:
         "--windowed",
         "--onedir",
         "--add-data", f"{RESOURCES}{os.pathsep}vaspen{os.sep}resources",
+        # ASE's format plugins (extxyz/vasp/cif/…) are imported lazily via
+        # the format registry — PyInstaller's static analysis cannot see
+        # them, and the exe fails with "No module named 'ase.io.extxyz'".
+        # Collect all ase.io submodules (plus ase.geometry, also lazy).
+        "--collect-submodules", "ase.io",
+        "--collect-submodules", "ase.geometry",
+        # ASE and pymatgen load data files at runtime (ase/spacegroup/
+        # spacegroup.dat for CIF symmetry, ase/collections/*.json for the
+        # molecule builder, pymatgen's periodic_table.json etc.) — static
+        # analysis misses them and the exe fails with "No such file or
+        # directory". Collect all package data for both.
+        "--collect-data", "ase",
+        "--collect-data", "pymatgen",
     ]
     if icon.exists():
         cmd += ["--icon", str(icon)]

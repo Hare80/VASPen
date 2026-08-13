@@ -28,16 +28,27 @@ from ase import Atoms
 from ase.data import atomic_numbers, covalent_radii
 
 from vaspen.core.bonds import find_bonds, mic_vector
+from vaspen.core.transform import rotation_matrix
+from vaspen.core.render_settings import (
+    FILL_DIR,
+    PALETTES,
+    RenderSettings,
+    light_direction,
+)
 from vaspen.utils.logger import logger
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QFontMetricsF,
+    QImage,
     QMatrix4x4,
     QPainter,
+    QPainterPath,
     QPen,
     QSurfaceFormat,
+    QVector3D,
 )
 from vaspen.ui.tools import ToolMode, make_tool
 from PySide6.QtOpenGL import (
@@ -46,6 +57,7 @@ from PySide6.QtOpenGL import (
     QOpenGLFramebufferObjectFormat,
     QOpenGLShader,
     QOpenGLShaderProgram,
+    QOpenGLTexture,
     QOpenGLVertexArrayObject,
 )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
@@ -185,12 +197,13 @@ HIGHLIGHT_COLOR = (1.0, 0.85, 0.0)  # amber/yellow
 NEAR_FADE_START = 0.8
 NEAR_FADE_END = 0.25
 
-# Ball-and-stick scale factors
-SPHERE_SCALE = 0.60   # atom sphere radius = covalent radius × 0.60
+# Ball-and-stick scale factors — the ADJUSTABLE defaults (sphere scale,
+# bond radius, background) live in RenderSettings (core/render_settings.py).
+SPHERE_SCALE = 0.60   # default atom sphere radius = covalent radius × 0.60
 EDGE_SCALE = 1.04     # dark outline sphere drawn slightly larger behind
-BOND_RADIUS = 0.12    # bond cylinder radius (Angstrom)
+BOND_RADIUS = 0.12    # default bond cylinder radius (Angstrom)
 
-BACKGROUND_COLOR = (0.118, 0.118, 0.141)  # #1e1e24 dark
+BACKGROUND_COLOR = (0.118, 0.118, 0.141)  # default background #1e1e24 dark
 
 # Mouse-drag threshold: movement below this is a click, not a drag
 CLICK_DRAG_PX = 4.0
@@ -215,11 +228,6 @@ def element_text_color(symbol: str) -> tuple[float, float, float]:
         factor = 0.62 / luminance
         base = tuple(c * factor for c in base)
     return base
-
-
-def _edge_color(color: tuple[float, float, float]) -> tuple[float, float, float]:
-    """Derive a darker outline color from a base atom color."""
-    return tuple(c * 0.45 for c in color)
 
 
 def _cell_edges(cell: np.ndarray) -> np.ndarray:
@@ -295,8 +303,19 @@ def _cylinder_verts(
     radius: float,
     segments: int = 12,
     lateral_offset: float = 0.0,
+    color_i: tuple[float, float, float] | None = None,
+    color_j: tuple[float, float, float] | None = None,
 ) -> np.ndarray:
-    """Bake bond cylinders into world-space triangle vertices (M×3).
+    """Bake bond cylinders into world-space triangle vertices (M×9).
+
+    Each vertex is pos(3) + radial normal(3) + color(3), so cylinders
+    are lit by the sphere shader like the atoms (previously unlit).
+    Winding is OUTWARD and normals point radially away from the axis
+    (the lateral_offset is a translation along u, so the radial normal
+    is offset-independent). When color_i/color_j are given the i-end
+    half of the cylinder is colored with color_i and the j-end half
+    with color_j (bonds-by-element rendering); the per-vertex color is
+    unused (zero) otherwise.
 
     Args:
         starts: Segment start points (K×3) — atom positions.
@@ -307,9 +326,9 @@ def _cylinder_verts(
             side).
 
     Returns:
-        Flat vertex array for glDrawArrays(GL_TRIANGLES). No normals —
-        bonds are rendered unlit. Ends are open (buried inside the
-        atom spheres, so the joint is seamless).
+        Flat vertex array for glDrawArrays(GL_TRIANGLES). Ends are
+        open (buried inside the atom spheres, so the joint is
+        seamless).
     """
     verts: list[np.ndarray] = []
     for s, e in zip(starts, ends):
@@ -330,15 +349,32 @@ def _cylinder_verts(
             e = e + u * lateral_offset
 
         angles = np.linspace(0.0, 2.0 * np.pi, segments, endpoint=False)
-        ring_s = s + radius * (np.cos(angles)[:, None] * u + np.sin(angles)[:, None] * v)
-        ring_e = e + radius * (np.cos(angles)[:, None] * u + np.sin(angles)[:, None] * v)
+        cos_a = np.cos(angles)
+        sin_a = np.sin(angles)
+        ring_s = s + radius * (cos_a[:, None] * u + sin_a[:, None] * v)
+        ring_e = e + radius * (cos_a[:, None] * u + sin_a[:, None] * v)
+        # Radial normals (point from the cylinder axis to the ring vertex)
+        normals = cos_a[:, None] * u + sin_a[:, None] * v
+        ci = np.asarray(color_i, dtype=np.float32) if color_i is not None \
+            else np.zeros(3, dtype=np.float32)
+        cj = np.asarray(color_j, dtype=np.float32) if color_j is not None \
+            else np.zeros(3, dtype=np.float32)
         for k in range(segments):
             k2 = (k + 1) % segments
             a0, a1 = ring_s[k], ring_s[k2]
             b0, b1 = ring_e[k], ring_e[k2]
-            verts.extend([a0, b0, b1, a0, b1, a1])
+            n0, n1 = normals[k], normals[k2]
+            # OUTWARD winding [a0, b1, b0, a0, a1, b1] — face normals
+            # point away from the axis, consistent with the sphere
+            # geometry (no reliance on the gl_FrontFacing flip).
+            verts.append(np.hstack([a0, n0, ci]))
+            verts.append(np.hstack([b1, n1, cj]))
+            verts.append(np.hstack([b0, n0, cj]))
+            verts.append(np.hstack([a0, n0, ci]))
+            verts.append(np.hstack([a1, n1, ci]))
+            verts.append(np.hstack([b1, n1, cj]))
     if not verts:
-        return np.zeros((0, 3), dtype=np.float32)
+        return np.zeros((0, 9), dtype=np.float32)
     return np.asarray(verts, dtype=np.float32)
 
 
@@ -400,6 +436,10 @@ def _to_qmatrix(m: np.ndarray) -> QMatrix4x4:
     return QMatrix4x4(*np.ascontiguousarray(m, dtype=np.float64).reshape(16).tolist())
 
 
+# Identity model matrix — bonds are baked in world space already.
+_IDENTITY = _to_qmatrix(np.eye(4, dtype=np.float32))
+
+
 # ----------------------------------------------------------------------
 # Shaders (GLSL 3.30 core)
 # ----------------------------------------------------------------------
@@ -408,13 +448,23 @@ _SPHERE_VERT = """
 #version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec3 aColor;
 uniform mat4 uMVP;
+uniform mat4 uModel;
 uniform mat4 uView;
 out vec3 vNormal;
+out vec3 vViewPos;
 out float vViewDepth;
+out vec3 vColor;
 void main() {
     vNormal = aNormal;
-    vec4 viewPos = uView * vec4(aPos, 1.0);
+    vColor = aColor;
+    // View-space position MUST go through the model matrix: the raw
+    // object-space aPos is on the UNIT sphere, and the depth error
+    // (±atom radius, up to ~1 A) is the same order as the near-fade
+    // thresholds — zooming close used to fade the wrong faces.
+    vec4 viewPos = uView * uModel * vec4(aPos, 1.0);
+    vViewPos = viewPos.xyz;
     vViewDepth = -viewPos.z;  // camera looks down -z in view space
     gl_Position = uMVP * vec4(aPos, 1.0);
 }
@@ -422,22 +472,60 @@ void main() {
 
 _SPHERE_FRAG = """
 #version 330 core
-in vec3 vNormal;
+in vec3 vNormal;        // world space
+in vec3 vViewPos;       // view space, unnormalized
 in float vViewDepth;
+in vec3 vColor;
 uniform vec4 uColor;
-uniform float uFadeStart;  // view depth (A) where fading begins
-uniform float uFadeEnd;    // view depth (A) where the atom is fully faded
+uniform mat4 uView;
+uniform vec3 uLightDir;     // world, unit, direction TO the key light
+uniform float uHeadlight;   // 0.0 world-fixed, 1.0 light from the camera
+uniform float uAmbient;
+uniform vec3 uAmbSky;       // hemisphere sky color (world up)
+uniform vec3 uAmbGround;    // hemisphere ground color
+uniform float uDiffuse;
+uniform float uSpecular;
+uniform float uSpecPerAtom; // per-element specular multiplier (0 = none)
+uniform float uShininess;
+uniform float uFillIntensity;
+uniform vec3 uFillDir;      // world, unit
+uniform float uGamma;       // display gamma (2.2)
+uniform float uUseVtxColor; // 1.0 = use per-vertex color (bonds by element)
+uniform float uOpacity;     // global atom/bond opacity (0-1)
+uniform float uFadeStart;   // view depth (A) where fading begins
+uniform float uFadeEnd;     // view depth (A) where the atom is fully faded
 out vec4 fragColor;
 void main() {
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;  // two-sided lighting: correct when viewed from inside
-    float diff = max(dot(n, normalize(vec3(0.35, 0.55, 0.75))), 0.0);
-    float shade = 0.45 + 0.60 * diff;
+
+    // Headlight: the light comes from the camera itself — per-fragment
+    // direction (a constant vec3(0,0,1) would skew off-center atoms).
+    vec3 V = -normalize(vViewPos);
+    vec3 Nv = mat3(uView) * n;
+    vec3 Lv = (uHeadlight > 0.5) ? V : mat3(uView) * uLightDir;
+    vec3 H = normalize(Lv + V);
+
+    // Hemisphere ambient mixes on the WORLD up axis (not view up), so
+    // orbiting the camera below the model does not change the shading.
+    vec3 ambient = mix(uAmbGround, uAmbSky, 0.5 + 0.5 * n.y) * uAmbient;
+    float diff = max(dot(Nv, Lv), 0.0);
+    float spec = (diff > 0.0) ? pow(max(dot(Nv, H), 0.0), uShininess) : 0.0;
+    float fill = uFillIntensity * max(dot(Nv, mat3(uView) * uFillDir), 0.0);
+
+    // Element colors are display-referred sRGB: decode, light, re-encode.
+    // A fully lit surface outputs the exact element color, and gamma
+    // acts as a perceptual lift for the shadowed side.
+    vec3 base = mix(uColor.rgb, vColor, uUseVtxColor);
+    vec3 lin = pow(base, vec3(uGamma)) * (ambient + uDiffuse * diff + fill)
+             + uSpecular * uSpecPerAtom * spec * vec3(1.0);
+    vec3 enc = pow(max(lin, vec3(0.0)), vec3(1.0 / uGamma));
+
     // Near-distance fade (user decision 2026-08-13): atoms fade out as
     // the camera approaches them, so zooming in never shows a
     // cross-section disk through the sphere.
     float fade = smoothstep(uFadeEnd, uFadeStart, vViewDepth);
-    fragColor = vec4(uColor.rgb * shade, uColor.a * fade);
+    fragColor = vec4(enc, uColor.a * uOpacity * fade);
 }
 """
 
@@ -458,6 +546,46 @@ void main() {
     fragColor = uColor;
 }
 """
+
+_GRAD_VERT = """
+#version 330 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec3 aColor;
+out vec3 vColor;
+void main() {
+    vColor = aColor;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}
+"""
+
+_GRAD_FRAG = """
+#version 330 core
+in vec3 vColor;
+out vec4 fragColor;
+void main() {
+    fragColor = vec4(vColor, 1.0);
+}
+"""
+
+# ----------------------------------------------------------------------
+# Label rendering: crisp vector TEXT drawn with QPainter (MS style) —
+# background-colored outline + element-colored fill, no quads/textures.
+# ----------------------------------------------------------------------
+
+def _gradient_verts(
+    top: tuple[float, float, float],
+    bottom: tuple[float, float, float],
+) -> np.ndarray:
+    """Background-gradient fullscreen triangle (NDC, covers the viewport).
+
+    Two bottom vertices carry the bottom color, the top vertex the top
+    color — the rasterizer interpolates the vertical gradient.
+    """
+    return np.array([
+        [-1.0, -1.0, *bottom],
+        [3.0, -1.0, *bottom],
+        [-1.0, 3.0, *top],
+    ], dtype=np.float32)
 
 
 class Viewport3D(QOpenGLWidget):
@@ -488,10 +616,12 @@ class Viewport3D(QOpenGLWidget):
         self._atom_pos = np.zeros((0, 3), dtype=np.float32)
         self._atom_radius = np.zeros(0, dtype=np.float32)
         self._atom_color = np.zeros((0, 4), dtype=np.float32)
-        self._atom_edge = np.zeros((0, 4), dtype=np.float32)
         self._symbols: list[str] = []
-        self._bond_verts = np.zeros((0, 3), dtype=np.float32)
+        self._bond_verts = np.zeros((0, 9), dtype=np.float32)
         self._cell_verts: np.ndarray | None = None
+        # cell frame drawn as screen-space quads (glLineWidth is a no-op
+        # on core profiles) — rebuilt per frame from _cell_verts
+        self._cell_frame_verts = np.zeros((0, 3), dtype=np.float32)
         self._selected_indices: set[int] = set()
         self._selected_bonds: set[int] = set()  # bond list indices
         self._preview_indices: set[int] = set()
@@ -507,11 +637,13 @@ class Viewport3D(QOpenGLWidget):
         self._preview_dirty = False     # bond geometry needs a rebake (drag preview)
         # Display style (parameter pack over the existing renderer)
         self._covalent_radii = np.zeros(0, dtype=np.float32)  # unscaled
-        self._style = "ball_stick"      # "ball_stick" | "cpk" | "wireframe"
-        self._show_bonds = True
-        self._show_cell = True
-        self._show_labels = False
-        self._background_color = BACKGROUND_COLOR
+        # All adjustable render parameters live in a RenderSettings
+        # object (View → Display Options edits it live; AppConfig
+        # persists it). _light_dir is the cached unit light vector.
+        self._render_settings = RenderSettings.default()
+        self._light_dir = np.asarray(
+            light_direction(25.0, 33.6), dtype=np.float32)
+        self._grad_verts = np.zeros((0, 5), dtype=np.float32)
         self._data_dirty = False
 
         # Interaction mode (tool dispatch — tools live in ui/tools.py)
@@ -527,6 +659,7 @@ class Viewport3D(QOpenGLWidget):
         self._cam_elevation = 30.0
         self._cam_up = np.array([0.0, 1.0, 0.0])  # world up for the view
         self._fit_radius = 5.0
+        self._fit_distance = 10.0  # camera distance after the last fit (label zoom reference)
         self._view_fitted = False  # True once _fit_camera has run
         self._has_cell = False  # set in set_structure; controls fit view
         self._cell = np.eye(3, dtype=np.float64)
@@ -538,6 +671,7 @@ class Viewport3D(QOpenGLWidget):
         self._gl_failed = False
         self._sphere_prog: QOpenGLShaderProgram | None = None
         self._flat_prog: QOpenGLShaderProgram | None = None
+        self._grad_prog: QOpenGLShaderProgram | None = None
         self._unit_vao: QOpenGLVertexArrayObject | None = None
         self._unit_vbo: QOpenGLBuffer | None = None
         self._unit_ibo: QOpenGLBuffer | None = None
@@ -547,8 +681,15 @@ class Viewport3D(QOpenGLWidget):
         self._bond_n_verts = 0
         self._cell_vao: QOpenGLVertexArrayObject | None = None
         self._cell_vbo: QOpenGLBuffer | None = None
+        self._grad_vao: QOpenGLVertexArrayObject | None = None
+        self._grad_vbo: QOpenGLBuffer | None = None
         self._pick_fbo: QOpenGLFramebufferObject | None = None
         self._pick_fbo_size: tuple[int, int] = (0, 0)
+        # Cached uniform locations (filled by initializeGL) — PySide6
+        # has no (name, float) setUniformValue overload, so floats are
+        # set by location.
+        self._u_loc: dict[str, int] = {}
+        self._far_plane = 100.0
 
         # Mouse interaction state
         self._press_button: Qt.MouseButton | None = None
@@ -589,8 +730,7 @@ class Viewport3D(QOpenGLWidget):
             self._atom_pos = np.zeros((0, 3), dtype=np.float32)
             self._atom_radius = np.zeros(0, dtype=np.float32)
             self._atom_color = np.zeros((0, 4), dtype=np.float32)
-            self._atom_edge = np.zeros((0, 4), dtype=np.float32)
-            self._bond_verts = np.zeros((0, 3), dtype=np.float32)
+            self._bond_verts = np.zeros((0, 9), dtype=np.float32)
             self._bonds = []
             self._bond_ranges = []
             self._cell_verts = None
@@ -603,21 +743,17 @@ class Viewport3D(QOpenGLWidget):
 
             radii = []
             colors = []
-            edges = []
             for sym in symbols:
                 z = atomic_numbers.get(sym, 0)
                 r = float(covalent_radii[z] if 0 < z < len(covalent_radii) else 0.77)
-                base = element_color(sym)
+                base = self._effective_atom_color(sym)
                 radii.append(r)
-                colors.append((base[0], base[1], base[2], 1.0))
-                e = _edge_color(base)
-                edges.append((e[0], e[1], e[2], 1.0))
+                colors.append((base[0], base[1], base[2], base[3]))
 
             self._atom_pos = positions
             self._covalent_radii = np.asarray(radii, dtype=np.float32)
             self._apply_display()
             self._atom_color = np.asarray(colors, dtype=np.float32)
-            self._atom_edge = np.asarray(edges, dtype=np.float32)
 
             # Cell/pbc must be updated BEFORE baking the bonds —
             # _bake_bond_verts uses them for the minimum-image vectors
@@ -657,6 +793,10 @@ class Viewport3D(QOpenGLWidget):
         positions = self._atom_pos
         cell = self._cell
         pbc = self._pbc
+        # Vertex colors for bonds-by-element rendering (i-end takes the
+        # color of atom i, j-end of atom j) — baked per frame with the
+        # geometry; unused when the setting is off (uUseVtxColor = 0).
+        bake_colors = self._render_settings.bonds_by_element
         self._bond_ranges = []
         pieces = []
         offset = 0
@@ -664,16 +804,23 @@ class Viewport3D(QOpenGLWidget):
             s = np.asarray([positions[b.i]], dtype=np.float64)
             e = np.asarray([positions[b.i] + mic_vector(
                 b.i, b.j, positions, cell, pbc)], dtype=np.float64)
+            ci = tuple(float(c) for c in self._atom_color[b.i][:3]) if bake_colors else None
+            cj = tuple(float(c) for c in self._atom_color[b.j][:3]) if bake_colors else None
             bond_pieces: list[np.ndarray] = []
             if b.order == 2:
                 # thinner components so the parallel sticks stay
                 # visually separate (they would merge at 0.12 Å)
-                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.09))
-                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.09))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.09,
+                                                   color_i=ci, color_j=cj))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.09,
+                                                   color_i=ci, color_j=cj))
             elif b.order == 3:
-                bond_pieces.append(_cylinder_verts(s, e, 0.05))
-                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.12))
-                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.12))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05,
+                                                   color_i=ci, color_j=cj))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.12,
+                                                   color_i=ci, color_j=cj))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.12,
+                                                   color_i=ci, color_j=cj))
             elif b.order == 4:
                 axis = e[0] - s[0]
                 for d in range(6):
@@ -682,15 +829,18 @@ class Viewport3D(QOpenGLWidget):
                     if t1 <= t0:
                         continue
                     bond_pieces.append(_cylinder_verts(
-                        s + axis * t0, s + axis * t1, BOND_RADIUS))
+                        s + axis * t0, s + axis * t1, self._render_settings.bond_radius,
+                        color_i=ci, color_j=cj))
             else:
-                bond_pieces.append(_cylinder_verts(s, e, BOND_RADIUS))
+                bond_pieces.append(_cylinder_verts(
+                    s, e, self._render_settings.bond_radius,
+                    color_i=ci, color_j=cj))
             count = sum(len(p) for p in bond_pieces)
             self._bond_ranges.append((offset, count))
             offset += count
             pieces.extend(p for p in bond_pieces if len(p))
         self._bond_verts = (np.concatenate(pieces) if pieces
-                            else np.zeros((0, 3), dtype=np.float32))
+                            else np.zeros((0, 9), dtype=np.float32))
 
     def highlight_atom(self, index: int | None) -> None:
         """Highlight the atom at index (None clears) — legacy single API."""
@@ -717,39 +867,114 @@ class Viewport3D(QOpenGLWidget):
 
     def _apply_display(self) -> None:
         """Apply the current style to the atom radii / bond visibility."""
-        if self._style == "cpk":
+        rs = self._render_settings
+        if rs.style == "cpk":
             self._atom_radius = self._covalent_radii.copy()
-        elif self._style == "wireframe":
+        elif rs.style == "wireframe":
             self._atom_radius = self._covalent_radii * 0.25
         else:  # ball_stick
-            self._atom_radius = self._covalent_radii * SPHERE_SCALE
-        self._show_bonds = self._style != "cpk"
+            self._atom_radius = self._covalent_radii * rs.sphere_scale
         self.update()
+
+    @property
+    def _show_bonds(self) -> bool:
+        """Bonds are hidden in the CPK (space-filling) style."""
+        return self._render_settings.style != "cpk"
+
+    @property
+    def _show_cell(self) -> bool:
+        return self._render_settings.show_cell
+
+    @property
+    def _show_labels(self) -> bool:
+        return self._render_settings.show_labels
+
+    def set_render_settings(self, rs: RenderSettings) -> None:
+        """Replace the whole render settings object and re-render.
+
+        The existing granular setters below all funnel through this so
+        the View menu wiring keeps working unchanged.
+        """
+        old = self._render_settings
+        self._render_settings = RenderSettings.from_dict(rs.to_dict())
+        self._light_dir = np.asarray(
+            light_direction(rs.light_azimuth, rs.light_elevation),
+            dtype=np.float32,
+        )
+        self._grad_verts = _gradient_verts(
+            self._render_settings.gradient_top,
+            self._render_settings.gradient_bottom,
+        )
+        self._apply_display()
+        if self._bonds and old.bond_radius != self._render_settings.bond_radius:
+            # the radius is baked into the bond triangles
+            self._bake_bond_verts()
+        if old.color_scheme != self._render_settings.color_scheme \
+                or old.atom_colors != self._render_settings.atom_colors \
+                or old.bonds_by_element != self._render_settings.bonds_by_element:
+            # element colors feed the atom AND bond vertex arrays
+            self._recolor_atoms()
+            if self._bonds:
+                self._bake_bond_verts()
+        # uniform/gradient changes need a buffer (re)upload — cheap, and
+        # simpler than diffing every field
+        self._data_dirty = True
+        self.update()
+
+    def render_settings(self) -> RenderSettings:
+        """The current render settings object."""
+        return self._render_settings
+
+    def _recolor_atoms(self) -> None:
+        """Rebuild the per-atom color array from the settings."""
+        colors = []
+        for sym in self._symbols:
+            base = self._effective_atom_color(sym)
+            colors.append((base[0], base[1], base[2], base[3]))
+        self._atom_color = np.asarray(colors, dtype=np.float32)
+
+    def _effective_atom_color(self, symbol: str) -> tuple[float, float, float, float]:
+        """Element RGBA honoring overrides → color scheme → Jmol.
+
+        The alpha channel comes from the per-element override table
+        (default 1.0 = opaque); the 3D view is the only consumer — the
+        structure tree keeps its own readable text colors.
+        """
+        rs = self._render_settings
+        override = rs.atom_colors.get(symbol)
+        if override is not None:
+            return (override[0], override[1], override[2], override[3])
+        rgb = PALETTES.get(rs.color_scheme, {}).get(symbol, element_color(symbol))
+        return (rgb[0], rgb[1], rgb[2], 1.0)
+
+    def structure_symbols(self) -> list[str]:
+        """Sorted unique element symbols of the displayed structure."""
+        return sorted(set(self._symbols))
 
     def set_structure_style(self, style: str) -> None:
         """Switch the display style: "ball_stick" | "cpk" | "wireframe"."""
         if style not in ("ball_stick", "cpk", "wireframe"):
             raise ValueError(f"Unknown display style: {style}")
-        self._style = style
+        self._render_settings.style = style
         self._apply_display()
 
     def structure_style(self) -> str:
         """The current display style."""
-        return self._style
+        return self._render_settings.style
 
     def set_show_cell(self, visible: bool) -> None:
         """Show/hide the unit cell frame."""
-        self._show_cell = visible
+        self._render_settings.show_cell = bool(visible)
         self.update()
 
     def set_show_labels(self, visible: bool) -> None:
         """Show/hide element labels (only for structures ≤ 500 atoms)."""
-        self._show_labels = visible
+        self._render_settings.show_labels = bool(visible)
         self.update()
 
     def set_background_color(self, color: tuple[float, float, float]) -> None:
         """Set the viewport background color (RGB 0-1)."""
-        self._background_color = tuple(float(c) for c in color)
+        self._render_settings.background_color = tuple(float(c) for c in color)
         self.update()
 
     def reset_view(self) -> None:
@@ -826,6 +1051,7 @@ class Viewport3D(QOpenGLWidget):
         # Ortho framing: the visible half-height IS the camera distance,
         # so d = 1.35×R frames the bounding sphere with a 35% margin.
         self._cam_distance = max(self._fit_radius * 1.35, 1.0)
+        self._fit_distance = self._cam_distance
         self._view_fitted = True
 
         if self._has_cell:
@@ -901,6 +1127,7 @@ class Viewport3D(QOpenGLWidget):
         else:
             extent = self._fit_radius
         far = self._cam_distance + extent + 5.0
+        self._far_plane = float(far)  # depth-cue reference (read in paintGL)
         proj = _ortho(-half_w, half_w, -half_h, half_h, near, far)
         return proj, view
 
@@ -917,6 +1144,16 @@ class Viewport3D(QOpenGLWidget):
 
             self._sphere_prog = self._build_program(_SPHERE_VERT, _SPHERE_FRAG)
             self._flat_prog = self._build_program(_FLAT_VERT, _FLAT_FRAG)
+            self._grad_prog = self._build_program(_GRAD_VERT, _GRAD_FRAG)
+
+            # Cached uniform locations (floats are set by location —
+            # PySide6 has no (name, float) setUniformValue overload).
+            for name in (
+                "uHeadlight", "uAmbient", "uDiffuse", "uSpecular",
+                "uSpecPerAtom", "uShininess", "uFillIntensity", "uGamma",
+                "uUseVtxColor", "uOpacity", "uFadeStart", "uFadeEnd",
+            ):
+                self._u_loc[name] = self._sphere_prog.uniformLocation(name)
 
             # Unit icosphere (shared by all atoms — scaled per atom)
             verts, faces = _unit_icosphere()
@@ -932,17 +1169,46 @@ class Viewport3D(QOpenGLWidget):
             self._sphere_prog.enableAttributeArray(loc_nrm)
             self._sphere_prog.setAttributeBuffer(loc_pos, GL_FLOAT, 0, 3, 24)
             self._sphere_prog.setAttributeBuffer(loc_nrm, GL_FLOAT, 12, 3, 24)
+            # aColor (location 2) stays DISABLED on the unit VAO — a
+            # disabled array reads as (0,0,0) and uUseVtxColor = 0 makes
+            # the shader ignore it.
             self._unit_vao.release()
 
-            # Bond / cell buffers (content uploaded on demand)
+            # Bond buffer (content uploaded on demand). Vertices are
+            # pos(3) + normal(3) + color(3), stride 36. The VAO carries
+            # pointers for BOTH programs: the lit sphere program reads
+            # all three attributes, the flat program (used by the
+            # ID-color pick pass) reads position only.
             self._bond_vao, self._bond_vbo, _ = self._make_mesh(
-                np.zeros((0, 3), dtype=np.float32), None
+                np.zeros((0, 9), dtype=np.float32), None
             )
             self._bond_vao.bind()
             loc_b = self._flat_prog.attributeLocation("aPos")
             self._flat_prog.enableAttributeArray(loc_b)
-            self._flat_prog.setAttributeBuffer(loc_b, GL_FLOAT, 0, 3, 12)
+            self._flat_prog.setAttributeBuffer(loc_b, GL_FLOAT, 0, 3, 36)
+            self._sphere_prog.enableAttributeArray(loc_pos)
+            self._sphere_prog.enableAttributeArray(loc_nrm)
+            self._sphere_prog.enableAttributeArray(
+                self._sphere_prog.attributeLocation("aColor"))
+            self._sphere_prog.setAttributeBuffer(loc_pos, GL_FLOAT, 0, 3, 36)
+            self._sphere_prog.setAttributeBuffer(loc_nrm, GL_FLOAT, 12, 3, 36)
+            self._sphere_prog.setAttributeBuffer(
+                self._sphere_prog.attributeLocation("aColor"),
+                GL_FLOAT, 24, 3, 36)
             self._bond_vao.release()
+
+            # Background-gradient fullscreen triangle (uploaded on demand)
+            self._grad_vao, self._grad_vbo, _ = self._make_mesh(
+                np.zeros((0, 5), dtype=np.float32), None
+            )
+            self._grad_vao.bind()
+            loc_gp = self._grad_prog.attributeLocation("aPos")
+            loc_gc = self._grad_prog.attributeLocation("aColor")
+            self._grad_prog.enableAttributeArray(loc_gp)
+            self._grad_prog.enableAttributeArray(loc_gc)
+            self._grad_prog.setAttributeBuffer(loc_gp, GL_FLOAT, 0, 2, 20)
+            self._grad_prog.setAttributeBuffer(loc_gc, GL_FLOAT, 8, 3, 20)
+            self._grad_vao.release()
 
             self._cell_vao, self._cell_vbo, _ = self._make_mesh(
                 np.zeros((0, 3), dtype=np.float32), None
@@ -1014,16 +1280,19 @@ class Viewport3D(QOpenGLWidget):
 
         self._cell_vao.bind()
         self._cell_vbo.bind()
-        if self._cell_verts is not None:
-            self._cell_vbo.allocate(self._cell_verts.tobytes(), self._cell_verts.nbytes)
-        else:
-            self._cell_vbo.allocate(b"", 0)
+        self._cell_vbo.allocate(
+            self._cell_frame_verts.tobytes(), self._cell_frame_verts.nbytes)
         self._cell_vao.release()
 
         self._meas_vao.bind()
         self._meas_vbo.bind()
         self._meas_vbo.allocate(self._meas_verts.tobytes(), self._meas_verts.nbytes)
         self._meas_vao.release()
+
+        self._grad_vao.bind()
+        self._grad_vbo.bind()
+        self._grad_vbo.allocate(self._grad_verts.tobytes(), self._grad_verts.nbytes)
+        self._grad_vao.release()
         self._data_dirty = False
 
     def paintGL(self) -> None:
@@ -1042,8 +1311,24 @@ class Viewport3D(QOpenGLWidget):
 
         gl = self._gl
         gl.glViewport(0, 0, fb_w, fb_h)
-        gl.glClearColor(*self._background_color, 1.0)
-        gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        if self._data_dirty:
+            self._upload_scene_buffers()
+
+        rs = self._render_settings
+        if rs.background_gradient and len(self._grad_verts) > 0:
+            # VESTA-style gradient background: a fullscreen triangle
+            # (bottom color → top color) instead of a flat clear.
+            gl.glClear(GL_DEPTH_BUFFER_BIT)
+            self._grad_prog.bind()
+            self._grad_vao.bind()
+            gl.glDisable(GL_DEPTH_TEST)
+            gl.glDrawArrays(GL_TRIANGLES, 0, len(self._grad_verts))
+            self._grad_vao.release()
+            self._grad_prog.release()
+            gl.glEnable(GL_DEPTH_TEST)
+        else:
+            gl.glClearColor(*rs.background_color, 1.0)
+            gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         gl.glEnable(GL_DEPTH_TEST)
 
         if len(self._atom_pos) == 0:
@@ -1052,9 +1337,6 @@ class Viewport3D(QOpenGLWidget):
                 "(File → Open, or drag-and-drop)"
             ))
             return
-
-        if self._data_dirty:
-            self._upload_scene_buffers()
 
         proj, view = self._camera_matrices()
 
@@ -1071,40 +1353,59 @@ class Viewport3D(QOpenGLWidget):
             self._rebuild_meas_dashes()
             self._upload_meas_buffer()
 
+        # Cell frame quads are screen-space too (width in px): rebuild
+        # + upload every frame so the width is zoom-proof.
+        if self._show_cell and self._cell_verts is not None \
+                and len(self._cell_verts) > 0:
+            self._rebuild_cell_frame_verts()
+            self._upload_cell_buffer()
+
         # --- Atom spheres (edge pass, then body pass) ---
         # Blending is on so the near-distance fade in the shader
         # actually fades instead of showing the raw cross-section.
         self._sphere_prog.bind()
         self._sphere_prog.setUniformValue("uView", _to_qmatrix(view))
-        # PySide6 has no (name, float) overload for setUniformValue —
-        # set by location instead.
-        self._sphere_prog.setUniformValue(
-            self._sphere_prog.uniformLocation("uFadeStart"), NEAR_FADE_START)
-        self._sphere_prog.setUniformValue(
-            self._sphere_prog.uniformLocation("uFadeEnd"), NEAR_FADE_END)
+        u = self._u_loc
+        self._sphere_prog.setUniformValue("uLightDir", QVector3D(*self._light_dir))
+        self._sphere_prog.setUniformValue("uAmbSky", QVector3D(*rs.ambient_sky))
+        self._sphere_prog.setUniformValue("uAmbGround", QVector3D(*rs.ambient_ground))
+        self._sphere_prog.setUniformValue("uFillDir", QVector3D(*FILL_DIR))
+        # Float uniforms MUST go through raw glUniform1f: PySide6's
+        # setUniformValue(location, float) overload silently does
+        # nothing in this build (verified by glGetUniformfv readback —
+        # every location-set float stayed 0, rendering atoms black).
+        gl.glUniform1f(u["uHeadlight"], 1.0 if rs.headlight else 0.0)
+        gl.glUniform1f(u["uAmbient"], float(rs.ambient))
+        gl.glUniform1f(u["uDiffuse"], float(rs.diffuse))
+        gl.glUniform1f(u["uSpecular"], float(rs.specular))
+        gl.glUniform1f(u["uShininess"], float(rs.shininess))
+        gl.glUniform1f(u["uFillIntensity"], float(rs.fill_intensity))
+        gl.glUniform1f(u["uGamma"], float(rs.gamma))
+        gl.glUniform1f(u["uOpacity"], float(rs.atom_opacity))
+        gl.glUniform1f(u["uFadeStart"], NEAR_FADE_START)
+        gl.glUniform1f(u["uFadeEnd"], NEAR_FADE_END)
+        # Specular highlights apply to all atoms uniformly (the old
+        # metals-only distinction was removed by user decision).
+        spec_on = 1.0 if rs.specular_enabled else 0.0
         self._unit_vao.bind()
         gl.glEnable(GL_BLEND)
         gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         for i in range(len(self._atom_pos)):
             scale = float(self._atom_radius[i])
             if i in self._selected_indices or i in self._preview_indices:
-                color = (*HIGHLIGHT_COLOR, 1.0)
-                edge = _edge_color(HIGHLIGHT_COLOR)
-                edge = (*edge, 1.0)
+                # highlight keeps the element's opacity override
+                color = (*HIGHLIGHT_COLOR, float(self._atom_color[i][3]))
             else:
                 color = tuple(float(c) for c in self._atom_color[i])
-                edge = tuple(float(c) for c in self._atom_edge[i])
 
             pos = self._atom_pos[i]
-            mvp = proj @ view @ _sphere_model(pos, scale * EDGE_SCALE)
+            model = _sphere_model(pos, scale)
+            mvp = proj @ view @ model
             self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
-            self._sphere_prog.setUniformValue("uColor", *edge)
-            gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
-                              GL_UNSIGNED_INT, VoidPtr(0))
-
-            mvp = proj @ view @ _sphere_model(pos, scale)
-            self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
+            self._sphere_prog.setUniformValue("uModel", _to_qmatrix(model))
             self._sphere_prog.setUniformValue("uColor", *color)
+            gl.glUniform1f(u["uSpecPerAtom"], spec_on)
+            gl.glUniform1f(u["uUseVtxColor"], 0.0)
             gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
                               GL_UNSIGNED_INT, VoidPtr(0))
 
@@ -1113,54 +1414,75 @@ class Viewport3D(QOpenGLWidget):
             z = atomic_numbers.get(self.current_element, 0)
             ghost_radius = (
                 float(covalent_radii[z]) if 0 < z < len(covalent_radii) else 0.77
-            ) * SPHERE_SCALE
-            ghost_color = element_color(self.current_element)
-            mvp = proj @ view @ _sphere_model(
+            ) * rs.sphere_scale
+            ghost_color = self._effective_atom_color(self.current_element)
+            model = _sphere_model(
                 np.asarray(self._ghost_pos, dtype=np.float32), ghost_radius)
+            mvp = proj @ view @ model
             self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
-            self._sphere_prog.setUniformValue("uColor", *ghost_color, 0.55)
+            self._sphere_prog.setUniformValue("uModel", _to_qmatrix(model))
+            self._sphere_prog.setUniformValue("uColor", *ghost_color[:3], 0.55)
+            gl.glUniform1f(u["uSpecPerAtom"], spec_on)
+            gl.glUniform1f(u["uUseVtxColor"], 0.0)
             gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
                               GL_UNSIGNED_INT, VoidPtr(0))
-        gl.glDisable(GL_BLEND)
-        self._unit_vao.release()
 
-        # --- Bonds (unlit cylinders; selected bonds highlighted) ---
+        # --- Bonds (lit cylinders; selected bonds highlighted) ---
+        # Drawn with the sphere program inside the blended block: the
+        # radial normals give them VESTA-style shading and the near
+        # fade applies to them too. Bond vertices are world-space, so
+        # the model matrix is the identity.
         if self._bond_n_verts > 0 and self._show_bonds:
-            self._flat_prog.bind()
             self._bond_vao.bind()
-            self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
-            if self._selected_bonds:
+            self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
+            self._sphere_prog.setUniformValue("uModel", _IDENTITY)
+            gl.glUniform1f(u["uSpecPerAtom"], 0.5 * spec_on)
+            use_vtx = 1.0 if rs.bonds_by_element else 0.0
+            # Bonds fade together with their atoms: per-element opacity
+            # overrides produce per-bond alphas (mean of the two atoms);
+            # a uniform scene stays a single draw call.
+            bond_alphas = self._bond_alphas()
+            if self._selected_bonds or bond_alphas is not None:
                 # per-bond colors: amber for selected, gray otherwise
                 for k, (first, count) in enumerate(self._bond_ranges):
                     if count == 0:
                         continue
                     if k in self._selected_bonds:
-                        self._flat_prog.setUniformValue("uColor", *HIGHLIGHT_COLOR, 1.0)
+                        self._sphere_prog.setUniformValue(
+                            "uColor", *HIGHLIGHT_COLOR, 1.0)
+                        gl.glUniform1f(u["uUseVtxColor"], 0.0)
                     else:
-                        self._flat_prog.setUniformValue("uColor", 0.55, 0.55, 0.55, 1.0)
+                        alpha = 1.0 if bond_alphas is None else float(bond_alphas[k])
+                        self._sphere_prog.setUniformValue(
+                            "uColor", 0.55, 0.55, 0.55, alpha)
+                        gl.glUniform1f(u["uUseVtxColor"], use_vtx)
                     gl.glDrawArrays(GL_TRIANGLES, first, count)
             else:
-                self._flat_prog.setUniformValue("uColor", 0.55, 0.55, 0.55, 1.0)
+                self._sphere_prog.setUniformValue("uColor", 0.55, 0.55, 0.55, 1.0)
+                gl.glUniform1f(u["uUseVtxColor"], use_vtx)
                 gl.glDrawArrays(GL_TRIANGLES, 0, self._bond_n_verts)
             self._bond_vao.release()
+        gl.glDisable(GL_BLEND)
+        self._unit_vao.release()
 
-        # --- Unit cell outline (faint blue, only when periodic) ---
-        # Depth-tested like normal geometry: parts of the frame behind
-        # atoms are occluded by the ball-and-stick model (user
-        # preference — the frame must not float on top). GL_DEPTH_CLAMP
-        # keeps the frame fully visible even when the camera is inside
-        # the cell or past a wall: vertices behind the near plane are
-        # clamped instead of clipped, so the frame never shows a
-        # near-plane "cross-section".
+        # --- Unit cell frame (only when periodic) ---
+        # Drawn as screen-space quads of width cell_line_width px —
+        # glLineWidth > 1 is silently ignored on GL core profiles, so
+        # wide lines must be triangle geometry. Depth-TESTED like
+        # normal geometry (atoms in front occlude the frame) AND
+        # depth-CLAMPED: without the clamp, quad vertices passing
+        # behind the near plane get clipped and the edges break into
+        # dashed gaps whenever the camera is inside the cell or the
+        # cell extends past the camera.
         if self._show_cell and self._cell_verts is not None and len(self._cell_verts) > 0:
             self._flat_prog.bind()
             self._cell_vao.bind()
             self._flat_prog.setUniformValue("uMVP", _to_qmatrix(proj @ view))
-            self._flat_prog.setUniformValue("uColor", 0.55, 0.65, 0.85, 0.35)
+            self._flat_prog.setUniformValue("uColor", *rs.cell_color, 1.0)
             gl.glEnable(GL_DEPTH_CLAMP)
             gl.glEnable(GL_BLEND)
             gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-            gl.glDrawArrays(GL_LINES, 0, len(self._cell_verts))
+            gl.glDrawArrays(GL_TRIANGLES, 0, len(self._cell_frame_verts))
             gl.glDisable(GL_DEPTH_CLAMP)
             gl.glDisable(GL_BLEND)
             self._cell_vao.release()
@@ -1196,22 +1518,19 @@ class Viewport3D(QOpenGLWidget):
             font = QFont(self.font())
             font.setPointSize(9)
             painter.setFont(font)
-            painter.drawText(QPointF(s[0] + 8.0, s[1] - 6.0), text)
+            self._draw_halo_text(painter, QPointF(s[0] + 8.0, s[1] - 6.0), text)
             painter.end()
 
-        # Atom labels (element symbols; capped to keep the overlay fast)
+        # Atom labels (element symbols; capped to keep the overlay fast).
+        # MS-style vector text: background-colored outline + element
+        # color fill, zoom-adaptive size. Drawn on top of the GL scene.
         if self._show_labels and 0 < len(self._atom_pos) <= 500:
-            painter = QPainter(self)
-            painter.setPen(QColor(225, 225, 225))
-            font = QFont(self.font())
-            font.setPointSize(8)
-            painter.setFont(font)
-            for i, pos in enumerate(self._atom_pos):
-                s = self.project_to_screen(pos)
-                if s is None:
-                    continue
-                painter.drawText(QPointF(s[0] + 4.0, s[1] - 4.0), self._symbols[i])
-            painter.end()
+            self._paint_atom_labels()
+
+        # Cell corner labels O/A/B/C (VESTA convention, own font size)
+        if (self._render_settings.show_cell_corners
+                and self._cell_verts is not None):
+            self._paint_cell_corner_labels()
 
         # Ghost bond preview (anchor → ghost atom, screen-space line)
         if self._ghost_bond_from is not None and self._ghost_pos is not None:
@@ -1230,10 +1549,194 @@ class Viewport3D(QOpenGLWidget):
             painter.drawRect(self._rubber_rect)
             painter.end()
 
+        # Orientation axes indicator (bottom-right, rotates with the view)
+        if self._render_settings.show_axes:
+            self._paint_axes_indicator()
+
+    def _overlay_text_color(self) -> QColor:
+        """Adaptive overlay text color for dark/light backgrounds."""
+        bg = self._render_settings.background_color
+        luminance = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]
+        if luminance > 0.5:
+            return QColor(30, 30, 30)
+        return QColor(225, 225, 225)
+
+    def _label_color(self, symbol: str) -> QColor:
+        """Element color adjusted to keep the label readable against the
+        background (paper-figure style labels).
+
+        Elements whose luminance sits within 0.3 of the background are
+        pushed away from it: dark elements on a dark background get
+        brightened, light elements on a light background get darkened.
+        """
+        bg = self._render_settings.background_color
+        bg_lum = 0.299 * bg[0] + 0.587 * bg[1] + 0.114 * bg[2]
+        # labels follow the atom's ACTUAL color (override → scheme → Jmol)
+        base = list(self._effective_atom_color(symbol)[:3])
+        lum = 0.299 * base[0] + 0.587 * base[1] + 0.114 * base[2]
+        gap = 0.3  # minimum luminance distance from the background
+        if lum > 1e-6:
+            if lum - bg_lum < gap and bg_lum < 0.5:
+                scale = (bg_lum + gap) / lum
+                if scale > 1.0:
+                    base = [min(1.0, c * scale) for c in base]
+            elif bg_lum - lum < gap and bg_lum > 0.5:
+                scale = (bg_lum - gap) / lum
+                if scale < 1.0:
+                    base = [max(0.0, c * scale) for c in base]
+        return QColor.fromRgbF(*base)
+
+    def _draw_halo_text(self, painter: QPainter, pos: QPointF, text: str) -> None:
+        """Draw text with a background-colored halo (8 offsets).
+
+        The halo is painted in the background color around the glyphs,
+        so labels separate from the atoms behind them — the text never
+        blends into a sphere or stick of a similar color.
+        """
+        halo = QColor.fromRgbF(*self._render_settings.background_color)
+        fill = painter.pen().color()
+        painter.setPen(halo)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    painter.drawText(pos + QPointF(dx, dy), text)
+        painter.setPen(fill)
+        painter.drawText(pos, text)
+
+    def _draw_outlined_text(
+        self,
+        painter: QPainter,
+        pos: QPointF,
+        text: str,
+        fill_color: QColor,
+    ) -> None:
+        """MS-style label text: 2 px background-colored outline around
+        the glyphs + element-colored fill (vector text, always crisp)."""
+        path = QPainterPath()
+        path.addText(pos.x(), pos.y(), painter.font(), text)
+        halo = QColor.fromRgbF(*self._render_settings.background_color)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(halo, 2.0))
+        painter.drawPath(path)
+        painter.fillPath(path, fill_color)
+
+    def _paint_atom_labels(self) -> None:
+        """Element labels for the displayed atoms (≤ 500)."""
+        painter = QPainter(self)
+        font = QFont(self.font())
+        font.setPointSizeF(
+            self._render_settings.label_size * self._label_scale())
+        font.setBold(True)
+        painter.setFont(font)
+        for i, pos in enumerate(self._atom_pos):
+            s = self.project_to_screen(pos)
+            if s is None:
+                continue
+            self._draw_outlined_text(
+                painter, QPointF(s[0] + 6.0, s[1] - 6.0),
+                self._symbols[i], self._label_color(self._symbols[i]))
+        painter.end()
+
+    def _paint_cell_corner_labels(self) -> None:
+        """O/A/B/C labels at the four cell vertices (VESTA convention),
+        with their own independent font size."""
+        painter = QPainter(self)
+        font = QFont(self.font())
+        font.setPointSizeF(
+            self._render_settings.corner_label_size * self._label_scale())
+        font.setBold(True)
+        painter.setFont(font)
+        fill = self._overlay_text_color()
+        for label, corner in (
+            ("O", (0.0, 0.0, 0.0)),
+            ("A", self._cell[0]),
+            ("B", self._cell[1]),
+            ("C", self._cell[2]),
+        ):
+            s = self.project_to_screen(np.asarray(corner, dtype=float))
+            if s is None:
+                continue
+            self._draw_outlined_text(
+                painter, QPointF(s[0] + 5.0, s[1] - 5.0), label, fill)
+        painter.end()
+
+    def _label_scale(self) -> float:
+        """Zoom-adaptive label size factor.
+
+        Labels grow when the camera zooms in and shrink when it zooms
+        out, relative to the last fitted distance (square-root curve,
+        clamped 0.6–2.5 so they stay readable but never overwhelm).
+        """
+        if self._fit_distance <= 0.0 or self._cam_distance <= 0.0:
+            return 1.0
+        return min(2.5, max(0.6, (self._fit_distance / self._cam_distance) ** 0.5))
+
+    def _bond_alphas(self) -> np.ndarray | None:
+        """Per-bond alpha values, or None when the scene is uniform.
+
+        Bonds fade together with their atoms (VMD/ChimeraX convention):
+        a bond's alpha is the mean of its two atoms' per-element
+        opacities. None means every alpha is 1.0 and the bonds can be
+        drawn in a single draw call. The global atom_opacity applies
+        uniformly via the uOpacity shader uniform and needs no
+        per-bond handling.
+        """
+        overrides = self._render_settings.atom_colors
+        if not overrides:
+            return None
+        alphas = np.ones(len(self._bonds), dtype=np.float32)
+        varying = False
+        for k, b in enumerate(self._bonds):
+            ai = overrides.get(self._symbols[b.i], (0.0, 0.0, 0.0, 1.0))[3]
+            aj = overrides.get(self._symbols[b.j], (0.0, 0.0, 0.0, 1.0))[3]
+            alphas[k] = 0.5 * (ai + aj)
+            if ai < 1.0 or aj < 1.0:
+                varying = True
+        return alphas if varying else None
+
+    def _paint_axes_indicator(self) -> None:
+        """Small RGB orientation axes in the bottom-right corner."""
+        _proj, view = self._camera_matrices()
+        rot = view[:3, :3]
+        origin = QPointF(self.width() - 52.0, self.height() - 52.0)
+        length = 36.0
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        font = QFont(self.font())
+        font.setPointSize(8)
+        font.setBold(True)
+        for axis, color, label in (
+            (0, QColor(224, 70, 70), "X"),
+            (1, QColor(70, 180, 70), "Y"),
+            (2, QColor(80, 110, 230), "Z"),
+        ):
+            world = np.zeros(3)
+            world[axis] = 1.0
+            # screen-space direction of the world axis (right/up rows of
+            # the view rotation; screen y points down)
+            sx = float(rot[0] @ world)
+            sy = -float(rot[1] @ world)
+            norm = math.hypot(sx, sy)
+            if norm < 1e-6:
+                continue  # pointing straight at/away from the camera
+            dx = sx / norm * length
+            dy = sy / norm * length
+            pen = QPen(color, 2.0)
+            pen.setCapStyle(Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(origin, QPointF(origin.x() + dx, origin.y() + dy))
+            painter.setPen(color)
+            painter.setFont(font)
+            painter.drawText(
+                QPointF(origin.x() + dx * 1.25 - 4.0, origin.y() + dy * 1.25 + 3.0),
+                label,
+            )
+        painter.end()
+
     def _paint_text(self, text: str) -> None:
         """Draw overlay text with QPainter (works inside paintGL)."""
         painter = QPainter(self)
-        painter.setPen(QColor(190, 190, 190))
+        painter.setPen(self._overlay_text_color())
         font = QFont(self.font())
         font.setPointSize(11)
         painter.setFont(font)
@@ -1339,9 +1842,44 @@ class Viewport3D(QOpenGLWidget):
     # ------------------------------------------------------------------
 
     def orbit(self, dx: float, dy: float) -> None:
-        """Orbit the camera: drag right → azimuth up; drag up → elevation up."""
-        self._cam_azimuth -= dx * 0.5
-        self._cam_elevation = max(-89.9, min(89.9, self._cam_elevation + dy * 0.5))
+        """Arcball orbit: drag right → around the camera up axis;
+        drag up → around the camera right axis.
+
+        The view direction itself is rotated (no elevation clamp), so a
+        c-axis top-down view — where the camera sits near the
+        elevation pole — rotates freely around axes perpendicular to c
+        instead of stalling at the old ±89.9° clamp.
+        """
+        _proj, view = self._camera_matrices()
+        rot = view[:3, :3]
+        right = rot[0]
+        up_axis = rot[1]
+        forward = -rot[2]  # view direction (camera → center)
+
+        R = (rotation_matrix(right, -dy * 0.5)
+             @ rotation_matrix(up_axis, -dx * 0.5))
+        v = R @ forward
+        v /= np.linalg.norm(v)
+
+        # The camera azimuth/elevation parametrize the EYE direction
+        # (eye = center + d·direction), which is the OPPOSITE of the
+        # rotated look direction.
+        self._cam_azimuth = math.degrees(math.atan2(-v[0], -v[2]))
+        self._cam_elevation = math.degrees(
+            math.asin(float(np.clip(-v[1], -1.0, 1.0))))
+        # The camera up rotates in the SAME frame as the view direction
+        # (trackball-style) — recomputing it as "world up projected ⊥ v"
+        # flips ~180° per frame near the pole (v ≈ ±y), which made
+        # drags spin the model crazily.
+        up = R @ up_axis
+        up = up - float(up @ v) * v
+        norm = float(np.linalg.norm(up))
+        if norm < 1e-6:  # fully degenerate only
+            up = np.cross(v, right)
+            norm = float(np.linalg.norm(up))
+        if norm > 1e-6:
+            up = up / norm
+        self._cam_up = up
         self.update()
 
     def pan(self, dx: float, dy: float) -> None:
@@ -1542,6 +2080,80 @@ class Viewport3D(QOpenGLWidget):
         self._meas_vbo.bind()
         self._meas_vbo.allocate(self._meas_verts.tobytes(), self._meas_verts.nbytes)
         self._meas_vao.release()
+
+    def _rebuild_cell_frame_verts(self) -> None:
+        """Rebuild the cell frame as camera-facing screen-space quads.
+
+        Each of the 12 edges becomes a quad strip whose width is
+        cell_line_width PIXELS (converted via world-units-per-pixel),
+        offset along the edge's screen-space perpendicular so the
+        on-screen width is constant at every orientation. glLineWidth
+        is ignored on GL core profiles, so triangle quads are the only
+        portable way to draw a wide cell frame.
+        """
+        wpp = 2.0 * self._cam_distance / max(self.height(), 1)
+        # Minimum 1.5 px: a 1-px quad falls between pixel centers at
+        # most angles and MSAA resolves it as an alternating
+        # solid/faint pattern (the frame looked DASHED at some angles).
+        width = max(float(self._render_settings.cell_line_width), 1.5) * wpp
+        edges = self._cell_verts.reshape(-1, 2, 3)
+        _proj, view = self._camera_matrices()
+        rot = view[:3, :3]
+        right = rot[0]
+        up = rot[1]
+        quads: list[np.ndarray] = []
+        for p0, p1 in edges:
+            edge = p1 - p0
+            length = float(np.linalg.norm(edge))
+            if length < 1e-9:
+                continue
+            e = edge / length
+            rx = float(right @ e)
+            ry = float(up @ e)
+            # screen-projected length of the edge direction: when an
+            # edge points at/away from the camera it collapses to a
+            # point on screen — draw a small square dot instead of a
+            # zero-area quad (otherwise the edge vanishes at some
+            # viewing angles).
+            screen_len = math.hypot(rx, ry)
+            if screen_len < 0.01:
+                mid = (p0 + p1) / 2.0
+                half = width / 2.0
+                quads.extend([
+                    mid - right * half - up * half,
+                    mid + right * half - up * half,
+                    mid + right * half + up * half,
+                    mid - right * half - up * half,
+                    mid + right * half + up * half,
+                    mid - right * half + up * half,
+                ])
+                continue
+            # Offset along the edge's screen-space PERPENDICULAR
+            # (-ry, rx)/screen_len: a unit vector whose screen
+            # projection always has length 1, so the quad stays
+            # exactly `width` px wide at every orientation. The old
+            # offset (screen-right projected onto the plane ⊥ e)
+            # thinned toward zero as the edge turned parallel to the
+            # screen-right axis — the 4 parallel edges of one cell
+            # direction vanished together, and near that angle the
+            # sub-pixel width MSAA-resolved into the dashed pattern.
+            off = (-ry * right + rx * up) / screen_len * (width / 2.0)
+            a, b = p0 + off, p0 - off
+            c, d = p1 + off, p1 - off
+            quads.extend([a, b, c, b, d, c])
+        self._cell_frame_verts = (np.asarray(quads, dtype=np.float32)
+                                  if quads
+                                  else np.zeros((0, 3), dtype=np.float32))
+
+    def _upload_cell_buffer(self) -> None:
+        """Upload the (per-frame) cell frame quad geometry."""
+        if self._gl is None:
+            return
+        self._cell_vao.bind()
+        self._cell_vbo.bind()
+        self._cell_vbo.allocate(
+            self._cell_frame_verts.tobytes(), self._cell_frame_verts.nbytes)
+        self._cell_vao.release()
 
     def set_rubber_band(self, rect) -> None:
         """Show/hide the box-selection rubber band (QRectF or None)."""

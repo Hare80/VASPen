@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.builder import StructureBuilder
 from vaspen.core.structure import StructureModel
+from vaspen.ui.structure_tree import composition_text
 
 
 class AtomPropertiesPanel(QWidget):
@@ -66,6 +67,15 @@ class AtomPropertiesPanel(QWidget):
         layout.addRow(QLabel("fx:"), self._fx_spin)
         layout.addRow(QLabel("fy:"), self._fy_spin)
         layout.addRow(QLabel("fz:"), self._fz_spin)
+
+        # Site composition (partially-occupied structures only; hidden
+        # otherwise — see refresh()).
+        self._composition_label = QLabel("")
+        self._composition_label.setWordWrap(True)
+        self._composition_caption = QLabel(self.tr("Composition"))
+        layout.addRow(self._composition_caption, self._composition_label)
+        self._composition_caption.setVisible(False)
+        self._composition_label.setVisible(False)
 
         self._charge_label = QLabel("")
         self._charge_caption = QLabel(self.tr("Charge:"))
@@ -144,6 +154,7 @@ class AtomPropertiesPanel(QWidget):
         self._element_label.setText(self.tr("Element:"))
         self._id_caption.setText(self.tr("ID:"))
         self._frac_caption.setText(self.tr("Fractional (periodic only)"))
+        self._composition_caption.setText(self.tr("Composition"))
         self._charge_caption.setText(self.tr("Charge:"))
         self._force_caption.setText(self.tr("Force:"))
         self._velocity_caption.setText(self.tr("Velocity:"))
@@ -176,6 +187,25 @@ class AtomPropertiesPanel(QWidget):
             self._charge_label.setText("")
             self._force_label.setText("")
             self._velocity_label.setText("")
+
+            # Site composition — shown only for a single selected atom
+            # whose site carries partial occupancy (mixed species or a
+            # vacancy); hidden otherwise.
+            comp_text = ""
+            if single:
+                index = next(iter(sel))
+                occ = model.occupancy
+                if occ is not None and index < len(occ):
+                    site = occ[index]
+                    if len(site) > 1 or (
+                            site and next(iter(site.values())) < 1.0):
+                        pairs = sorted(
+                            site.items(), key=lambda kv: (-kv[1], kv[0]))
+                        comp_text = composition_text(pairs, 1, self.tr)
+            self._composition_label.setText(comp_text)
+            self._composition_caption.setVisible(bool(comp_text))
+            self._composition_label.setVisible(bool(comp_text))
+
             if single:
                 index = next(iter(sel))
                 self._element_combo.setCurrentText(model.symbols[index])

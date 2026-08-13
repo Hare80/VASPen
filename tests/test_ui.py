@@ -432,3 +432,390 @@ def test_status_bar_dash_for_molecule(window, monkeypatch, water_molecule, si_bu
     # si_bulk is the fcc primitive cell (a = 5.43/√2 ≈ 3.84, α=60°)
     assert "a=3.84" in window._cell_label.text()
     assert "—" not in window._cell_label.text()
+
+
+# ----------------------------------------------------------------------
+# Render settings: backward-compat setters + startup persistence
+# ----------------------------------------------------------------------
+
+def test_legacy_setters_update_render_settings(window):
+    """The pre-existing granular setters keep working — they now mutate
+    the internal RenderSettings object."""
+    view = window._viewport
+    view.set_background_color((0.1, 0.2, 0.3))
+    assert view.render_settings().background_color == (0.1, 0.2, 0.3)
+    view.set_show_cell(False)
+    assert view.render_settings().show_cell is False
+    view.set_show_labels(True)
+    assert view.render_settings().show_labels is True
+    view.set_structure_style("cpk")
+    assert view.render_settings().style == "cpk"
+
+
+def test_startup_applies_persisted_render_settings(window, qtbot):
+    """A fresh window reads the persisted render settings and derives
+    its View-menu check states from them (not hardcoded values)."""
+    from vaspen.core.render_settings import RenderSettings
+    from vaspen.utils.config import AppConfig
+
+    cfg = AppConfig()
+    rs = RenderSettings.default()
+    rs.style = "wireframe"
+    rs.show_cell = False
+    rs.show_labels = True
+    cfg.render_settings = rs
+    cfg.sync()
+
+    w2 = MainWindow()
+    qtbot.addWidget(w2)
+    vp = w2._viewport
+    assert vp.structure_style() == "wireframe"
+    assert vp.render_settings().show_cell is False
+    assert vp.render_settings().show_labels is True
+    assert w2._style_actions["wireframe"].isChecked()
+    assert not w2.act_show_cell.isChecked()
+    assert w2.act_show_labels.isChecked()
+
+
+def test_display_options_menu_action_exists(window):
+    actions = [a.text() for a in window._menu_view.actions()
+               if not a.isSeparator()]
+    assert "Display &Options..." in actions
+
+
+def test_viewport_effective_color_override_and_scheme(window):
+    """Element color resolution: override > scheme palette > Jmol."""
+    from vaspen.core.render_settings import PALETTES, RenderSettings
+    from vaspen.ui.viewport3d import element_color
+
+    view = window._viewport
+    rs = RenderSettings.default()
+    view.set_render_settings(rs)
+
+    fe_jmol = element_color("Fe")
+    assert view._effective_atom_color("Fe") == (*fe_jmol, 1.0)
+
+    rs2 = RenderSettings.default()
+    rs2.color_scheme = "metal_nonmetal"
+    view.set_render_settings(rs2)
+    assert view._effective_atom_color("Fe")[:3] == PALETTES["metal_nonmetal"]["Fe"]
+
+    rs3 = RenderSettings.default()
+    rs3.atom_colors = {"Fe": [1.0, 0.0, 0.0, 0.4]}
+    view.set_render_settings(rs3)
+    assert view._effective_atom_color("Fe") == (1.0, 0.0, 0.0, 0.4)
+    # other elements fall through to the palette/Jmol
+    assert view._effective_atom_color("O") == (*element_color("O"), 1.0)
+
+
+def test_viewport_structure_symbols(window, monkeypatch):
+    from ase import Atoms
+
+    view = window._viewport
+    view.set_structure(Atoms("Fe2O3", positions=np.zeros((5, 3))))
+    assert view.structure_symbols() == ["Fe", "O"]
+
+
+# ----------------------------------------------------------------------
+# Round-2 fixes: bond alpha sync, label colors
+# ----------------------------------------------------------------------
+
+def test_bond_alphas_none_without_overrides(window, monkeypatch):
+    from ase import Atoms
+
+    view = window._viewport
+    view.set_structure(Atoms("Fe2O", positions=[[0, 0, 0], [1, 0, 0], [2, 0, 0]]))
+    assert view._bond_alphas() is None
+
+
+def test_bond_alphas_mean_of_atom_opacities(window, monkeypatch):
+    """A bond's alpha is the mean of its two atoms' override opacities."""
+    from ase import Atoms
+
+    from vaspen.core.render_settings import RenderSettings
+
+    view = window._viewport
+    view.set_structure(Atoms("Fe2O", positions=[[0, 0, 0], [1, 0, 0], [2, 0, 0]]))
+    rs = RenderSettings.default()
+    rs.atom_colors = {"Fe": [0.878, 0.4, 0.2, 0.4]}  # Fe half-transparent
+    view.set_render_settings(rs)
+
+    alphas = view._bond_alphas()
+    assert alphas is not None
+    assert len(alphas) == len(view._bonds)
+    assert alphas[0] == pytest.approx(0.4)   # Fe-Fe bond: (0.4+0.4)/2
+    assert alphas[-1] == pytest.approx(0.7)  # Fe-O bond: (0.4+1.0)/2
+
+
+def test_bond_alphas_none_when_overrides_fully_opaque(window, monkeypatch):
+    from ase import Atoms
+
+    from vaspen.core.render_settings import RenderSettings
+
+    view = window._viewport
+    view.set_structure(Atoms("Fe2O", positions=[[0, 0, 0], [1, 0, 0], [2, 0, 0]]))
+    rs = RenderSettings.default()
+    rs.atom_colors = {"Fe": [0.878, 0.4, 0.2, 1.0]}
+    view.set_render_settings(rs)
+    assert view._bond_alphas() is None  # all alphas 1.0 → single draw
+
+
+def test_label_color_contrast_against_background(window):
+    """Labels must not blend into the background."""
+    view = window._viewport
+    # dark background
+    view.set_background_color((0.118, 0.118, 0.141))
+    dark = view._label_color("H")   # white H stays white on dark
+    assert dark.redF() > 0.9 and dark.greenF() > 0.9
+    n_dark = view._label_color("N")  # dark blue N gets brightened
+    n_lum = 0.299 * n_dark.redF() + 0.587 * n_dark.greenF() + 0.114 * n_dark.blueF()
+    assert n_lum > 0.35
+
+    view.set_background_color((1.0, 1.0, 1.0))  # white background (default)
+    h_light = view._label_color("H")  # white H must be darkened
+    h_lum = 0.299 * h_light.redF() + 0.587 * h_light.greenF() + 0.114 * h_light.blueF()
+    assert h_lum <= 0.71  # luminance gap 0.3 → capped at 0.7 (float fuzz)
+
+
+def test_label_scale_zooms_with_camera(window):
+    """Labels grow when zoomed in, shrink when zoomed out (clamped)."""
+    view = window._viewport
+    view._fit_distance = 10.0
+    view._cam_distance = 10.0
+    assert view._label_scale() == pytest.approx(1.0)
+    view._cam_distance = 2.5  # zoomed in 4× → sqrt(4) = 2×
+    assert view._label_scale() == pytest.approx(2.0)
+    view._cam_distance = 100.0  # zoomed way out → clamped floor
+    assert view._label_scale() == pytest.approx(0.6)
+    view._cam_distance = 0.5  # extreme zoom-in → clamped ceiling
+    assert view._label_scale() == pytest.approx(2.5)
+
+
+def test_orbit_free_rotation_no_clamp(window):
+    """Arcball orbit: vertical drag rotates around the camera-right
+    axis even when the camera sits at the elevation pole (c-axis
+    top-down view) — the old ±89.9° clamp stalled there."""
+    view = window._viewport
+    # near-top-down view (c vertical): elevation pinned at the pole
+    view._cam_azimuth = 25.0
+    view._cam_elevation = 89.9
+    view._cam_up = np.array([0.0, 0.0, 1.0])
+    view._cam_center = np.zeros(3)
+    view._cam_distance = 10.0
+
+    view.orbit(0.0, 8.0)  # drag up → elevation should DECREASE smoothly
+    assert view._cam_elevation < 89.9
+    assert abs(view._cam_elevation - 89.9) > 3.0  # no clamp stall
+
+
+def test_orbit_matches_legacy_direction_small_drag(window):
+    """Small drags rotate in the same sense as before the arcball
+    rewrite: right → azimuth down, up → elevation up."""
+    view = window._viewport
+    view._cam_azimuth = 40.0
+    view._cam_elevation = 20.0
+    view._cam_up = np.array([0.0, 1.0, 0.0])
+    view._cam_center = np.zeros(3)
+    view._cam_distance = 10.0
+
+    view.orbit(4.0, 0.0)
+    assert view._cam_azimuth == pytest.approx(40.0 - 2.0, abs=1.0)
+    view.orbit(0.0, 4.0)
+    assert view._cam_elevation > 20.0  # drag up → elevation up
+
+
+def test_orbit_pole_drag_no_spin(window):
+    """Regression: repeated drags near the elevation pole must NOT flip
+    the view ~180° per frame (the crazy-spin bug — the camera up used
+    to be recomputed from the pole-unstable world-up projection).
+
+    Note: the azimuth parametrization itself is nearly singular at the
+    pole (a smooth 2° tilt swings the azimuth value wildly), so the
+    stability criterion is the ANGLE between consecutive look
+    directions — must stay ~2° per frame, never ~180°.
+    """
+    import math
+
+    view = window._viewport
+    view._cam_azimuth = 25.0
+    view._cam_elevation = 89.9
+    view._cam_up = np.array([0.0, 0.0, 1.0])
+    view._cam_center = np.zeros(3)
+    view._cam_distance = 10.0
+
+    def look_dir() -> np.ndarray:
+        az = math.radians(view._cam_azimuth)
+        el = math.radians(view._cam_elevation)
+        d = np.array([math.cos(el) * math.sin(az), math.sin(el),
+                      math.cos(el) * math.cos(az)])
+        return -d  # look direction = opposite of the eye direction
+
+    prev = look_dir()
+    for _ in range(12):
+        view.orbit(0.0, 4.0)
+        cur = look_dir()
+        angle = math.degrees(math.acos(float(np.clip(prev @ cur, -1.0, 1.0))))
+        assert angle < 3.5  # ~2°/frame, no 180° flips
+        prev = cur
+    assert view._cam_elevation < 85.0  # kept rotating past the pole
+
+
+def test_cell_frame_quads_keep_constant_screen_width(window):
+    """Regression: frame quads were offset along the screen-right axis
+    projected onto the edge plane, so their on-screen width thinned
+    toward zero as an edge turned parallel to screen-right — the 4
+    parallel edges of one cell direction vanished together, and near
+    that angle the sub-pixel width rendered as dashes. Every on-screen
+    edge must keep its full pixel width at every orientation.
+    """
+    import math
+
+    view = window._viewport
+    corners = np.array(
+        [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1],
+         [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1]], dtype=float)
+    pairs = [(0, 1), (0, 2), (0, 3), (1, 4), (1, 5), (2, 4), (2, 6),
+             (3, 5), (3, 6), (4, 7), (5, 7), (6, 7)]
+    view._cell_verts = np.array([corners[[i, j]] for i, j in pairs],
+                                dtype=float)
+    view._render_settings.cell_line_width = 1.0  # floor is 1.5 px
+    view._cam_up = np.array([0.0, 1.0, 0.0])
+    view._cam_center = np.zeros(3)
+    view._cam_distance = 10.0
+    view._cam_elevation = 10.0
+
+    w, h = view.width(), view.height()
+    for az in range(0, 360, 3):
+        view._cam_azimuth = float(az)
+        view._rebuild_cell_frame_verts()
+        proj, vmat = view._camera_matrices()
+        mvp = proj @ vmat
+        right, up = vmat[:3, :3][0], vmat[:3, :3][1]
+        quads = view._cell_frame_verts.reshape(-1, 3)
+        for k, (p0, p1) in enumerate(pairs):
+            e = corners[p1] - corners[p0]
+            e /= np.linalg.norm(e)
+            if math.hypot(float(right @ e), float(up @ e)) < 0.01:
+                continue  # end-on edge → dot quad, orientation-safe
+            # max distance from any quad vertex to the edge's
+            # projected segment = half of the on-screen width
+            verts = quads[k * 6:k * 6 + 6]
+            d_max = 0.0
+            for v in verts:
+                clip = mvp @ np.append(v, 1.0)
+                px = np.array([(clip[0] / clip[3] + 1) / 2 * w,
+                               (clip[1] / clip[3] + 1) / 2 * h])
+                a = np.append(corners[p0], 1.0)
+                b = np.append(corners[p1], 1.0)
+                ca, cb = mvp @ a, mvp @ b
+                pa = np.array([(ca[0] / ca[3] + 1) / 2 * w,
+                               (ca[1] / ca[3] + 1) / 2 * h])
+                pb = np.array([(cb[0] / cb[3] + 1) / 2 * w,
+                               (cb[1] / cb[3] + 1) / 2 * h])
+                seg = pb - pa
+                seg_len = float(np.linalg.norm(seg))
+                if seg_len < 1e-9:
+                    d = float(np.linalg.norm(px - pa))
+                else:
+                    t = float(np.clip((px - pa) @ seg / seg_len**2, 0.0, 1.0))
+                    d = float(np.linalg.norm(px - (pa + t * seg)))
+                d_max = max(d_max, d)
+            # half-width = 1.5 px / 2; orientation must not thin it
+            assert 0.65 <= d_max <= 0.85, (
+                f"az={az} edge {k}: on-screen half-width {d_max:.3f} px "
+                "(expected ~0.75)")
+
+
+# ----------------------------------------------------------------------
+# Partial occupancy: composition display + POSCAR save confirmation
+# ----------------------------------------------------------------------
+
+def test_structure_tree_shows_composition(window, monkeypatch, disordered_atoms):
+    """The left panel shows an MS-style Composition line with element
+    percentages (and vacancy) for disordered structures."""
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: disordered_atoms))
+    window._open_file("fake.cif")
+
+    tree = window._structure_tree
+    label = tree._cell_label.text()
+    assert "Composition:" in label
+    assert "Fe 68.3%" in label
+    assert "Ni 16.7%" in label
+    assert "Co 6.7%" in label
+    assert "Vacancy 8.3%" in label
+
+
+def test_atom_properties_site_composition(window, monkeypatch, disordered_atoms):
+    """The properties panel shows the selected site's composition; it is
+    hidden for atoms without partial occupancy."""
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: disordered_atoms))
+    window._open_file("fake.cif")
+    panel = window._atom_props
+
+    window._structure.select_atom(0)  # Fe 0.5 / Ni 0.5
+    assert not panel._composition_label.isHidden()
+    assert "Fe 50.0%" in panel._composition_label.text()
+    assert "Ni 50.0%" in panel._composition_label.text()
+
+    window._structure.select_atom(2)  # Fe 0.75 → vacancy
+    assert not panel._composition_label.isHidden()
+    assert "Fe 75.0%" in panel._composition_label.text()
+    assert "Vacancy 25.0%" in panel._composition_label.text()
+
+    # plain structure → no composition row
+    from ase import Atoms as _Atoms
+    monkeypatch.setattr(
+        fi.FileIO, "read",
+        classmethod(lambda cls, p: _Atoms("H2",
+                                          positions=[[0, 0, 0], [0.74, 0, 0]],
+                                          cell=[10, 10, 10])))
+    window._open_file("fake.xyz")
+    assert panel._composition_label.isHidden()
+
+
+def test_poscar_save_confirm_disorder(window, monkeypatch, disordered_atoms,
+                                      tmp_path):
+    """Saving a disordered structure to POSCAR warns and requires
+    confirmation; a clean structure saves without a warning."""
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: disordered_atoms))
+    monkeypatch.setattr(window, "_ensure_periodic_for", lambda fmt: True)
+    window._open_file("fake.cif")
+
+    target = tmp_path / "out.vasp"
+
+    # Cancel → no file written
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(target), "")))
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: QMessageBox.Cancel))
+    window._on_export_poscar()
+    assert not target.exists()
+
+    # Confirm → file written
+    monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda *a, **k: QMessageBox.Save))
+    window._on_export_poscar()
+    assert target.exists()
+
+    # Clean structure → no warning at all
+    from ase import Atoms as _Atoms
+    monkeypatch.setattr(
+        fi.FileIO, "read",
+        classmethod(lambda cls, p: _Atoms("H2",
+                                          positions=[[0, 0, 0], [0.74, 0, 0]],
+                                          cell=[10, 10, 10])))
+    window._open_file("fake.xyz")
+
+    def _boom(*a, **k):
+        raise AssertionError("warning shown for a clean structure")
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(_boom))
+    window._on_export_poscar()
+    assert target.exists()

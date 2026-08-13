@@ -140,3 +140,28 @@ class AppConfig:
     @last_directory.setter
     def last_directory(self, value: str) -> None:
         self.set("last_directory", value)
+
+    @property
+    def render_settings(self):
+        """Persisted 3D render settings (JSON string under QSettings).
+
+        Corrupt or missing JSON falls back to defaults. Lazy import
+        keeps utils free of a core dependency at module load time.
+        """
+        import json
+
+        from vaspen.core.render_settings import RenderSettings
+
+        raw = self.get("render_settings", "")
+        if not raw:
+            return RenderSettings.default()
+        try:
+            return RenderSettings.from_dict(json.loads(str(raw)))
+        except (ValueError, TypeError):
+            return RenderSettings.default()
+
+    @render_settings.setter
+    def render_settings(self, value) -> None:
+        import json
+
+        self.set("render_settings", json.dumps(value.to_dict()))

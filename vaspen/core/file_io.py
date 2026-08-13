@@ -7,6 +7,7 @@ elsewhere in the codebase.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -85,6 +86,106 @@ def _normalize_pbc(atoms: Atoms, fmt: str | None) -> Atoms:
     if fmt == "cif" and atoms.get_cell().rank == 3 and not atoms.pbc.any():
         atoms.pbc = True
     return atoms
+
+
+# Numeric prefix of an occupancy token: accepts "0.5", "1.0", "0.5(2)"
+# (error-bar notation) — the "(2)" suffix is dropped.
+_OCC_NUM_PREFIX = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)")
+
+
+def _sanitize_cif_occupancy(text: str) -> str:
+    """Replace non-numeric occupancy tokens in CIF text with ``1.0``.
+
+    ASE's CIF reader treats occupancy values as floats, but real-world
+    CIFs (e.g. ICSD entries) mark unknown occupancy with ``?`` or ``.``.
+    ASE then crashes with a str/float comparison when merging
+    partially-occupied sites (ase/spacegroup/xtal.py). Unknown occupancy
+    is normalized to full occupation (1.0); error-bar values like
+    ``0.5(2)`` keep their numeric prefix. Only the ``_atom_site_occupancy``
+    column inside ``loop_`` blocks is touched.
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if stripped.lower().startswith("loop_"):
+            out.append(line)
+            i += 1
+            headers: list[str] = []
+            while i < len(lines) and lines[i].strip().startswith("_"):
+                headers.append(lines[i].strip().lstrip("_"))
+                out.append(lines[i])
+                i += 1
+            if "atom_site_occupancy" in headers:
+                occ_col = headers.index("atom_site_occupancy")
+                # Data rows run until the next tag / loop / data block.
+                while (i < len(lines)
+                       and lines[i].strip()
+                       and not lines[i].strip().startswith(
+                           ("_", "loop_", "data_", "#"))):
+                    toks = lines[i].split()
+                    if len(toks) > occ_col:
+                        tok = toks[occ_col].strip("\"'")
+                        m = _OCC_NUM_PREFIX.match(tok)
+                        toks[occ_col] = m.group(0) if m else "1.0"
+                        out.append(" ".join(toks))
+                    else:
+                        out.append(lines[i])
+                    i += 1
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
+def extract_occupancy(atoms: Atoms) -> list[dict[str, float]] | None:
+    """Return per-atom site compositions from ASE occupancy info, or None.
+
+    ASE's CIF reader merges co-located partially-occupied species into
+    one atom per site (the symbol is the dominant species) and stores the
+    full composition in ``atoms.info['occupancy']`` — a dict mapping
+    ``str(spacegroup_kinds)`` (or the raw site index when the kinds array
+    is absent) to ``{symbol: occupancy}``. Returns one dict per atom, in
+    atom order, or None when the structure carries no occupancy data —
+    including uniform single-species 1.0 occupancy, which ASE also
+    reports and which does not constitute disorder.
+    """
+    occ_info = atoms.info.get("occupancy")
+    if not isinstance(occ_info, dict) or not occ_info:
+        return None
+
+    def _parse_comp(comp: object) -> dict[str, float]:
+        if not isinstance(comp, dict):
+            return {}
+        parsed: dict[str, float] = {}
+        for sym, occ in comp.items():
+            try:
+                parsed[str(sym)] = float(occ)
+            except (TypeError, ValueError):
+                continue
+        return parsed
+
+    by_key = {str(k): _parse_comp(v) for k, v in occ_info.items()}
+    kinds = atoms.arrays.get("spacegroup_kinds")
+    if kinds is None and len(by_key) == len(atoms):
+        # CIF path without symmetry expansion: keys are site indices in
+        # atom order.
+        kinds = list(range(len(atoms)))
+    if kinds is None:
+        return None
+    result: list[dict[str, float]] = []
+    for i, kind in enumerate(kinds):
+        comp = by_key.get(str(kind))
+        if not comp:
+            # Site has no occupancy entry — full occupation of its symbol.
+            comp = {str(atoms.symbols[i]): 1.0}
+        result.append(comp)
+    if all(len(comp) == 1 and next(iter(comp.values())) == 1.0
+           for comp in result):
+        return None
+    return result
 
 
 class FileIO:
@@ -253,6 +354,26 @@ def _ase_writer(path: str | Path, atoms: Atoms) -> None:
     ase_write(str(path), atoms)
 
 
+def _cif_reader(path: str | Path) -> Atoms:
+    """CIF reader — sanitizes invalid occupancy tokens before ASE reads.
+
+    Real-world CIFs (ICSD) often mark unknown occupancy with ``?`` or
+    ``.``; ASE crashes on those when merging partially-occupied sites
+    (see ``_sanitize_cif_occupancy``). Unknown occupancy is read as full
+    occupation (1.0).
+    """
+    import io
+
+    from ase.io import read as ase_read
+
+    data = Path(path).read_bytes()
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")
+    return ase_read(io.StringIO(_sanitize_cif_occupancy(text)), format="cif")
+
+
 # Register all common structure formats
 _BUILTIN_EXTENSIONS = [
     ".cif", ".xyz", ".vasp", ".poscar", ".contcar",
@@ -262,3 +383,7 @@ _BUILTIN_EXTENSIONS = [
 
 for _ext in _BUILTIN_EXTENSIONS:
     FileIO.register(_ext, _ase_reader, _ase_writer)
+
+# CIF needs occupancy sanitation (the generic ASE reader above crashes on
+# '?'-valued occupancies) — override with the dedicated reader.
+FileIO.register(".cif", _cif_reader, _ase_writer)
