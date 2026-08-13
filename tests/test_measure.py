@@ -1,4 +1,4 @@
-"""Tests for core.measure — distance / angle / dihedral (MIC-aware)."""
+"""Tests for core.measure — distance / angle / dihedral (direct vectors)."""
 
 import numpy as np
 from ase import Atoms
@@ -16,11 +16,12 @@ def test_water_geometry():
     assert np.isclose(angle(water, 1, 0, 2), 104.0, atol=0.5)
 
 
-def test_distance_mic_across_boundary():
-    """Direct H–H 1.5 Å, but the periodic image is 0.5 Å away."""
+def test_distance_periodic_uses_direct_vectors():
+    """Displayed atoms at 1.5 Å measure 1.5 Å even though the periodic
+    image is 0.5 Å away (settled: measure the DISPLAYED atoms)."""
     atoms = Atoms("H2", positions=[[0.0, 0, 0], [1.5, 0, 0]],
                   cell=[2.0, 2.0, 2.0], pbc=True)
-    assert np.isclose(distance(atoms, 0, 1), 0.5, atol=1e-9)
+    assert np.isclose(distance(atoms, 0, 1), 1.5, atol=1e-9)
 
 
 def test_angle_right_angle():
@@ -28,13 +29,19 @@ def test_angle_right_angle():
     assert np.isclose(angle(atoms, 0, 1, 2), 90.0, atol=1e-6)
 
 
-def test_angle_mic_across_boundary():
-    """The angle vertex's neighbor across the cell boundary must use
-    the minimum-image vector (not the raw displacement)."""
-    atoms = Atoms("H3", positions=[[0.9, 0, 0], [0, 0, 0], [0, 1, 0]],
+def test_angle_periodic_uses_direct_vectors():
+    """The angle uses the raw displacement to the DISPLAYED atom, not
+    the minimum-image vector across the boundary."""
+    # direct v1 = pos0 − pos1 = (0.6, 0.5, 0); the MIC image would be
+    # (−0.4, 0.5, 0) → a different angle
+    atoms = Atoms("H3", positions=[[0.6, 0.5, 0], [0, 0, 0], [0, 1, 0]],
                   cell=[1.0, 10.0, 10.0], pbc=(True, False, False))
-    # atom 0's nearest image of (0.9,0,0) is (-0.1,0,0) → angle = 90°
-    assert np.isclose(angle(atoms, 0, 1, 2), 90.0, atol=1e-6)
+    v1 = np.array([0.6, 0.5, 0.0])
+    v2 = np.array([0.0, 1.0, 0.0])
+    expected = np.rad2deg(np.arccos(v1 @ v2 / np.linalg.norm(v1)))
+    assert np.isclose(angle(atoms, 0, 1, 2), expected, atol=1e-6)
+    # and it differs from the minimum-image value (~38.7°)
+    assert not np.isclose(angle(atoms, 0, 1, 2), 38.66, atol=0.5)
 
 
 def test_dihedral_perpendicular():

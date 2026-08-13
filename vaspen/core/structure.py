@@ -21,6 +21,7 @@ from typing import Iterable
 
 import numpy as np
 from ase import Atoms
+from ase.geometry import cellpar_to_cell
 from ase.io import read as ase_read
 from PySide6.QtCore import QObject, Signal
 
@@ -557,6 +558,42 @@ class StructureModel(QObject):
         self._recompute_if_auto()
         self.structure_modified.emit()
 
+    def set_cell_parameters(
+        self,
+        lengths: tuple[float, float, float],
+        angles: tuple[float, float, float],
+        scale_atoms: bool = True,
+    ) -> None:
+        """Set the unit cell from lengths (a, b, c) and angles (α, β, γ).
+
+        Undoable: one push, emits structure_modified. With
+        ``scale_atoms`` the fractional coordinates are kept (atoms follow
+        the deforming cell); otherwise Cartesian coordinates are kept.
+
+        Args:
+            lengths: (a, b, c) cell lengths in Angstrom.
+            angles: (α, β, γ) cell angles in degrees.
+            scale_atoms: Keep fractional coordinates (default True).
+
+        Raises:
+            ValueError: For non-positive lengths, angles outside (0, 180),
+                or a degenerate cell (zero/negative volume).
+        """
+        if not all(np.isfinite(lengths)) or not all(l > 0 for l in lengths):
+            raise ValueError(f"Cell lengths must be positive, got {lengths}.")
+        if not all(np.isfinite(angles)) or not all(0 < a < 180 for a in angles):
+            raise ValueError(f"Cell angles must be in (0, 180), got {angles}.")
+        cell = cellpar_to_cell([*lengths, *angles])
+        # relative criterion: degenerate if the volume is below 1 ppm of
+        # the axis-aligned box (also catches floating-point near-zero)
+        if float(np.linalg.det(cell)) <= 1e-6 * float(np.prod(lengths)):
+            raise ValueError("Degenerate cell parameters (zero or negative volume).")
+        self._push_undo()
+        self._atoms.set_cell(cell, scale_atoms=scale_atoms)
+        self._dirty = True
+        self._recompute_if_auto()
+        self.structure_modified.emit()
+
     def make_periodic(self, padding: float) -> None:
         """Wrap the structure into a padded periodic cell (vacuum box).
 
@@ -586,6 +623,27 @@ class StructureModel(QObject):
         """Set Cartesian positions (N×3)."""
         self._push_undo()
         self._atoms.set_positions(positions)
+        self._dirty = True
+        self._recompute_if_auto()
+        self.structure_modified.emit()
+
+    def set_geometry(
+        self,
+        positions: np.ndarray,
+        cell: np.ndarray | None = None,
+    ) -> None:
+        """Set Cartesian positions and optionally the unit cell in ONE
+        undo step.
+
+        Used by the Transform dialog: a whole-structure transform of a
+        periodic structure rotates the cell together with the atoms, and
+        both must land in a single undo entry. Bonds survive (manual
+        mode) or re-detect (auto mode).
+        """
+        self._push_undo()
+        self._atoms.set_positions(positions)
+        if cell is not None:
+            self._atoms.set_cell(cell)
         self._dirty = True
         self._recompute_if_auto()
         self.structure_modified.emit()

@@ -20,11 +20,25 @@ from ase.data import atomic_numbers, covalent_radii
 from ase.geometry import get_distances
 
 # Bond detection constants
-BOND_TOLERANCE = 1.07   # covalent bond if d < (r1 + r2) * tolerance
+BOND_TOLERANCE = 1.15   # covalent bond if d < (r1 + r2) * tolerance
+                        # (1.15 catches long single bonds like the O–O
+                        # peroxide bond at ratio 1.11 while H-bonds
+                        # (~2.0 ratio) and capped metal–metal distances
+                        # stay unbonded)
 BOND_MAX_LENGTH = 3.0   # global maximum bond / contact length
 MAX_BOND_RADIUS = 1.35  # cap covalent radius used for bond detection
                         # (heavy metals like Ba=2.15 would otherwise bond
                         # to everything)
+MIN_BOND_RADIUS = 0.37  # floor: H's tabulated covalent radius (0.31)
+                        # underestimates its bonding radius — the floor
+                        # keeps H–H (~0.74 Å, ratio 1.19) and X–H bonds
+                        # inside the detection threshold
+SHELL_GAP_RATIO = 1.1   # relative gap that separates coordination shells
+                        # (metal–metal pairs in periodic structures bond
+                        # only within the first shell — see
+                        # _metal_shell_cutoffs)
+SHELL_SCAN_LENGTH = 6.0  # neighbor range scanned for the shell gap
+                         # (must reach the 2nd/3rd shells)
 
 # Pauling electronegativity for non-metal detection (ionic-contact rule).
 # Pairs metal↔non-metal within BOND_MAX_LENGTH are drawn as contacts
@@ -147,15 +161,21 @@ def find_bonds(
         return []
 
     radii = np.array([
-        min(covalent_radii[atomic_numbers[s]], MAX_BOND_RADIUS)
+        min(max(covalent_radii[atomic_numbers[s]], MIN_BOND_RADIUS),
+            MAX_BOND_RADIUS)
         for s in symbols
     ])
     nonmetals = [_is_nonmetal(s) for s in symbols]
+    periodic = any(pbc)
 
     # Pairwise distances with minimum-image convention.
     # NOTE: ASE ≥3.29 returns (vectors (N,M,3), distances (N,M)) — order
     # swapped relative to older versions.
     _vecs, dists = get_distances(positions, positions, cell=cell, pbc=pbc)
+
+    # Metal–metal pairs in PERIODIC structures bond only within the
+    # first coordination shell (see _metal_shell_cutoffs).
+    metal_cutoffs = _metal_shell_cutoffs(dists, nonmetals, periodic)
 
     bonds: list[Bond] = []
     for i in range(n):
@@ -163,11 +183,52 @@ def find_bonds(
             d = dists[i, j]
             if d <= 0.3 or d > BOND_MAX_LENGTH:
                 continue
-            # Rule 1: covalent bond
-            covalent = d < (radii[i] + radii[j]) * BOND_TOLERANCE
-            # Rule 2: ionic contact between metal and non-metal
-            ionic = nonmetals[i] != nonmetals[j]
-            if covalent or ionic:
+            metal_pair = (not nonmetals[i]) and (not nonmetals[j])
+            if metal_pair and periodic:
+                # Rule 3: metal–metal in a crystal → first shell only
+                # (the shell gap separates real bonds from the second
+                # coordination shell — a global tolerance cannot)
+                bonded = d < min(metal_cutoffs[i], metal_cutoffs[j])
+            else:
+                # Rule 1: covalent bond
+                covalent = d < (radii[i] + radii[j]) * BOND_TOLERANCE
+                # Rule 2: ionic contact between metal and non-metal
+                ionic = nonmetals[i] != nonmetals[j]
+                bonded = covalent or ionic
+            if bonded:
                 order = infer_bond_order(float(d), float(radii[i]), float(radii[j]))
                 bonds.append(Bond(i, j, order))
     return bonds
+
+
+def _metal_shell_cutoffs(
+    dists: np.ndarray,
+    nonmetals: list[bool],
+    periodic: bool,
+) -> np.ndarray:
+    """Per-atom first-shell cutoffs for metallic atoms (periodic only).
+
+    In crystals the coordination shells define the bonds: a global
+    tolerance cannot separate e.g. the bcc second-neighbor shell at
+    2.87 Å from the fcc Al nearest neighbor at 2.86 Å. For each
+    metallic atom the sorted neighbor distances (up to
+    SHELL_SCAN_LENGTH) are scanned for the first relative gap ≥
+    SHELL_GAP_RATIO; the cutoff is the midpoint of the two shells
+    (BOND_MAX_LENGTH when no gap exists — dense alloys without a
+    distinct shell structure). Non-periodic structures return
+    BOND_MAX_LENGTH for every atom (molecules keep the tolerance rule).
+    """
+    cutoffs = np.full(len(dists), BOND_MAX_LENGTH, dtype=float)
+    if not periodic:
+        return cutoffs
+    n = len(dists)
+    for i in range(n):
+        if nonmetals[i]:
+            continue
+        ds = sorted(float(dists[i, j]) for j in range(n)
+                    if j != i and 0.3 < dists[i, j] <= SHELL_SCAN_LENGTH)
+        for k in range(1, len(ds)):
+            if ds[k] >= ds[k - 1] * SHELL_GAP_RATIO:
+                cutoffs[i] = (ds[k - 1] + ds[k]) / 2.0
+                break
+    return cutoffs

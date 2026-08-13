@@ -502,7 +502,9 @@ class Viewport3D(QOpenGLWidget):
         self._ghost_bond_from = None    # world pos of the ghost bond's anchor
         self.current_element = "C"      # element of the atom being added
         self._measurements = []         # [(kind, indices, text), ...]
+        self._meas_pairs: list[tuple[int, int]] = []  # per-measurement line endpoints (atom indices)
         self._meas_verts = np.zeros((0, 3), dtype=np.float32)
+        self._preview_dirty = False     # bond geometry needs a rebake (drag preview)
         # Display style (parameter pack over the existing renderer)
         self._covalent_radii = np.zeros(0, dtype=np.float32)  # unscaled
         self._style = "ball_stick"      # "ball_stick" | "cpk" | "wireframe"
@@ -528,6 +530,7 @@ class Viewport3D(QOpenGLWidget):
         self._view_fitted = False  # True once _fit_camera has run
         self._has_cell = False  # set in set_structure; controls fit view
         self._cell = np.eye(3, dtype=np.float64)
+        self._pbc: tuple[bool, bool, bool] = (False, False, False)
 
         # GL resources
         self._gl = None
@@ -616,59 +619,78 @@ class Viewport3D(QOpenGLWidget):
             self._atom_color = np.asarray(colors, dtype=np.float32)
             self._atom_edge = np.asarray(edges, dtype=np.float32)
 
+            # Cell/pbc must be updated BEFORE baking the bonds —
+            # _bake_bond_verts uses them for the minimum-image vectors
+            # (stale cell/pbc from a previously opened structure would
+            # draw periodic bonds as sticks across the whole box).
+            self._has_cell = any(pbc)
+            self._cell = np.asarray(cell, dtype=np.float64)
+            self._pbc = pbc
+            self._cell_verts = _cell_edges(cell) if any(pbc) else None
+
             bond_list = (bonds if bonds is not None
                          else find_bonds(positions, symbols, cell, pbc))
             self._bonds = bond_list
-            # Bake per bond so every bond keeps a vertex slice of its own
-            # (needed by the ID-color pick pass to draw individual bonds).
-            # Ranges stay aligned with bond indices even for zero-length
-            # bonds (drawing 0 verts is a no-op).
-            # Bond orders: single = one cylinder; double/triple = parallel
-            # cylinders offset laterally; aromatic (4) = dashed segments.
-            self._bond_ranges = []
-            pieces = []
-            offset = 0
-            for b in bond_list:
-                s = np.asarray([positions[b.i]], dtype=np.float64)
-                e = np.asarray([positions[b.i] + mic_vector(
-                    b.i, b.j, positions, cell, pbc)], dtype=np.float64)
-                bond_pieces: list[np.ndarray] = []
-                if b.order == 2:
-                    # thinner components so the parallel sticks stay
-                    # visually separate (they would merge at 0.12 Å)
-                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.09))
-                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.09))
-                elif b.order == 3:
-                    bond_pieces.append(_cylinder_verts(s, e, 0.05))
-                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.12))
-                    bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.12))
-                elif b.order == 4:
-                    axis = e[0] - s[0]
-                    for d in range(6):
-                        t0 = d / 6.0 + 0.015
-                        t1 = min((d + 0.8) / 6.0, 1.0)
-                        if t1 <= t0:
-                            continue
-                        bond_pieces.append(_cylinder_verts(
-                            s + axis * t0, s + axis * t1, BOND_RADIUS))
-                else:
-                    bond_pieces.append(_cylinder_verts(s, e, BOND_RADIUS))
-                count = sum(len(p) for p in bond_pieces)
-                self._bond_ranges.append((offset, count))
-                offset += count
-                pieces.extend(p for p in bond_pieces if len(p))
-            self._bond_verts = (np.concatenate(pieces) if pieces
-                                else np.zeros((0, 3), dtype=np.float32))
+            self._bake_bond_verts()
 
-            self._cell_verts = _cell_edges(cell) if any(pbc) else None
-
-            self._has_cell = any(pbc)
-            self._cell = np.asarray(cell, dtype=np.float64)
             if reset_view or not self._view_fitted:
                 self._fit_camera()
 
+        self._preview_dirty = False
         self._data_dirty = True
         self.update()
+
+    def _bake_bond_verts(self) -> None:
+        """(Re)bake bond triangles from the CURRENT atom positions.
+
+        Called from set_structure and — during a move drag — every frame
+        the preview updates atom positions, so the sticks follow the
+        atoms instead of lagging behind at their baked locations.
+
+        Bake per bond so every bond keeps a vertex slice of its own
+        (needed by the ID-color pick pass to draw individual bonds).
+        Ranges stay aligned with bond indices even for zero-length
+        bonds (drawing 0 verts is a no-op).
+        Bond orders: single = one cylinder; double/triple = parallel
+        cylinders offset laterally; aromatic (4) = dashed segments.
+        """
+        positions = self._atom_pos
+        cell = self._cell
+        pbc = self._pbc
+        self._bond_ranges = []
+        pieces = []
+        offset = 0
+        for b in self._bonds:
+            s = np.asarray([positions[b.i]], dtype=np.float64)
+            e = np.asarray([positions[b.i] + mic_vector(
+                b.i, b.j, positions, cell, pbc)], dtype=np.float64)
+            bond_pieces: list[np.ndarray] = []
+            if b.order == 2:
+                # thinner components so the parallel sticks stay
+                # visually separate (they would merge at 0.12 Å)
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.09))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.09))
+            elif b.order == 3:
+                bond_pieces.append(_cylinder_verts(s, e, 0.05))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=-0.12))
+                bond_pieces.append(_cylinder_verts(s, e, 0.05, lateral_offset=+0.12))
+            elif b.order == 4:
+                axis = e[0] - s[0]
+                for d in range(6):
+                    t0 = d / 6.0 + 0.015
+                    t1 = min((d + 0.8) / 6.0, 1.0)
+                    if t1 <= t0:
+                        continue
+                    bond_pieces.append(_cylinder_verts(
+                        s + axis * t0, s + axis * t1, BOND_RADIUS))
+            else:
+                bond_pieces.append(_cylinder_verts(s, e, BOND_RADIUS))
+            count = sum(len(p) for p in bond_pieces)
+            self._bond_ranges.append((offset, count))
+            offset += count
+            pieces.extend(p for p in bond_pieces if len(p))
+        self._bond_verts = (np.concatenate(pieces) if pieces
+                            else np.zeros((0, 3), dtype=np.float32))
 
     def highlight_atom(self, index: int | None) -> None:
         """Highlight the atom at index (None clears) — legacy single API."""
@@ -1036,6 +1058,19 @@ class Viewport3D(QOpenGLWidget):
 
         proj, view = self._camera_matrices()
 
+        # Drag preview: re-bake the bonds from the preview atom positions
+        # so the sticks follow the atoms instead of lagging behind.
+        if self._preview_dirty and self._bonds:
+            self._bake_bond_verts()
+            self._upload_bond_buffer()
+            self._preview_dirty = False
+
+        # Measurement dashes are screen-space: rebuild + upload every
+        # frame (zoom-proof dashes, lines track dragged atoms).
+        if self._measurements:
+            self._rebuild_meas_dashes()
+            self._upload_meas_buffer()
+
         # --- Atom spheres (edge pass, then body pass) ---
         # Blending is on so the near-distance fade in the shader
         # actually fades instead of showing the raw cross-section.
@@ -1214,6 +1249,13 @@ class Viewport3D(QOpenGLWidget):
     # ------------------------------------------------------------------
 
     def mousePressEvent(self, event) -> None:
+        if self._press_button is not None:
+            # A drag/pan is already in progress — a second button must
+            # NOT hijack the press state (it used to overwrite
+            # _press_button/_press_pos/_dragged and leave stale overlays
+            # like a stuck rubber band). The ongoing drag wins.
+            event.accept()
+            return
         self._press_button = event.button()
         self._press_pos = event.position()
         self._last_pos = event.position()
@@ -1247,6 +1289,12 @@ class Viewport3D(QOpenGLWidget):
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() != self._press_button:
+            # Release of a button that never started the gesture (e.g.
+            # the right button pressed mid-drag) — must not clear the
+            # drag state while the original button is still held.
+            event.accept()
+            return
         if self._tool_active and event.button() == Qt.LeftButton:
             self._active_tool.mouse_release(event, event.position())
             self._tool_active = False
@@ -1318,6 +1366,11 @@ class Viewport3D(QOpenGLWidget):
     def set_mode(self, mode: ToolMode) -> None:
         """Switch the active interaction mode (toolbar QActionGroup)."""
         self._mode = mode
+        # Cancel the PREVIOUS tool first — switching mid-drag must not
+        # leak its transient state (previews, rubber band, pending picks)
+        if self._active_tool is not None:
+            self._active_tool.cancel()
+        self._tool_active = False
         if mode not in self._tool_instances:
             self._tool_instances[mode] = make_tool(mode, self)
         self._active_tool = self._tool_instances[mode]
@@ -1332,11 +1385,14 @@ class Viewport3D(QOpenGLWidget):
         """Reset the active tool's transient state.
 
         Called when the structure changes so no tool keeps stale atom
-        indices or preview state across edits.
+        indices or preview state across edits. Also clears screen-space
+        overlays (rubber band) as a safety net.
         """
         self._tool_active = False
+        self._rubber_rect = None
         if self._active_tool is not None:
             self._active_tool.cancel()
+        self.update()
 
     def pick(self, pos):
         """Atom or bond under the cursor: ("atom", i) | ("bond", k) | None."""
@@ -1383,10 +1439,16 @@ class Viewport3D(QOpenGLWidget):
             self.update()
 
     def preview_atom_positions(self, indices, positions) -> None:
-        """Drag fast path for several atoms (single repaint)."""
+        """Drag fast path for several atoms (single repaint).
+
+        Marks the bond geometry dirty so the sticks are re-baked from
+        the preview positions on the next frame — bonds follow the
+        atoms during the drag.
+        """
         for idx, pos in zip(indices, positions):
             if 0 <= idx < len(self._atom_pos):
                 self._atom_pos[idx] = np.asarray(pos, dtype=np.float32)
+        self._preview_dirty = True
         self.update()
 
     def preview_ghost_atom(self, position: np.ndarray | None) -> None:
@@ -1405,40 +1467,81 @@ class Viewport3D(QOpenGLWidget):
     def set_measurements(self, payload) -> None:
         """Set measurement annotations: [(kind, indices, value text), ...].
 
-        Lines are baked into a GL_LINES buffer here (minimum-image for
-        periodic cells); labels are projected every frame from the LIVE
-        atom positions, so they track atom drags.
+        Stores the line endpoint pairs (atom indices). The dashed
+        GL_LINES geometry is rebuilt EVERY FRAME from the live atom
+        positions with a screen-space dash pattern (see
+        _rebuild_meas_dashes) — dashes stay visible at any zoom and the
+        lines track atom drags like the labels do.
+
+        Settled with the user (2026-08-13): measurements are between
+        the DISPLAYED atoms — direct Cartesian vectors, NO minimum
+        image, so a periodic distance never crosses the cell boundary.
         """
         self._measurements = payload
-        atoms = self._atoms
-        cell = np.asarray(
-            atoms.get_cell().array if atoms is not None and atoms.get_cell().rank == 3
-            else np.eye(3), dtype=float)
-        pbc = (tuple(atoms.get_pbc()) if atoms is not None and atoms.get_pbc().any()
-               else (False, False, False))
-
-        verts: list[np.ndarray] = []
+        pairs: list[tuple[int, int]] = []
         for kind, idx, _text in payload:
             if kind == "distance":
-                pairs = [(idx[0], idx[1])]
+                pairs.append((idx[0], idx[1]))
             elif kind == "angle":
-                pairs = [(idx[1], idx[0]), (idx[1], idx[2])]
+                pairs.append((idx[1], idx[0]))
+                pairs.append((idx[1], idx[2]))
             else:
-                pairs = [(idx[0], idx[1]), (idx[1], idx[2]), (idx[2], idx[3])]
-            for a, b in pairs:
-                start = np.asarray(self._atom_pos[a], dtype=float)
-                end = start + mic_vector(a, b, self._atom_pos, cell, pbc)
-                # Dashed: 16 segments per line, 60% duty (world-space —
-                # line stippling is not available in the GL core profile)
-                for d in range(16):
-                    t0 = d / 16.0
-                    t1 = min((d + 0.6) / 16.0, 1.0)
-                    verts.append(start + (end - start) * t0)
-                    verts.append(start + (end - start) * t1)
+                pairs.append((idx[0], idx[1]))
+                pairs.append((idx[1], idx[2]))
+                pairs.append((idx[2], idx[3]))
+        self._meas_pairs = pairs
+        self._rebuild_meas_dashes()
+        self.update()
+
+    def _rebuild_meas_dashes(self) -> None:
+        """Rebuild the dashed measurement lines (screen-space dash length).
+
+        Dash length = 10 px on screen (gap 5 px), converted to world
+        units with the current world-units-per-pixel factor, so the
+        dashes stay crisp and distinct at ANY zoom (fixed world-space
+        dashes collapsed into solid-looking lines when zoomed out).
+        """
+        if not self._meas_pairs:
+            self._meas_verts = np.zeros((0, 3), dtype=np.float32)
+            return
+        wpp = 2.0 * self._cam_distance / max(self.height(), 1)
+        dash = 10.0 * wpp
+        gap = 5.0 * wpp
+        verts: list[np.ndarray] = []
+        for a, b in self._meas_pairs:
+            start = np.asarray(self._atom_pos[a], dtype=float)
+            end = np.asarray(self._atom_pos[b], dtype=float)
+            total = float(np.linalg.norm(end - start))
+            if total < 1e-12:
+                continue
+            direction = (end - start) / total
+            t = 0.0
+            while t < total:
+                t1 = min(t + dash, total)
+                verts.append(start + direction * t)
+                verts.append(start + direction * t1)
+                t = t1 + gap
         self._meas_verts = (np.asarray(verts, dtype=np.float32)
                             if verts else np.zeros((0, 3), dtype=np.float32))
-        self._data_dirty = True
-        self.update()
+
+    def _upload_bond_buffer(self) -> None:
+        """Upload the (re-baked) bond geometry into the GL buffer."""
+        if self._gl is None:
+            return
+        self._bond_vao.bind()
+        self._bond_vbo.bind()
+        self._bond_vbo.allocate(self._bond_verts.tobytes(), self._bond_verts.nbytes)
+        self._bond_n_verts = len(self._bond_verts)
+        self._bond_vao.release()
+
+    def _upload_meas_buffer(self) -> None:
+        """Upload the (per-frame) measurement dash geometry."""
+        if self._gl is None:
+            return
+        self._meas_vao.bind()
+        self._meas_vbo.bind()
+        self._meas_vbo.allocate(self._meas_verts.tobytes(), self._meas_verts.nbytes)
+        self._meas_vao.release()
 
     def set_rubber_band(self, rect) -> None:
         """Show/hide the box-selection rubber band (QRectF or None)."""

@@ -339,6 +339,33 @@ PyVista was also considered (VTK-based) but is heavier and harder to embed in Qt
 - **Slabs** (pbc partially True with a full-rank cell) count as periodic and are never re-boxed. `is_periodic` = `cell.rank == 3 and pbc.any()` (structure.py).
 - **`FileIO.write` stays pure** (no dialogs, no mutation): saving a rank-<3 cell to vasp/cif raises a translatable `ValueError` before any file is created — the UI wrap makes this unreachable in normal flow.
 
+### 7.6 Materials Project Integration (planned — security policy, 2026-08-13)
+
+Materials Project (MP) integration lets users search and download structures by formula or `mp-XXXX` ID and look up computed properties (band gap, formation energy, …) via the MP API (pymatgen `MPRester` — pymatgen is already a dependency, no new package). It is offline-first and optional: the app is fully functional without it, and any network failure degrades to a status-bar message.
+
+**API key handling (settled — never re-litigate):**
+- The key is the user's personal credential. Store it only in `QSettings` (OS-native backend: Windows registry / `~/.config` / macOS plist) — never in the repo, project files, logs, crash reports, or generated VASP input files.
+- Settings UI displays the key masked (last 4 characters) with a note that it is a personal credential.
+- `MP_API_KEY` environment variable is an optional fallback. **No built-in default key** — a key bundled in an open-source repo would be public.
+- Logging redacts the key (centralized in `utils/logger.py`).
+
+**Network policy:**
+- HTTPS only; TLS certificate verification is never disabled.
+- All requests run on a worker (`QThread`) with timeouts — never block the GUI thread.
+
+**Input sanitization (injection defenses):**
+- Formulas are validated by parsing with pymatgen `Composition` before any request is built; invalid input is rejected client-side.
+- API criteria are constructed only through a whitelist UI (property + numeric range). User text is never `eval()`'d / `exec()`'d into criteria.
+- Identifiers must match `^mp-\d+$` before use in an API call or filename.
+
+**Response handling:**
+- Responses are parsed strictly as JSON/structures and treated as data — never executed, never rendered as HTML/JS in rich-text widgets.
+- Downloaded files are named from the sanitized materials_id (e.g. `mp-1234.cif`), never from raw formula or user input → no path traversal.
+
+**Attribution:** MP terms of use require citation in publications and forbid bulk redistribution; the UI labels downloaded data with its MP source and materials_id.
+
+Planned module: `vaspen/core/materials_project.py` (pure logic, no Qt); UI is a modal search/download dialog created fresh per invocation (existing i18n rules in §11.2 apply).
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -547,6 +574,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [ ] User documentation
 
 ### v1.0+ — Future
+- [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6
 - [ ] Remote SSH server connection + job submission
 - [ ] Job queue management
 - [ ] Band structure / DOS plotting (post-processing)

@@ -501,3 +501,82 @@ def test_bond_selection_survives_manual_edit_and_undo(model):
 
     model.undo()
     assert model.selected_bonds == {1}
+
+
+# ----------------------------------------------------------------------
+# set_cell_parameters (Phase 3)
+# ----------------------------------------------------------------------
+
+
+def _cubic_model():
+    """Model with a 4 Å cubic cell and one atom at the body center."""
+    m = StructureModel()
+    m.load_atoms(Atoms("Si", positions=[[2.0, 2.0, 2.0]],
+                       cell=[4.0, 4.0, 4.0], pbc=True))
+    return m
+
+
+def test_set_cell_parameters_scale_keeps_fractional():
+    m = _cubic_model()
+    modified = _counter(m, "structure_modified")
+    m.set_cell_parameters((8.0, 8.0, 8.0), (90, 90, 90), scale_atoms=True)
+    assert modified.count == 1
+    assert np.allclose(m.cell_lengths, [8.0, 8.0, 8.0])
+    assert np.allclose(m.scaled_positions[0], [0.5, 0.5, 0.5])
+    assert np.allclose(m.positions[0], [4.0, 4.0, 4.0])  # follows the cell
+
+
+def test_set_cell_parameters_no_scale_keeps_cartesian():
+    m = _cubic_model()
+    m.set_cell_parameters((8.0, 8.0, 8.0), (90, 90, 90), scale_atoms=False)
+    assert np.allclose(m.positions[0], [2.0, 2.0, 2.0])
+    assert np.allclose(m.scaled_positions[0], [0.25, 0.25, 0.25])
+
+
+def test_set_cell_parameters_rhombohedral_angles():
+    m = _cubic_model()
+    m.set_cell_parameters((4.0, 4.0, 4.0), (60, 60, 60), scale_atoms=True)
+    assert np.allclose(m.cell_angles, [60, 60, 60], atol=1e-8)
+    assert np.linalg.det(m.cell) > 0
+
+
+def test_set_cell_parameters_single_undo_step():
+    m = _cubic_model()
+    m.set_cell_parameters((8.0, 8.0, 8.0), (90, 90, 90), scale_atoms=True)
+    m.undo()
+    assert np.allclose(m.cell_lengths, [4.0, 4.0, 4.0])
+    assert np.allclose(m.positions[0], [2.0, 2.0, 2.0])
+
+
+def test_set_cell_parameters_rejects_invalid():
+    m = _cubic_model()
+    with pytest.raises(ValueError):
+        m.set_cell_parameters((0.0, 4.0, 4.0), (90, 90, 90))
+    with pytest.raises(ValueError):
+        m.set_cell_parameters((4.0, 4.0, 4.0), (90, 90, 180))
+    # α+β+γ = 360° → zero volume
+    with pytest.raises(ValueError):
+        m.set_cell_parameters((4.0, 4.0, 4.0), (120, 120, 120))
+    # model untouched by the failed calls
+    assert np.allclose(m.cell_lengths, [4.0, 4.0, 4.0])
+    assert m.can_undo is False
+
+
+def test_set_geometry_single_undo():
+    m = _cubic_model()
+    modified = _counter(m, "structure_modified")
+    m.set_geometry([[1.0, 1.0, 1.0]], np.diag([5.0, 5.0, 5.0]))
+    assert modified.count == 1
+    assert np.allclose(m.positions[0], [1.0, 1.0, 1.0])
+    assert np.allclose(m.cell_lengths, [5.0, 5.0, 5.0])
+
+    m.undo()  # positions AND cell revert together
+    assert np.allclose(m.positions[0], [2.0, 2.0, 2.0])
+    assert np.allclose(m.cell_lengths, [4.0, 4.0, 4.0])
+
+
+def test_set_geometry_positions_only():
+    m = _cubic_model()
+    m.set_geometry([[3.0, 3.0, 3.0]])
+    assert np.allclose(m.positions[0], [3.0, 3.0, 3.0])
+    assert np.allclose(m.cell_lengths, [4.0, 4.0, 4.0])

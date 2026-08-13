@@ -268,24 +268,48 @@ Files: {}</source>
         <translation>已应用表面切割。</translation>
     </message>
     <message>
-        <source>Supercell</source>
-        <translation>超胞</translation>
-    </message>
-    <message>
-        <source>Enter scaling factors (n_a n_b n_c):</source>
-        <translation>输入扩展因子 (n_a n_b n_c)：</translation>
-    </message>
-    <message>
-        <source>Need exactly 3 integers</source>
-        <translation>需要恰好 3 个整数</translation>
-    </message>
-    <message>
         <source>Supercell {}×{}×{} created.</source>
         <translation>已创建 {}×{}×{} 超胞。</translation>
     </message>
     <message>
-        <source>Invalid Input</source>
-        <translation>无效输入</translation>
+        <source>Edit &amp;Lattice...</source>
+        <translation>编辑晶格(&amp;L)...</translation>
+    </message>
+    <message>
+        <source>Edit the unit cell parameters with live preview</source>
+        <translation>实时预览编辑晶胞参数</translation>
+    </message>
+    <message>
+        <source>&amp;Transform...</source>
+        <translation>变换(&amp;T)...</translation>
+    </message>
+    <message>
+        <source>Translate, rotate or align atoms numerically</source>
+        <translation>数值平移、旋转或对齐原子</translation>
+    </message>
+    <message>
+        <source>Find &amp;Symmetry...</source>
+        <translation>查找对称性(&amp;S)...</translation>
+    </message>
+    <message>
+        <source>Analyze the space group and symmetrize the structure</source>
+        <translation>分析空间群并对称化结构</translation>
+    </message>
+    <message>
+        <source>Edit Lattice</source>
+        <translation>编辑晶格</translation>
+    </message>
+    <message>
+        <source>Lattice editing requires a periodic structure (a full-rank cell with periodic boundary conditions).</source>
+        <translation>编辑晶格需要周期结构（满秩晶胞且具有周期性边界条件）。</translation>
+    </message>
+    <message>
+        <source>Transform applied.</source>
+        <translation>已应用变换。</translation>
+    </message>
+    <message>
+        <source>Structure symmetrized.</source>
+        <translation>已对称化结构。</translation>
     </message>
     <message>
         <source>About VASPen</source>
@@ -334,6 +358,14 @@ Files: {}</source>
     <message>
         <source>Move</source>
         <translation>移动</translation>
+    </message>
+    <message>
+        <source>Rotate</source>
+        <translation>旋转</translation>
+    </message>
+    <message>
+        <source>Drag to rotate the selection or molecule (Esc cancels)</source>
+        <translation>拖动以旋转选中原子或分子（Esc 取消）</translation>
     </message>
     <message>
         <source>Delete</source>
@@ -867,6 +899,131 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
         <source>Velocity:</source>
         <translation>速度：</translation>
+    </message>
+</context>
+<context>
+    <name>LatticeDialog</name>
+    <message>
+        <source>Edit Lattice</source>
+        <translation>编辑晶格</translation>
+    </message>
+    <message>
+        <source>Scale atom positions (keep fractional coordinates)</source>
+        <translation>缩放原子位置（保持分数坐标）</translation>
+    </message>
+    <message>
+        <source>These parameters do not form a valid unit cell.</source>
+        <translation>这些参数无法构成有效的晶胞。</translation>
+    </message>
+</context>
+<context>
+    <name>SupercellDialog</name>
+    <message>
+        <source>Supercell</source>
+        <translation>超胞</translation>
+    </message>
+    <message>
+        <source>Repeat along {}:</source>
+        <translation>沿 {} 方向重复：</translation>
+    </message>
+    <message>
+        <source>Bonds are re-detected automatically after the supercell is created.</source>
+        <translation>创建超胞后将自动重新检测化学键。</translation>
+    </message>
+</context>
+<context>
+    <name>TransformDialog</name>
+    <message>
+        <source>Transform</source>
+        <translation>变换</translation>
+    </message>
+    <message>
+        <source>Apply to</source>
+        <translation>应用于</translation>
+    </message>
+    <message>
+        <source>Whole structure ({})</source>
+        <translation>整个结构（{}）</translation>
+    </message>
+    <message>
+        <source>Selected atoms ({})</source>
+        <translation>选中的原子（{}）</translation>
+    </message>
+    <message>
+        <source>Translate</source>
+        <translation>平移</translation>
+    </message>
+    <message>
+        <source>Rotate</source>
+        <translation>旋转</translation>
+    </message>
+    <message>
+        <source>Axis:</source>
+        <translation>轴：</translation>
+    </message>
+    <message>
+        <source>Angle:</source>
+        <translation>角度：</translation>
+    </message>
+    <message>
+        <source>Rotate about the center of the moved atoms</source>
+        <translation>绕被移动原子的中心旋转</translation>
+    </message>
+    <message>
+        <source>No atoms selected.</source>
+        <translation>未选中任何原子。</translation>
+    </message>
+</context>
+<context>
+    <name>SymmetryDialog</name>
+    <message>
+        <source>Symmetry</source>
+        <translation>对称性</translation>
+    </message>
+    <message>
+        <source>Symmetry analysis requires a periodic structure (a full-rank cell with periodic boundary conditions).</source>
+        <translation>对称性分析需要周期结构（满秩晶胞且具有周期性边界条件）。</translation>
+    </message>
+    <message>
+        <source>Space group number:</source>
+        <translation>空间群编号：</translation>
+    </message>
+    <message>
+        <source>International symbol:</source>
+        <translation>国际符号：</translation>
+    </message>
+    <message>
+        <source>Hall symbol:</source>
+        <translation>Hall 符号：</translation>
+    </message>
+    <message>
+        <source>Point group:</source>
+        <translation>点群：</translation>
+    </message>
+    <message>
+        <source>Setting:</source>
+        <translation>设置：</translation>
+    </message>
+    <message>
+        <source>Point group (Schoenflies):</source>
+        <translation>点群（Schoenflies）：</translation>
+    </message>
+    <message>
+        <source>Rotational symmetry number:</source>
+        <translation>旋转对称数：</translation>
+    </message>
+
+    <message>
+        <source>&amp;Symmetrize</source>
+        <translation>对称化(&amp;S)</translation>
+    </message>
+    <message>
+        <source>Standardize the cell and positions to the conventional cell</source>
+        <translation>将晶胞与位置标准化为常规晶胞</translation>
+    </message>
+    <message>
+        <source>Could not symmetrize the structure.</source>
+        <translation>无法对称化该结构。</translation>
     </message>
 </context>
 </TS>

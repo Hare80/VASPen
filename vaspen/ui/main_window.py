@@ -192,6 +192,21 @@ class MainWindow(QMainWindow):
         self.act_supercell.setStatusTip(self.tr("Create a supercell"))
         self.act_supercell.triggered.connect(self._on_supercell)
 
+        self.act_edit_lattice = QAction(self.tr("Edit &Lattice..."), self)
+        self.act_edit_lattice.setStatusTip(
+            self.tr("Edit the unit cell parameters with live preview"))
+        self.act_edit_lattice.triggered.connect(self._on_edit_lattice)
+
+        self.act_transform = QAction(self.tr("&Transform..."), self)
+        self.act_transform.setStatusTip(
+            self.tr("Translate, rotate or align atoms numerically"))
+        self.act_transform.triggered.connect(self._on_transform)
+
+        self.act_symmetry = QAction(self.tr("Find &Symmetry..."), self)
+        self.act_symmetry.setStatusTip(
+            self.tr("Analyze the space group and symmetrize the structure"))
+        self.act_symmetry.triggered.connect(self._on_symmetry)
+
         # ── 3D edit modes (exclusive; live in the edit toolbar) ──
         self._mode_actions: dict[ToolMode, QAction] = {}
         self._mode_group = QActionGroup(self)
@@ -200,6 +215,7 @@ class MainWindow(QMainWindow):
             (ToolMode.SELECT, self.tr("Select"), self.tr("Select atoms (Ctrl/Shift for multi-select, Shift+drag box-select)")),
             (ToolMode.ADD_ATOM, self.tr("Add Atom"), self.tr("Click empty space to add an atom")),
             (ToolMode.MOVE_ATOM, self.tr("Move"), self.tr("Drag an atom to move it (Esc cancels)")),
+            (ToolMode.ROTATE, self.tr("Rotate"), self.tr("Drag to rotate the selection or molecule (Esc cancels)")),
             (ToolMode.DELETE, self.tr("Delete"), self.tr("Click an atom or bond to delete it")),
             (ToolMode.CREATE_BOND, self.tr("Create Bond"), self.tr("Click two atoms to create a bond")),
             (ToolMode.MEASURE_DISTANCE, self.tr("Distance"), self.tr("Click two atoms to measure their distance")),
@@ -337,6 +353,10 @@ class MainWindow(QMainWindow):
         self._menu_tools = mb.addMenu(self.tr("&Tools"))
         self._menu_tools.addAction(self.act_surface)
         self._menu_tools.addAction(self.act_supercell)
+        self._menu_tools.addSeparator()
+        self._menu_tools.addAction(self.act_edit_lattice)
+        self._menu_tools.addAction(self.act_transform)
+        self._menu_tools.addAction(self.act_symmetry)
 
         # Help
         self._menu_help = mb.addMenu(self.tr("&Help"))
@@ -371,7 +391,7 @@ class MainWindow(QMainWindow):
 
         # Interaction modes (exclusive)
         for mode in (ToolMode.SELECT, ToolMode.ADD_ATOM, ToolMode.MOVE_ATOM,
-                     ToolMode.DELETE, ToolMode.CREATE_BOND):
+                     ToolMode.ROTATE, ToolMode.DELETE, ToolMode.CREATE_BOND):
             act = self._mode_actions[mode]
             act.toggled.connect(
                 lambda checked, m=mode: self._viewport.set_mode(m) if checked else None
@@ -762,25 +782,52 @@ class MainWindow(QMainWindow):
 
     def _on_supercell(self) -> None:
         from vaspen.core.builder import StructureBuilder
+        from vaspen.ui.supercell_dialog import SupercellDialog
 
-        # Simple input: use a dialog or inline for now
-        from PySide6.QtWidgets import QInputDialog
-        text, ok = QInputDialog.getText(
-            self,
-            self.tr("Supercell"),
-            self.tr("Enter scaling factors (n_a n_b n_c):"),
-            text="1 1 1",
-        )
-        if ok and text:
-            try:
-                parts = [int(x) for x in text.split()]
-                if len(parts) != 3:
-                    raise ValueError(self.tr("Need exactly 3 integers"))
-                StructureBuilder.make_supercell(self._structure, tuple(parts))
-                self._structure.reset_filepath()  # derived structure → Save As
-                self._set_status(self.tr("Supercell {}×{}×{} created.").format(*parts))
-            except Exception as e:
-                QMessageBox.critical(self, self.tr("Invalid Input"), str(e))
+        dlg = SupercellDialog(self)
+        if dlg.exec() == SupercellDialog.Accepted and dlg.factors is not None:
+            StructureBuilder.make_supercell(self._structure, dlg.factors)
+            self._structure.reset_filepath()  # derived structure → Save As
+            self._set_status(self.tr("Supercell {}×{}×{} created.").format(*dlg.factors))
+
+    def _on_edit_lattice(self) -> None:
+        from vaspen.ui.lattice_dialog import LatticeDialog
+
+        if not self._structure.is_periodic:
+            QMessageBox.information(
+                self,
+                self.tr("Edit Lattice"),
+                self.tr("Lattice editing requires a periodic structure "
+                        "(a full-rank cell with periodic boundary conditions)."),
+            )
+            return
+        dlg = LatticeDialog(self._structure, self._viewport, self)
+        dlg.exec()  # applies to the model on Accept (one undo step)
+
+    def _on_transform(self) -> None:
+        from vaspen.ui.transform_dialog import TransformDialog
+
+        dlg = TransformDialog(self._structure, self)
+        if (dlg.exec() == TransformDialog.Accepted
+                and dlg.result_atoms is not None):
+            # One undo step; bonds survive (manual mode) or re-detect
+            # (auto). Periodic whole-structure transforms also carry the
+            # rotated unit cell.
+            cell = None
+            if self._structure.is_periodic:
+                cell = dlg.result_atoms.get_cell().array
+            self._structure.set_geometry(dlg.result_atoms.get_positions(), cell)
+            self._set_status(self.tr("Transform applied."))
+
+    def _on_symmetry(self) -> None:
+        from vaspen.ui.symmetry_dialog import SymmetryDialog
+
+        dlg = SymmetryDialog(self._structure, self)
+        if (dlg.exec() == SymmetryDialog.Accepted
+                and dlg.result_atoms is not None):
+            # replace_atoms: one undo step; bonds/selection reset (new indices)
+            self._structure.replace_atoms(dlg.result_atoms)
+            self._set_status(self.tr("Structure symmetrized."))
 
     # ------------------------------------------------------------------
     # Preferences
@@ -861,6 +908,15 @@ class MainWindow(QMainWindow):
         self.act_surface.setStatusTip(self.tr("Cut a surface/slab from the current structure"))
         self.act_supercell.setText(self.tr("&Supercell..."))
         self.act_supercell.setStatusTip(self.tr("Create a supercell"))
+        self.act_edit_lattice.setText(self.tr("Edit &Lattice..."))
+        self.act_edit_lattice.setStatusTip(
+            self.tr("Edit the unit cell parameters with live preview"))
+        self.act_transform.setText(self.tr("&Transform..."))
+        self.act_transform.setStatusTip(
+            self.tr("Translate, rotate or align atoms numerically"))
+        self.act_symmetry.setText(self.tr("Find &Symmetry..."))
+        self.act_symmetry.setStatusTip(
+            self.tr("Analyze the space group and symmetrize the structure"))
         self.act_about.setText(self.tr("&About VASPen"))
         self.act_about_qt.setText(self.tr("About &Qt"))
 
@@ -889,6 +945,8 @@ class MainWindow(QMainWindow):
                                 self.tr("Click empty space to add an atom")),
             ToolMode.MOVE_ATOM: (self.tr("Move"),
                                  self.tr("Drag an atom to move it (Esc cancels)")),
+            ToolMode.ROTATE: (self.tr("Rotate"),
+                              self.tr("Drag to rotate the selection or molecule (Esc cancels)")),
             ToolMode.DELETE: (self.tr("Delete"),
                               self.tr("Click an atom or bond to delete it")),
             ToolMode.CREATE_BOND: (self.tr("Create Bond"),

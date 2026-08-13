@@ -1,55 +1,48 @@
 """Geometric measurements on structures (pure functions, no Qt).
 
-Distance, bond angle and dihedral are computed from minimum-image
-vectors, so periodic structures measure the physically shortest value
-across cell boundaries.
+Settled with the user (2026-08-13): measurements are between the
+DISPLAYED atoms — plain Cartesian geometry, NO minimum-image vectors —
+so a periodic distance is the straight line between the atoms as shown,
+never crossing the cell boundary. (A future Display Style - Lattice
+feature that shows periodic images outside the cell may re-introduce a
+periodic option.)
 """
 
 from __future__ import annotations
 
 import numpy as np
 from ase import Atoms
-from ase.geometry import get_angles, get_dihedrals, get_distances
+from ase.geometry import get_angles, get_dihedrals
 
 
-def _cell_pbc(atoms: Atoms) -> tuple[np.ndarray, tuple[bool, bool, bool]]:
-    cell = atoms.get_cell().array if atoms.get_cell().rank == 3 else np.eye(3)
-    pbc = tuple(atoms.get_pbc()) if atoms.get_pbc().any() else (False, False, False)
-    return np.asarray(cell, dtype=float), pbc
-
-
-def _mic_displacement(atoms: Atoms, i: int, j: int) -> np.ndarray:
-    """Minimum-image vector from atom i to atom j."""
-    pos = np.asarray(atoms.get_positions(), dtype=float)
-    cell, pbc = _cell_pbc(atoms)
-    vecs, _dists = get_distances(pos[[i]], pos[[j]], cell=cell, pbc=pbc)
-    return np.asarray(vecs[0, 0], dtype=float)
+def _positions(atoms: Atoms) -> np.ndarray:
+    return np.asarray(atoms.get_positions(), dtype=float)
 
 
 def distance(atoms: Atoms, i: int, j: int) -> float:
-    """Minimum-image distance between atoms i and j (Å)."""
-    pos = np.asarray(atoms.get_positions(), dtype=float)
-    cell, pbc = _cell_pbc(atoms)
-    _vecs, dists = get_distances(pos[[i]], pos[[j]], cell=cell, pbc=pbc)
-    return float(dists[0, 0])
+    """Direct Cartesian distance between atoms i and j (Å)."""
+    pos = _positions(atoms)
+    return float(np.linalg.norm(pos[j] - pos[i]))
 
 
 def angle(atoms: Atoms, i: int, j: int, k: int) -> float:
-    """Bond angle i–j–k in degrees (0..180), minimum-image vectors."""
-    v1 = _mic_displacement(atoms, j, i)
-    v2 = _mic_displacement(atoms, j, k)
+    """Bond angle i–j–k in degrees (0..180), direct vectors."""
+    pos = _positions(atoms)
+    v1 = pos[i] - pos[j]
+    v2 = pos[k] - pos[j]
     return float(get_angles(np.array([v1]), np.array([v2]))[0])
 
 
 def dihedral(atoms: Atoms, i: int, j: int, k: int, l: int) -> float:
-    """Dihedral angle i–j–k–l in degrees, minimum-image vectors.
+    """Dihedral angle i–j–k–l in degrees, direct vectors.
 
     ASE returns the angle in [0, 360); this normalizes to (-180, 180]
     (the common chemistry convention).
     """
-    v0 = _mic_displacement(atoms, i, j)
-    v1 = _mic_displacement(atoms, j, k)
-    v2 = _mic_displacement(atoms, k, l)
+    pos = _positions(atoms)
+    v0 = pos[j] - pos[i]
+    v1 = pos[k] - pos[j]
+    v2 = pos[l] - pos[k]
     value = float(get_dihedrals(
         np.array([v0]), np.array([v1]), np.array([v2]))[0])
     if value > 180.0:

@@ -777,19 +777,39 @@ def test_frac_button_label_follows_mode(window, monkeypatch, si_bulk):
 
 
 def test_measurement_line_vert_counts(window):
-    """Lines are dashed: 16 segments × 2 verts per line segment."""
+    """Lines are dashed in SCREEN space: 10 px dash / 5 px gap, so the
+    dash pattern holds at any zoom (fixed world-space dashes collapsed
+    into solid lines when zoomed out)."""
     view = window._viewport
     atoms = Atoms("H4", positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
     view.set_structure(atoms)
 
     view.set_measurements([("distance", [0, 1], "1.00 Å")])
-    assert len(view._meas_verts) == 16 * 2
+    wpp = 2.0 * view._cam_distance / max(view.height(), 1)
+    verts = view._meas_verts
+    assert len(verts) % 2 == 0 and len(verts) > 0
+    # dashes cover the line from start to end
+    assert np.allclose(verts[0], [0, 0, 0])
+    assert np.allclose(verts[-1], [1, 0, 0])
+    # every dash but the last is exactly 10 px long (in world units)
+    for k in range(0, len(verts) - 2, 2):
+        assert np.isclose(np.linalg.norm(verts[k + 1] - verts[k]),
+                          10.0 * wpp, atol=1e-6)
 
+    # angle = 2 line segments, dihedral = 3
     view.set_measurements([("angle", [0, 1, 2], "90.00°")])
-    assert len(view._meas_verts) == 2 * 16 * 2
-
+    assert len(view._meas_pairs) == 2
     view.set_measurements([("dihedral", [0, 1, 2, 3], "60.00°")])
-    assert len(view._meas_verts) == 3 * 16 * 2
+    assert len(view._meas_pairs) == 3
+
+    # zooming out keeps the same on-screen dash length
+    view._cam_distance *= 4.0
+    view.set_measurements([("distance", [0, 1], "1.00 Å")])
+    wpp2 = 2.0 * view._cam_distance / max(view.height(), 1)
+    verts2 = view._meas_verts
+    assert np.isclose(np.linalg.norm(verts2[1] - verts2[0]),
+                      10.0 * wpp2, atol=1e-6)
+    assert len(verts2) < len(verts)  # longer dashes → fewer of them
 
 
 def test_clear_all_pushes_empty_payload_to_viewport(window, monkeypatch):
@@ -966,3 +986,298 @@ def test_add_atom_placement_is_screen_outward(window, monkeypatch):
     assert window._structure.n_atoms == n_before + 1
     new2 = window._structure.positions[-1]
     assert float(np.dot(new2 - anchor, outward)) > 0
+
+
+# ----------------------------------------------------------------------
+# Move tool — axis constraint (X/Y/Z during drag, Phase 3)
+# ----------------------------------------------------------------------
+
+
+def _drag_with_key(view, start, end, key):
+    """Press → move → press ``key`` → move → release."""
+    view.mousePressEvent(_FakeMouseEvent(Qt.LeftButton, start))
+    view._last_pos = QPointF(*start)
+    view._dragged = True
+    view.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, end))
+    view.keyPressEvent(_FakeKeyEvent(key))
+    view.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, end))
+    view.mouseReleaseEvent(_FakeMouseEvent(Qt.LeftButton, end))
+
+
+def test_move_axis_lock_x_non_periodic(window, monkeypatch):
+    """X during drag: only the world-x coordinates change."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    _load(window, monkeypatch, atoms)
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    view._pick = lambda pos: ("atom", 0)
+
+    before = window._structure.positions.copy()
+    _drag_with_key(view, (400.0, 300.0), (500.0, 400.0), Qt.Key_X)
+    after = window._structure.positions
+
+    assert np.allclose(after[:, 1:], before[:, 1:])  # y/z untouched
+    assert not np.allclose(after[:, 0], before[:, 0])  # x moved
+
+
+def test_move_axis_lock_periodic_single_fractional_component(window, monkeypatch, si_bulk):
+    """Periodic + X lock: the fractional shift has a single component
+    (lattice-vector direction) — group geometry preserved."""
+    _load(window, monkeypatch, si_bulk, "bulk.vasp")
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    view._pick = lambda pos: ("atom", 1)  # bonded to atom 0 → group of 2
+
+    before = window._structure.scaled_positions.copy()
+    _drag_with_key(view, (400.0, 300.0), (500.0, 400.0), Qt.Key_X)
+    after = window._structure.scaled_positions
+
+    frac_delta = after - before
+    assert np.allclose(frac_delta[:, 1:], 0.0, atol=1e-12)  # only axis 0
+    assert np.any(np.abs(frac_delta[:, 0]) > 1e-9)  # and it moved
+    # both atoms share the same fractional delta modulo the per-atom
+    # wrap (bonds never tear across the boundary)
+    assert np.allclose(frac_delta[0] % 1.0, frac_delta[1] % 1.0, atol=1e-9)
+
+
+def test_move_axis_lock_toggles_off(window, monkeypatch):
+    """Pressing the same key again unlocks the axis."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    _load(window, monkeypatch, atoms)
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    view._pick = lambda pos: ("atom", 0)
+
+    before = window._structure.positions.copy()
+    start, end = (400.0, 300.0), (500.0, 400.0)
+    view.mousePressEvent(_FakeMouseEvent(Qt.LeftButton, start))
+    view._last_pos = QPointF(*start)
+    view._dragged = True
+    view.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, end))
+    view.keyPressEvent(_FakeKeyEvent(Qt.Key_X))  # lock
+    view.keyPressEvent(_FakeKeyEvent(Qt.Key_X))  # unlock again
+    view.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, end))
+    view.mouseReleaseEvent(_FakeMouseEvent(Qt.LeftButton, end))
+    after = window._structure.positions
+
+    # unlocked: the y/z components are free to change too
+    assert not np.allclose(after[:, 1:], before[:, 1:])
+
+
+def test_move_preview_bonds_follow_atoms(window):
+    """During a move drag the bond geometry must be re-baked from the
+    preview positions (bonds follow the atoms, no lagging behind)."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    view = window._viewport
+    view.set_structure(atoms)
+
+    before = view._bond_verts.copy()
+    # drag preview: atom 0 moves up by 1 Å (simulating a move drag frame)
+    view.preview_atom_positions([0], [[0.0, 1.0, 0.0]])
+    assert view._preview_dirty is True
+    # what paintGL does each frame with the preview flag set
+    view._bake_bond_verts()
+
+    assert not np.allclose(view._bond_verts, before)
+    # the re-baked bond connects the MOVED atom (ends near y=1)
+    max_y = float(view._bond_verts[:, 1].max())
+    assert np.isclose(max_y, 1.0, atol=0.2)
+    assert len(view._bond_verts) == len(before)  # same vertex count
+
+
+def test_bond_bake_uses_current_structure_cell(window):
+    """Regression: loading a periodic structure AFTER a molecule must
+    bake the bond geometry with the NEW cell/pbc. Stale molecule
+    cell/pbc drew Fe bonds as minimum-image-less sticks across the
+    whole box (only Detect Bonds — a second set_structure — fixed it)."""
+    from ase.io import read
+
+    from vaspen.core.bonds import find_bonds
+
+    view = window._viewport
+    view.set_structure(read("examples/benzene.xyz"))  # molecule first
+    assert view._pbc == (False, False, False)
+
+    fe = read("examples/Fe_bcc_2x2x2.vasp")
+    bonds = find_bonds(
+        np.asarray(fe.get_positions(), dtype=float),
+        list(fe.get_chemical_symbols()),
+        fe.get_cell().array, tuple(fe.get_pbc()))
+    view.set_structure(fe, bonds=bonds)
+
+    assert view._pbc == (True, True, True)
+    assert np.allclose(view._cell, fe.get_cell().array)
+    # every baked stick is a short nearest-neighbor tube, not a
+    # box-diagonal spanning the cell
+    for first, count in view._bond_ranges:
+        if count == 0:
+            continue
+        start = view._bond_verts[first]
+        end = view._bond_verts[first + count - 1]
+        assert np.linalg.norm(end - start) < 2.7
+
+
+def test_move_single_selection_moves_only_that_atom(window, monkeypatch):
+    """Any selection wins (settled 2026-08-13): a SINGLE selected atom
+    moves alone — the connected-component fallback does not apply."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    window._structure.select_atom(0)  # O only
+    view._pick = lambda pos: ("atom", 0)
+
+    before = window._structure.positions.copy()
+    _drag(view, (400.0, 300.0), (450.0, 300.0))
+
+    after = window._structure.positions
+    assert not np.allclose(after[0], before[0])  # O moved
+    assert np.allclose(after[1:], before[1:])    # H stayed
+
+
+def test_move_selection_wins_when_grabbing_outside(window, monkeypatch):
+    """Selection priority holds even when the grabbed atom is NOT in
+    the selection."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    window._structure.set_selection({1, 2})  # the two H atoms
+    view._pick = lambda pos: ("atom", 0)     # grab the O atom
+
+    before = window._structure.positions.copy()
+    _drag(view, (400.0, 300.0), (450.0, 300.0))
+
+    after = window._structure.positions
+    assert np.allclose(after[0], before[0])       # O stayed
+    assert not np.allclose(after[1:], before[1:])  # the selection moved
+
+
+# ----------------------------------------------------------------------
+# Rotate tool (mouse rotation of a selection / molecule, Phase 3)
+# ----------------------------------------------------------------------
+
+
+def test_rotate_tool_keeps_centroid_and_distances(window, monkeypatch):
+    """Rotation acts about the group CENTROID (settled with the user):
+    the centroid stays put and intra-group distances survive."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.ROTATE)
+    view._pick = lambda pos: ("atom", 0)  # O → connected component = all 3
+
+    before = window._structure.positions.copy()
+    centroid = before.mean(axis=0)
+    _drag(view, (400.0, 300.0), (500.0, 340.0))
+
+    after = window._structure.positions
+    assert len(window._structure._undo_stack) == 1  # one commit
+    assert np.allclose(after.mean(axis=0), centroid, atol=1e-8)  # centroid fixed
+    for i in range(3):
+        for j in range(i + 1, 3):
+            assert np.isclose(np.linalg.norm(after[i] - after[j]),
+                              np.linalg.norm(before[i] - before[j]), atol=1e-6)
+    assert not np.allclose(after, before)  # something actually rotated
+
+
+def test_rotate_tool_esc_cancels(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.ROTATE)
+    view._pick = lambda pos: ("atom", 0)
+    before = window._structure.positions.copy()
+
+    start, end = (400.0, 300.0), (500.0, 340.0)
+    view.mousePressEvent(_FakeMouseEvent(Qt.LeftButton, start))
+    view._last_pos = QPointF(*start)
+    view._dragged = True
+    view.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, end))
+    view.keyPressEvent(_FakeKeyEvent(Qt.Key_Escape))
+    view.mouseReleaseEvent(_FakeMouseEvent(Qt.LeftButton, end))
+
+    assert window._structure._undo_stack == []
+    assert np.allclose(window._structure.positions, before)
+
+
+def test_rotate_tool_prefers_selection(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.ROTATE)
+    window._structure.set_selection({1, 2})  # the two H atoms
+    view._pick = lambda pos: ("atom", 0)     # grab the O atom
+
+    before = window._structure.positions.copy()
+    _drag(view, (400.0, 300.0), (500.0, 340.0))
+
+    after = window._structure.positions
+    assert np.allclose(after[0], before[0])  # O untouched
+
+
+# ----------------------------------------------------------------------
+# Interaction conflicts (second button / Esc during a drag, Phase 3)
+# ----------------------------------------------------------------------
+
+
+def test_right_press_mid_box_select_keeps_drag(window, monkeypatch):
+    """Regression: pressing the right button mid box-select must NOT
+    hijack the drag state or leave a stuck rubber band."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.SELECT)
+
+    start, end = (100.0, 100.0), (300.0, 250.0)
+    view.mousePressEvent(_FakeMouseEvent(Qt.LeftButton, start, Qt.ShiftModifier))
+    view._last_pos = QPointF(*start)
+    view._dragged = True
+    view.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, end, Qt.ShiftModifier))
+    assert view._rubber_rect is not None
+
+    # right button press + release while the left drag is active
+    view.mousePressEvent(_FakeMouseEvent(Qt.RightButton, (200.0, 180.0)))
+    view.mouseReleaseEvent(_FakeMouseEvent(Qt.RightButton, (200.0, 180.0)))
+    assert view._rubber_rect is not None  # drag still in progress
+    assert view._press_button == Qt.LeftButton
+
+    # releasing the left button finishes the box select and clears it
+    view.mouseReleaseEvent(_FakeMouseEvent(Qt.LeftButton, end, Qt.ShiftModifier))
+    assert view._rubber_rect is None
+
+
+def test_esc_cancels_box_select(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.SELECT)
+
+    start, end = (100.0, 100.0), (300.0, 250.0)
+    view.mousePressEvent(_FakeMouseEvent(Qt.LeftButton, start, Qt.ShiftModifier))
+    view._last_pos = QPointF(*start)
+    view._dragged = True
+    view.mouseMoveEvent(_FakeMouseEvent(Qt.LeftButton, end, Qt.ShiftModifier))
+
+    view.keyPressEvent(_FakeKeyEvent(Qt.Key_Escape))
+    assert view._rubber_rect is None  # band cleared immediately
+
+    view.mouseReleaseEvent(_FakeMouseEvent(Qt.LeftButton, end, Qt.ShiftModifier))
+    assert window._structure.selected_indices == set()  # nothing selected
+
+
+def test_rotate_action_is_on_toolbar(window):
+    """Regression: the Rotate mode must be registered in BOTH the mode
+    actions AND the edit toolbar (it was once missing from the latter)."""
+    from PySide6.QtWidgets import QToolBar
+
+    actions = window._edit_toolbar.actions()
+    rotate_acts = [a for a in actions if a is window._mode_actions.get(ToolMode.ROTATE)]
+    assert len(rotate_acts) == 1

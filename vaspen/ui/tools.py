@@ -19,6 +19,8 @@ import numpy as np
 from ase.data import atomic_numbers, covalent_radii
 from PySide6.QtCore import QPointF, QRectF, Qt
 
+from vaspen.core.transform import rotation_matrix
+
 
 class ToolMode(Enum):
     """Exclusive interaction modes of the 3D viewport."""
@@ -26,6 +28,7 @@ class ToolMode(Enum):
     SELECT = auto()
     ADD_ATOM = auto()
     MOVE_ATOM = auto()
+    ROTATE = auto()
     DELETE = auto()
     CREATE_BOND = auto()
     MEASURE_DISTANCE = auto()
@@ -75,10 +78,16 @@ def _orbit_to(vp, pos) -> None:
 class SelectTool(Tool):
     """Click = select; Ctrl+click = add; Shift+click = toggle;
     Shift+drag = box select; plain drag = orbit (navigation is always
-    available in every mode — settled camera policy)."""
+    available in every mode — settled camera policy). Esc cancels an
+    in-progress box selection."""
+
+    def __init__(self, viewport) -> None:
+        super().__init__(viewport)
+        self._cancelled = False
 
     def mouse_press(self, event, pos) -> bool:
         self._press_pos = pos
+        self._cancelled = False
         return True
 
     def mouse_move(self, event, pos) -> None:
@@ -92,6 +101,9 @@ class SelectTool(Tool):
 
     def mouse_release(self, event, pos) -> None:
         vp = self._vp
+        if self._cancelled:
+            self._cancelled = False
+            return
         if vp._dragged:
             if event.modifiers() & Qt.ShiftModifier:
                 vp.set_rubber_band(None)
@@ -110,6 +122,18 @@ class SelectTool(Tool):
             vp.atoms_selected.emit([index], mode)
         else:
             vp.bond_clicked.emit(index)
+
+    def key_press(self, event) -> bool:
+        if event.key() == Qt.Key_Escape and self._press_pos is not None:
+            # Esc mid box-selection: cancel it (release then does nothing)
+            self._cancelled = True
+            self._vp.set_rubber_band(None)
+            return True
+        return False
+
+    def cancel(self) -> None:
+        self._cancelled = False
+        self._vp.set_rubber_band(None)
 
     def _box_select(self, p1, p2) -> None:
         """Select atoms whose projected centers fall inside the rubber band."""
@@ -219,15 +243,21 @@ class AddAtomTool(Tool):
 class MoveAtomTool(Tool):
     """Drag to move atoms. Move-set priority (settled with the user):
 
-    1. If the dragged atom belongs to a multi-atom selection → move the
-       whole selection.
-    2. Otherwise → move the bond-connected component it belongs to (the
-       whole molecule for molecular structures; the whole structure for
-       a connected crystal; just the atom when isolated).
+    1. ANY non-empty selection (even a single atom) → move exactly the
+       selected atoms — the grabbed atom does not need to belong to it.
+    2. Otherwise → move the bond-connected component of the grabbed
+       atom (the whole molecule for molecular structures; the whole
+       structure for a connected crystal; just the atom when isolated).
 
     The drag uses the fast preview path (no model calls); release
     commits as ONE undoable model call. Esc (or cancel) restores the
     start positions. Click without drag selects the primary atom.
+
+    Axis constraint: pressing X/Y/Z during a drag locks the motion to
+    that axis (toggle — pressing the same key again unlocks). For
+    periodic structures the constraint follows the LATTICE vector
+    direction so the fractional shift has a single component (pure
+    fractional-axis semantics); otherwise it follows the world axis.
     """
 
     def __init__(self, viewport) -> None:
@@ -237,6 +267,8 @@ class MoveAtomTool(Tool):
         self._start_frac: np.ndarray | None = None   # K×3 (periodic only)
         self._press_world: np.ndarray | None = None
         self._moved = False
+        self._axis: int | None = None  # 0/1/2 while X/Y/Z lock is active
+        self._last_pos = None
 
     @staticmethod
     def _connected(index: int, bonds) -> list[int]:
@@ -262,8 +294,10 @@ class MoveAtomTool(Tool):
             return False  # empty space → default navigation (orbit)
         index = hit[1]
         sel = vp._selected_indices
-        if index in sel and len(sel) > 1:
-            self._indices = sorted(sel)          # priority 1: selection
+        if sel:
+            # priority 1 (settled 2026-08-13): any selection — move
+            # exactly the selected atoms, no matter which atom is grabbed
+            self._indices = sorted(sel)
         else:
             self._indices = self._connected(index, vp._bonds)
         self._start_cart = np.asarray(vp._atom_pos[self._indices], dtype=float)
@@ -279,12 +313,147 @@ class MoveAtomTool(Tool):
     def mouse_move(self, event, pos) -> None:
         if not self._indices or not self._vp._dragged:
             return
+        self._last_pos = pos
         self._vp.preview_atom_positions(self._indices, self._targets(pos))
         self._moved = True
 
     def mouse_release(self, event, pos) -> None:
         indices, moved = self._indices, self._moved
         # Compute the commit positions BEFORE _reset clears the drag state
+        targets = self._targets(pos) if indices and moved else None
+        self._reset()
+        if not indices:
+            return
+        if moved:
+            self._vp.atoms_moved.emit(indices, targets)
+        else:
+            self._vp.atoms_selected.emit([indices[0]], "replace")
+
+    def key_press(self, event) -> bool:
+        key = event.key()
+        if key == Qt.Key_Escape and self._indices:
+            self._vp.preview_atom_positions(self._indices, self._start_cart)
+            self._reset()
+            return True
+        axis_map = {Qt.Key_X: 0, Qt.Key_Y: 1, Qt.Key_Z: 2}
+        if key in axis_map and self._indices:
+            axis = axis_map[key]
+            self._axis = None if self._axis == axis else axis
+            # Re-apply the constraint to the current drag immediately
+            if self._moved and self._last_pos is not None:
+                self._vp.preview_atom_positions(
+                    self._indices, self._targets(self._last_pos))
+            return True
+        return False
+
+    def cancel(self) -> None:
+        if self._indices and self._start_cart is not None:
+            self._vp.preview_atom_positions(self._indices, self._start_cart)
+        self._reset()
+
+    def _reset(self) -> None:
+        self._indices = []
+        self._start_cart = None
+        self._start_frac = None
+        self._press_world = None
+        self._moved = False
+        self._axis = None
+        self._last_pos = None
+
+    def _targets(self, pos) -> np.ndarray:
+        """Start positions + cursor delta, wrapped per atom.
+
+        Periodic: the whole GROUP is shifted by ONE fractional delta,
+        then each atom wraps %1 — group-relative geometry is preserved
+        across the cell boundary (bonds never tear).
+
+        Axis lock (X/Y/Z during drag): the delta is projected onto the
+        lattice-vector direction when periodic (single fractional
+        component), onto the world axis otherwise.
+        """
+        world = self._vp.screen_to_world(pos)
+        delta = world - self._press_world
+        if self._axis is not None:
+            if self._start_frac is not None:
+                cell = np.asarray(self._vp._atoms.get_cell().array, dtype=float)
+                axis_vec = cell[:, self._axis]
+                n2 = float(axis_vec @ axis_vec)
+                if n2 > 1e-12:
+                    delta = axis_vec * (float(delta @ axis_vec) / n2)
+            else:
+                e = np.zeros(3)
+                e[self._axis] = 1.0
+                delta = e * float(delta @ e)
+        if self._start_frac is not None:
+            cell = np.asarray(self._vp._atoms.get_cell().array, dtype=float)
+            frac_delta = np.linalg.solve(cell.T, delta)
+            new_frac = self._start_frac + frac_delta
+            for ax in range(3):
+                if self._vp._atoms.get_pbc()[ax]:
+                    new_frac[:, ax] %= 1.0
+            return new_frac @ cell
+        return self._start_cart + delta
+
+    def cursor(self) -> Qt.CursorShape:
+        return Qt.CursorShape.SizeAllCursor
+
+
+class RotateAtomTool(Tool):
+    """Drag to ROTATE a group of atoms about the group CENTROID (mouse-only).
+
+    Group priority is identical to Move (settled 2026-08-13): any
+    non-empty selection > bond-connected component of the grabbed atom.
+    Horizontal drag rotates about the camera up axis, vertical drag
+    about the camera right axis (0.5°/px, near side follows the
+    cursor). Uses the fast preview path; release commits as ONE
+    undoable model call (atoms_moved); Esc restores the start
+    positions; click without drag selects the primary atom. Periodic
+    axes wrap %1 per atom after rotation.
+    """
+
+    def __init__(self, viewport) -> None:
+        super().__init__(viewport)
+        self._indices: list[int] = []
+        self._start_cart: np.ndarray | None = None   # K×3
+        self._center: np.ndarray | None = None       # group centroid
+        self._start_frac: np.ndarray | None = None   # K×3 (periodic only)
+        self._press_pos = None
+        self._moved = False
+
+    @staticmethod
+    def _connected(index: int, bonds) -> list[int]:
+        return MoveAtomTool._connected(index, bonds)
+
+    def mouse_press(self, event, pos) -> bool:
+        vp = self._vp
+        hit = vp.pick(pos)
+        if hit is None or hit[0] != "atom":
+            return False  # empty space → default navigation (orbit)
+        index = hit[1]
+        sel = vp._selected_indices
+        if sel:
+            self._indices = sorted(sel)   # priority 1: any selection
+        else:
+            self._indices = self._connected(index, vp._bonds)
+        self._start_cart = np.asarray(vp._atom_pos[self._indices], dtype=float)
+        self._center = self._start_cart.mean(axis=0)
+        atoms = vp._atoms
+        if (atoms is not None and atoms.get_cell().rank == 3
+                and atoms.get_pbc().any()):
+            self._start_frac = atoms.get_scaled_positions()[self._indices].copy()
+        else:
+            self._start_frac = None
+        self._press_pos = pos
+        return True
+
+    def mouse_move(self, event, pos) -> None:
+        if not self._indices or not self._vp._dragged:
+            return
+        self._vp.preview_atom_positions(self._indices, self._targets(pos))
+        self._moved = True
+
+    def mouse_release(self, event, pos) -> None:
+        indices, moved = self._indices, self._moved
         targets = self._targets(pos) if indices and moved else None
         self._reset()
         if not indices:
@@ -309,28 +478,38 @@ class MoveAtomTool(Tool):
     def _reset(self) -> None:
         self._indices = []
         self._start_cart = None
+        self._center = None
         self._start_frac = None
-        self._press_world = None
+        self._press_pos = None
         self._moved = False
 
     def _targets(self, pos) -> np.ndarray:
-        """Start positions + cursor delta, wrapped per atom.
+        """Start positions rotated about the group CENTROID.
 
-        Periodic: the whole GROUP is shifted by ONE fractional delta,
-        then each atom wraps %1 — group-relative geometry is preserved
-        across the cell boundary (bonds never tear).
+        Horizontal drag → rotation about the camera up axis (near side
+        follows the cursor); vertical drag → about the camera right
+        axis with the tilt convention the user chose (drag up tips the
+        structure toward the viewer). Periodic: each atom wraps %1
+        along pbc axes afterwards.
         """
-        world = self._vp.screen_to_world(pos)
-        delta = world - self._press_world
+        dx = pos.x() - self._press_pos.x()
+        dy = pos.y() - self._press_pos.y()
+        _proj, view = self._vp._camera_matrices()
+        rot = view[:3, :3]
+        up = np.asarray(rot[1, :], dtype=float)      # camera up
+        right = np.asarray(rot[0, :], dtype=float)   # camera right
+        angle_up = dx * 0.5
+        angle_right = dy * 0.5
+        R = rotation_matrix(up, angle_up) @ rotation_matrix(right, angle_right)
+        rotated = (self._start_cart - self._center) @ R.T + self._center
         if self._start_frac is not None:
             cell = np.asarray(self._vp._atoms.get_cell().array, dtype=float)
-            frac_delta = np.linalg.solve(cell.T, delta)
-            new_frac = self._start_frac + frac_delta
+            scaled = np.linalg.solve(cell.T, rotated.T).T
             for ax in range(3):
                 if self._vp._atoms.get_pbc()[ax]:
-                    new_frac[:, ax] %= 1.0
-            return new_frac @ cell
-        return self._start_cart + delta
+                    scaled[:, ax] %= 1.0
+            return scaled @ cell
+        return rotated
 
     def cursor(self) -> Qt.CursorShape:
         return Qt.CursorShape.SizeAllCursor
@@ -477,6 +656,7 @@ TOOL_CLASSES = {
     ToolMode.SELECT: SelectTool,
     ToolMode.ADD_ATOM: AddAtomTool,
     ToolMode.MOVE_ATOM: MoveAtomTool,
+    ToolMode.ROTATE: RotateAtomTool,
     ToolMode.CREATE_BOND: CreateBondTool,
     ToolMode.DELETE: DeleteTool,
 }
