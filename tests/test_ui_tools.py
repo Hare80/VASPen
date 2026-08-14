@@ -1513,3 +1513,24 @@ def test_symmetry_blocked_when_fixed(window, monkeypatch):
     )
     window._on_symmetry()
     assert opened == []
+
+
+def test_viewport_fixed_mask_tracks_model(window, monkeypatch):
+    """The renderer's per-atom fixed mask mirrors the model's flags
+    (any direction fixed counts) — the data the frozen-atom outline
+    edge pass reads."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+
+    assert len(view._fixed_mask) == 3 and not view._fixed_mask.any()
+
+    window._structure.set_fixed(0, True)
+    assert view._fixed_mask.tolist() == [True, False, False]
+
+    window._structure.set_fixed(0, np.array([True, False, True]))  # partial
+    assert view._fixed_mask[0]  # any direction fixed counts
+
+    window._structure.set_fixed(0, False)
+    assert not view._fixed_mask.any()

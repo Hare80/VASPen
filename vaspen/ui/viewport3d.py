@@ -203,6 +203,13 @@ SPHERE_SCALE = 0.60   # default atom sphere radius = covalent radius × 0.60
 EDGE_SCALE = 1.04     # dark outline sphere drawn slightly larger behind
 BOND_RADIUS = 0.12    # default bond cylinder radius (Angstrom)
 
+# Frozen atoms restore the old per-atom outline style: an edge sphere at
+# EDGE_SCALE colored with _edge_color(body color) — the ORIGINAL outline
+# look (user decision 2026-08-14, red was rejected). EDGE_DARKEN controls
+# how dark the rim is (0.45 = the historical value; the user picked 0.60
+# from generated Cu previews on 2026-08-14).
+EDGE_DARKEN = 0.60
+
 BACKGROUND_COLOR = (0.118, 0.118, 0.141)  # default background #1e1e24 dark
 
 # Mouse-drag threshold: movement below this is a click, not a drag
@@ -212,6 +219,17 @@ CLICK_DRAG_PX = 4.0
 def element_color(symbol: str) -> tuple[float, float, float]:
     """Return the Jmol RGB color (0-1) for an element symbol."""
     return JMOL_COLORS.get(symbol, DEFAULT_ATOM_COLOR)
+
+
+def _edge_color(color: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Derive the darker outline color from a base atom color.
+
+    The original renderer's edge style (user decision 2026-08-14:
+    frozen atoms restore it with the ORIGINAL color, not red). The
+    factor reads the module-level EDGE_DARKEN at draw time so preview
+    scripts can sweep it without touching the render code.
+    """
+    return tuple(c * EDGE_DARKEN for c in color)
 
 
 def element_text_color(symbol: str) -> tuple[float, float, float]:
@@ -689,9 +707,10 @@ class Viewport3D(QOpenGLWidget):
         self._preview_indices: set[int] = set()
         # Per-atom fixed flags (VASP selective dynamics) — mirror of the
         # model's, fed via set_structure(fixed=...). Used by the drag
-        # tools to reject frozen targets at press time (phase-2 display
-        # markers will read the same array).
+        # tools to reject frozen targets at press time, and by the
+        # renderer for the frozen-atom edge outline.
         self._fixed_flags = np.zeros((0, 3), dtype=bool)
+        self._fixed_mask = np.zeros(0, dtype=bool)  # any direction fixed
         self._bonds: list = []          # Bond objects, same order as render
         self._bond_ranges: list[tuple[int, int]] = []  # (first, count) vertex slices
         self._rubber_rect = None        # QRectF | None (box selection)
@@ -806,6 +825,7 @@ class Viewport3D(QOpenGLWidget):
                                  else np.zeros((n, 3), dtype=bool))
         elif len(self._fixed_flags) != n:
             self._fixed_flags = np.zeros((n, 3), dtype=bool)
+        self._fixed_mask = self._fixed_flags.any(axis=1)
 
         if atoms is None or len(atoms) == 0:
             self._atom_pos = np.zeros((0, 3), dtype=np.float32)
@@ -1498,6 +1518,28 @@ class Viewport3D(QOpenGLWidget):
                 color = tuple(float(c) for c in self._atom_color[i])
 
             pos = self._atom_pos[i]
+            if self._fixed_mask[i]:
+                # Frozen atoms restore the old per-atom outline style:
+                # a darker edge sphere at 1.04× drawn first — the body
+                # sphere covers its center, leaving the dark rim visible.
+                # The rim uses the ORIGINAL outline color (the displayed
+                # body color × 0.45 — element color, or the highlight
+                # color for a selected atom; user decision 2026-08-14,
+                # red was rejected). Same alpha as the body so
+                # transparent atoms keep a consistent rim; no specular
+                # on the rim.
+                edge = (*_edge_color(color[:3]), color[3])
+                edge_model = _sphere_model(pos, scale * EDGE_SCALE)
+                self._sphere_prog.setUniformValue(
+                    "uMVP", _to_qmatrix(proj @ view @ edge_model))
+                self._sphere_prog.setUniformValue(
+                    "uModel", _to_qmatrix(edge_model))
+                self._sphere_prog.setUniformValue("uColor", *edge)
+                gl.glUniform1f(u["uSpecPerAtom"], 0.0)
+                gl.glUniform1f(u["uUseVtxColor"], 0.0)
+                gl.glDrawElements(GL_TRIANGLES, self._unit_n_indices,
+                                  GL_UNSIGNED_INT, VoidPtr(0))
+
             model = _sphere_model(pos, scale)
             mvp = proj @ view @ model
             self._sphere_prog.setUniformValue("uMVP", _to_qmatrix(mvp))
