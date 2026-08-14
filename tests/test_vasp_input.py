@@ -1,13 +1,19 @@
 """Tests for VASP input generation (INCAR/KPOINTS/POTCAR)."""
 
+import re
+
 import numpy as np
 import pytest
 from ase import Atoms
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.vasp_input import (
+    INCAR_PRESETS,
+    INCAR_SUGGESTIONS,
+    _format_incar_value,
     available_variants,
     estimate_k_mesh,
+    format_incar_content,
     generate_all_inputs,
     generate_kpoints_automatic,
     generate_kpoints_line_mode,
@@ -15,6 +21,7 @@ from vaspen.core.vasp_input import (
     generate_potcar,
     get_high_symmetry_points,
     get_potcar_recommendation,
+    parse_incar_content,
     resolve_potcar_dir,
 )
 
@@ -239,7 +246,7 @@ def test_generate_all_inputs_element_order_consistent(tmp_path):
     assert files["POSCAR"].splitlines()[0].split() == ["O", "Fe"]
     assert files["POTCAR"] == "POTCAR-O\nPOTCAR-Fe\n"
     # INCAR/KPOINTS sanity
-    assert "ENCUT = 400" in files["INCAR"]
+    assert re.search(r"^\s*ENCUT\s*=\s*400", files["INCAR"], re.M)
     assert "Gamma" in files["KPOINTS"]
     assert "9 9 9" in files["KPOINTS"]  # cell [3,3,3], KSPACING 0.04 → ceil(8.33)
 
@@ -305,7 +312,7 @@ def test_generate_all_poscar_has_selective_dynamics_when_fixed():
     second_coords = lines[coord_line + 2].split()
     assert second_coords[3:6] == ["T", "T", "T"]
     # other files unaffected
-    assert "ENCUT = 400" in files["INCAR"]
+    assert re.search(r"^\s*ENCUT\s*=\s*400", files["INCAR"], re.M)
     assert "Gamma" in files["KPOINTS"]
 
 
@@ -316,3 +323,200 @@ def test_generate_all_poscar_plain_when_all_free():
     ))
     files = generate_all_inputs(model)
     assert "Selective dynamics" not in files["POSCAR"]
+
+
+# ----------------------------------------------------------------------
+# INCAR formatting — aligned comments, no duplicate tags, .TRUE. bools
+# ----------------------------------------------------------------------
+
+def _preset_incar(preset: str) -> str:
+    """Render one preset's tags with the production formatter."""
+    tags = dict(INCAR_PRESETS[preset])
+    tags.pop("_description", None)
+    return format_incar_content(tags, suggestions=INCAR_SUGGESTIONS[preset])
+
+
+def _active_tags(incar: str) -> list[str]:
+    """Tag names of active (non-commented) lines in INCAR content."""
+    tags = []
+    for line in incar.splitlines():
+        if line.startswith("  #"):
+            continue
+        m = re.match(r"^\s*(\w+)\s*=", line)
+        if m:
+            tags.append(m.group(1))
+    return tags
+
+
+def test_incar_no_duplicate_tags():
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "OFe2", positions=np.eye(3) * 1.5, cell=[3, 3, 3], pbc=True,
+    ))
+    for preset in INCAR_PRESETS:
+        content = generate_all_inputs(model, incar_preset=preset)["INCAR"]
+        tags = _active_tags(content)
+        assert len(tags) == len(set(tags)), f"{preset}: {tags}"
+    # overrides replace an existing tag instead of duplicating it
+    content = generate_all_inputs(model, incar_overrides={"ENCUT": 500})["INCAR"]
+    assert _active_tags(content).count("ENCUT") == 1
+
+
+def test_incar_comments_aligned_at_column_26():
+    for preset in INCAR_PRESETS:
+        for line in _preset_incar(preset).splitlines():
+            if "(" in line and not line.startswith("  #"):
+                assert line[25] == "(", repr(line)
+
+
+def test_incar_line_format_matches_reference():
+    """'(' at column 26, e.g. '  NSW    =  300          (number of...)'."""
+    content = format_incar_content(
+        {"NSW": 300}, comments={"NSW": "number of ionic steps"}
+    )
+    assert content.splitlines()[0] == "  NSW    =  300          (number of ionic steps)"
+
+
+def test_incar_bools_as_dot_true():
+    content = _preset_incar("neb")
+    assert ".TRUE." in content
+    assert "True" not in content
+
+
+def test_band_preset_lcharg_true():
+    content = _preset_incar("band")
+    assert re.search(r"^\s*LCHARG\s*=\s*\.TRUE\.", content, re.M)
+    assert re.search(r"^\s*ICHARG\s*=\s*11", content, re.M)
+
+
+def test_dos_nedos_2001():
+    assert re.search(r"^\s*NEDOS\s*=\s*2001", _preset_incar("dos"), re.M)
+
+
+def test_optical_sigma_001():
+    assert re.search(r"^\s*SIGMA\s*=\s*0\.01\b", _preset_incar("optical"), re.M)
+
+
+def test_neb_nsw_500():
+    assert re.search(r"^\s*NSW\s*=\s*500\b", _preset_incar("neb"), re.M)
+
+
+def test_ediﬀ_stays_1e_6():
+    content = _preset_incar("scf")
+    assert re.search(r"^\s*EDIFF\s*=\s*1E-06\b", content, re.M)
+
+
+def test_ispin_active_default_1():
+    for preset in INCAR_PRESETS:
+        content = _preset_incar(preset)
+        assert re.search(r"^\s*ISPIN\s*=\s*1\b", content, re.M), preset
+        assert not any(
+            l.startswith("  # ISPIN") for l in content.splitlines()
+        ), preset
+
+
+def test_system_line_has_no_comment():
+    for preset in INCAR_PRESETS:
+        content = _preset_incar(preset)
+        line = next(l for l in content.splitlines() if l.startswith("SYSTEM"))
+        assert "(" not in line, line
+
+
+def test_suggestions_commented_out():
+    content = _preset_incar("scf")
+    lines = content.splitlines()
+    assert any(l.startswith("  # MAGMOM") for l in lines)
+    assert "MAGMOM" not in _active_tags(content)
+    for preset in INCAR_PRESETS:
+        content = _preset_incar(preset)
+        assert any(l.startswith("  # IVDW") for l in content.splitlines()), preset
+        assert any(l.startswith("  # ISTART") for l in content.splitlines()), preset
+
+
+def test_format_incar_value():
+    assert _format_incar_value(True) == ".TRUE."
+    assert _format_incar_value(False) == ".FALSE."
+    assert _format_incar_value(1e-8) == "1E-08"
+    assert _format_incar_value(0.05) == "0.05"
+    assert _format_incar_value(-0.02) == "-0.02"
+    assert _format_incar_value(400) == "400"
+    assert _format_incar_value("Auto") == "Auto"
+    assert _format_incar_value("True") == ".TRUE."
+    assert _format_incar_value("false") == ".FALSE."
+    assert _format_incar_value("") == ""
+
+
+def test_format_incar_content_unknown_tag_no_comment():
+    content = format_incar_content({"CUSTOM": 3, "SYSTEM": "x"})
+    lines = content.splitlines()
+    assert lines[0].startswith("  CUSTOM ")
+    assert lines[1] == "SYSTEM = x"
+    assert "(" not in lines[0]
+    assert lines[0].rstrip() == lines[0]  # no trailing spaces
+
+
+def test_format_incar_content_suggestion_skipped_when_active():
+    content = format_incar_content(
+        {"ISPIN": 2}, suggestions={"ISPIN": 2, "IVDW": 11}
+    )
+    assert _active_tags(content).count("ISPIN") == 1
+    assert not any(l.startswith("  # ISPIN") for l in content.splitlines())
+    assert any(l.startswith("  # IVDW") for l in content.splitlines())
+
+
+# ----------------------------------------------------------------------
+# parse_incar_content — recognition of generated / hand-edited INCAR
+# ----------------------------------------------------------------------
+
+def test_parse_roundtrips_presets():
+    """parse(format(preset)) recovers every tag and normalized value."""
+    for preset in INCAR_PRESETS:
+        tags = dict(INCAR_PRESETS[preset])
+        tags.pop("_description", None)
+        parsed, problems = parse_incar_content(
+            format_incar_content(tags, suggestions=INCAR_SUGGESTIONS[preset])
+        )
+        assert problems == [], preset
+        assert list(parsed) == list(tags), preset  # same order
+        for tag, value in tags.items():
+            expected = _format_incar_value(value)
+            assert parsed[tag] == expected, f"{preset}: {tag}"
+
+
+def test_parse_skips_comment_and_blank_lines():
+    text = "! a comment\n\n  ENCUT = 400\n  # IVDW = 11\n   \n!LDAU = .TRUE.\n"
+    tags, problems = parse_incar_content(text)
+    assert problems == []
+    assert list(tags) == ["ENCUT"]
+    assert tags["ENCUT"] == "400"
+
+
+def test_parse_system_keeps_full_line():
+    tags, _ = parse_incar_content("SYSTEM = My job (2026-08-14)\nENCUT = 400\n")
+    assert tags["SYSTEM"] == "My job (2026-08-14)"
+
+
+def test_parse_strips_trailing_comment():
+    tags, problems = parse_incar_content(
+        "  ENCUT  =  400          (plane-wave cutoff in eV)\n"
+    )
+    assert problems == []
+    assert tags["ENCUT"] == "400"
+
+
+def test_parse_reports_malformed_lines():
+    tags, problems = parse_incar_content("ENCUT = 400\nthis is not a tag\n")
+    assert list(tags) == ["ENCUT"]
+    assert problems == [(2, "malformed", "this is not a tag")]
+
+
+def test_parse_reports_case_insensitive_duplicates():
+    tags, problems = parse_incar_content("ENCUT = 400\nencut = 500\n")
+    assert tags["ENCUT"] == "400"  # first occurrence wins
+    assert problems == [(2, "duplicate", "encut")]
+
+
+def test_parse_empty_value():
+    tags, problems = parse_incar_content("MAGMOM =\n")
+    assert problems == []
+    assert tags["MAGMOM"] == ""

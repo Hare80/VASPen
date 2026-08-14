@@ -834,3 +834,175 @@ def test_dialog_dropdowns_are_menu_buttons(qtbot, periodic_model, srtio3):
     for widget in checkables:
         assert isinstance(widget, MenuButton)
         assert not isinstance(widget, QComboBox)
+
+
+# ----------------------------------------------------------------------
+# INCAR editor — preview format & duplicate-tag validation
+# ----------------------------------------------------------------------
+
+def test_incar_editor_preview_uses_aligned_format(qtbot):
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("neb")  # has LCLIMB=True → .TRUE. in preview
+
+    preview = dlg._preview.toPlainText()
+    assert ".TRUE." in preview
+    assert "True" not in preview
+    # comment alignment: active comment lines have '(' at column 26
+    for line in preview.splitlines():
+        if "(" in line and not line.startswith("  #"):
+            assert line[25] == "(", repr(line)
+    # suggestion block is commented out
+    assert any(l.startswith("  # MAGMOM") for l in preview.splitlines())
+    dlg.close()
+
+
+def test_incar_editor_duplicate_tags_detected(qtbot):
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+
+    dlg._add_custom_tag()
+    row = dlg._table.rowCount() - 1
+    dlg._table.item(row, 0).setText("ENCUT")  # collides with preset ENCUT
+    assert "ENCUT" in dlg._validate_tags()
+    dlg.close()
+
+
+def test_incar_editor_add_tag_focuses_pending_row(qtbot):
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+
+    dlg._add_custom_tag()
+    rows_before = dlg._table.rowCount()
+    dlg._add_custom_tag()  # NEW_TAG row already pending → no new row
+    assert dlg._table.rowCount() == rows_before
+    dlg.close()
+
+
+# ----------------------------------------------------------------------
+# INCAR editor — editable preview, sync, save-with-hand-edits
+# ----------------------------------------------------------------------
+
+def test_incar_editor_preview_is_editable(qtbot):
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    assert not dlg._preview.isReadOnly()
+    dlg.close()
+
+
+def test_incar_editor_sync_from_preview(qtbot):
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+
+    # hand-edit: change ENCUT, add a new tag, keep a commented suggestion
+    dlg._preview.setPlainText(
+        "SYSTEM = edited\n"
+        "  ENCUT  =  500          (my cutoff)\n"
+        "  IVDW   =  11\n"
+        "  # MAGMOM =               (initial magnetic moments per atom)\n"
+    )
+    dlg._on_sync_from_preview()
+
+    # table now holds the parsed tags (ENCUT updated, IVDW added)
+    table_tags = {
+        dlg._table.item(r, 0).text(): dlg._table.item(r, 1).text()
+        for r in range(dlg._table.rowCount())
+    }
+    assert table_tags["ENCUT"] == "500"
+    assert "IVDW" in table_tags and table_tags["IVDW"] == "11"
+    assert "MAGMOM" not in table_tags  # commented line stays a suggestion
+    # preview was re-aligned/normalized by the sync (canonical comment
+    # table replaces the hand-written one)
+    preview = dlg._preview.toPlainText()
+    assert "  ENCUT  =  500          (plane-wave cutoff in eV; set to 1.3 x ENMAX of POTCAR)" in preview
+    assert not dlg._preview_dirty
+    dlg.close()
+
+
+def test_incar_editor_sync_rejects_bad_lines(qtbot, monkeypatch):
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+    warnings = []
+    monkeypatch.setattr(
+        "vaspen.ui.incar_editor.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a),
+    )
+
+    dlg._preview.setPlainText("ENCUT = 500\nnot a tag line\n")
+    dlg._on_sync_from_preview()
+
+    assert len(warnings) == 1
+    # table untouched by the failed sync
+    table_tags = {
+        dlg._table.item(r, 0).text() for r in range(dlg._table.rowCount())
+    }
+    assert "ENCUT" in table_tags  # still preset value, not synced
+    dlg.close()
+
+
+def test_incar_editor_accept_saves_hand_edited_preview(qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QDialog, QFileDialog
+
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+
+    out = tmp_path / "INCAR"
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        lambda *a, **k: (str(out), ""),
+    )
+
+    # user hand-edits the preview, then saves without touching the table
+    dlg._preview.setPlainText("SYSTEM = hand edited\n  ENCUT = 520\n")
+    dlg._on_accept()
+
+    assert out.read_text(encoding="utf-8") == "SYSTEM = hand edited\n  ENCUT = 520\n"
+    assert dlg.result() == QDialog.Accepted  # noqa: F821
+    dlg.close()
+
+
+def test_incar_editor_accept_blocks_duplicate_in_preview(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+
+    warnings = []
+    calls = []
+    monkeypatch.setattr(
+        "vaspen.ui.incar_editor.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a),
+    )
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        lambda *a, **k: calls.append(a) or ("", ""),
+    )
+
+    dlg._preview.setPlainText("ENCUT = 400\nencut = 500\n")
+    dlg._on_accept()
+
+    assert len(warnings) == 1
+    assert calls == []  # save dialog never opened
+    dlg.close()

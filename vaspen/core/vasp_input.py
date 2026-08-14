@@ -19,12 +19,16 @@ from ase.dft.kpoints import get_special_points as ase_get_special_points
 # Each preset is a dict of tag → value. Values are written as-is to
 # the INCAR file (strings, ints, floats, bools).
 #
-# Key design principles:
+# Key design principles (confirmed with the user 2026-08-14):
 #   1. ENCUT defaults to 400 eV (user should increase to 1.3× ENMAX).
 #   2. ISMEAR=0 (Gaussian) for most calculations.
 #   3. ISMEAR=-5 (tetrahedron) for DOS.
-#   4. LWAVE/LCHARG = False by default (save disk space).
+#   4. LWAVE/LCHARG = False by default (save disk space); the band
+#      preset writes CHGCAR because ICHARG=11 reads it back.
 #   5. PREC=Normal, LREAL=Auto as pragmatic defaults.
+#   6. Generated lines carry aligned (comments) — see
+#      format_incar_content(); commented-out suggestion tags
+#      (INCAR_SUGGESTIONS) follow after a blank line.
 
 INCAR_PRESETS: dict[str, dict[str, Any]] = {
     "scf": {
@@ -56,6 +60,7 @@ INCAR_PRESETS: dict[str, dict[str, Any]] = {
         "LREAL": "Auto",
         "LWAVE": False,
         "LCHARG": False,
+        "ISPIN": 1,
     },
     "band": {
         "_description": "Band structure — fixed charge density, line-mode KPOINTS.",
@@ -67,8 +72,9 @@ INCAR_PRESETS: dict[str, dict[str, Any]] = {
         "PREC": "Normal",
         "LREAL": "Auto",
         "LWAVE": False,
-        "LCHARG": False,
-        "ICHARG": 11,  # Read CHGCAR for non-SCF band calculation
+        "LCHARG": True,   # ICHARG=11 reads the CHGCAR written by the SCF run
+        "ICHARG": 11,     # Read CHGCAR for non-SCF band calculation
+        "ISPIN": 1,
     },
     "dos": {
         "_description": "Density of states — tetrahedron smearing, dense k-mesh.",
@@ -82,14 +88,15 @@ INCAR_PRESETS: dict[str, dict[str, Any]] = {
         "LWAVE": False,
         "LCHARG": False,
         "LORBIT": 11,
-        "NEDOS": 2000,
+        "NEDOS": 2001,   # odd: the Fermi level lands on a DOS grid point
+        "ISPIN": 1,
     },
     "optical": {
         "_description": "Optical properties — frequency-dependent dielectric function.",
         "SYSTEM": "VASP optical",
         "ENCUT": 400,
         "ISMEAR": 0,
-        "SIGMA": 0.05,
+        "SIGMA": 0.01,
         "EDIFF": 1e-6,
         "PREC": "Normal",
         "LREAL": "Auto",
@@ -98,6 +105,7 @@ INCAR_PRESETS: dict[str, dict[str, Any]] = {
         "LOPTICS": True,
         "CSHIFT": 0.1,
         "NEDOS": 2000,
+        "ISPIN": 1,
     },
     "neb": {
         "_description": "Nudged Elastic Band — transition state search.",
@@ -109,7 +117,7 @@ INCAR_PRESETS: dict[str, dict[str, Any]] = {
         "EDIFFG": -0.05,
         "IBRION": 3,   # Damped MD (recommended for NEB)
         "POTIM": 0.0,
-        "NSW": 200,
+        "NSW": 500,
         "PREC": "Normal",
         "LREAL": "Auto",
         "LWAVE": False,
@@ -117,7 +125,53 @@ INCAR_PRESETS: dict[str, dict[str, Any]] = {
         "IMAGES": 5,   # Number of intermediate images
         "SPRING": -5,  # Spring constant
         "LCLIMB": True,
+        "ISPIN": 1,
     },
+}
+
+# Short trailing comments for generated INCAR lines (written in
+# parentheses after the value; SYSTEM has none — VASP takes the whole
+# line after '=' as the system name).
+INCAR_TAG_COMMENTS: dict[str, str] = {
+    "ENCUT": "plane-wave cutoff in eV; set to 1.3 x ENMAX of POTCAR",
+    "ISMEAR": "smearing: 0-Gaussian, 1-MP (metals), -5-tetrahedron",
+    "SIGMA": "smearing width in eV",
+    "EDIFF": "electronic convergence in eV",
+    "EDIFFG": "ionic convergence in eV/A; negative = force",
+    "IBRION": "ions: -1-fixed, 0-MD, 1-quasi-Newton, 2-CG",
+    "ISIF": "2-ions only, 3-ions + cell",
+    "NSW": "max ionic steps",
+    "NELM": "max electronic SCF steps",
+    "PREC": "precision: Low, Normal, Accurate",
+    "LREAL": "real-space projection: Auto, On, Off",
+    "LWAVE": "write WAVECAR; very large file",
+    "LCHARG": "write CHGCAR",
+    "LORBIT": "projected DOS: 11-element resolved",
+    "NEDOS": "DOS grid points",
+    "LOPTICS": "frequency-dependent dielectric matrix",
+    "CSHIFT": "complex shift for Kramers-Kronig in eV",
+    "ICHARG": "charge init: 11-read CHGCAR (non-SCF)",
+    "ISPIN": "spin: 1-non-polarized, 2-collinear",
+    "IMAGES": "intermediate images between endpoints",
+    "SPRING": "spring constant in eV/A^2",
+    "LCLIMB": "climbing image NEB",
+    "POTIM": "time step in fs (MD) / displacement",
+    "MAGMOM": "initial magnetic moments per atom; with ISPIN=2",
+    "ISTART": "1-read existing WAVECAR if present",
+    "IVDW": "11-DFT-D3 van der Waals correction",
+}
+
+# Commented-out suggestion lines appended after a blank line. They are
+# inactive until the user removes the '# '; suggestions that are
+# already active tags are skipped so a tag never appears twice.
+_COMMON_SUGGESTIONS: dict[str, Any] = {
+    "MAGMOM": "",   # initial magnetic moments; fill per atom
+    "IVDW": 11,
+    "ISTART": 1,
+}
+
+INCAR_SUGGESTIONS: dict[str, dict[str, Any]] = {
+    preset: dict(_COMMON_SUGGESTIONS) for preset in INCAR_PRESETS
 }
 
 INCAR_TAG_DESCRIPTIONS: dict[str, str] = {
@@ -147,6 +201,130 @@ INCAR_TAG_DESCRIPTIONS: dict[str, str] = {
     "POTIM": "Time step for MD / damped MD (IBRION=3)",
     "MAGMOM": "Initial magnetic moments per atom",
 }
+
+
+# ======================================================================
+# INCAR text formatting
+# ======================================================================
+
+def _format_incar_value(val: Any) -> str:
+    """Format an INCAR value VASP-style (bools as .TRUE./.FALSE.)."""
+    if isinstance(val, bool):
+        return ".TRUE." if val else ".FALSE."
+    if isinstance(val, float):
+        return f"{val:g}".replace("e", "E")
+    text = str(val).strip()
+    lowered = text.lower()
+    if lowered in ("true", ".true.", "t"):
+        return ".TRUE."
+    if lowered in ("false", ".false.", "f"):
+        return ".FALSE."
+    return text
+
+
+def _format_incar_line(
+    tag: str,
+    value: Any,
+    comment: str | None,
+    commented: bool,
+) -> str:
+    """One INCAR line: aligned tag/value with the comment at column 26."""
+    body = f"{tag:<7}=  {_format_incar_value(value):<13}"
+    prefix = "  # " if commented else "  "
+    if comment:
+        return f"{prefix}{body}({comment})"
+    return (prefix + body).rstrip()
+
+
+def format_incar_content(
+    tags: dict[str, Any],
+    comments: dict[str, str] | None = None,
+    suggestions: dict[str, Any] | None = None,
+) -> str:
+    """Render INCAR tags as aligned text with trailing (comments).
+
+    Each tag is written exactly once, in dict order. Trailing comments
+    come from `comments` (default: INCAR_TAG_COMMENTS); tags without an
+    entry get no comment. Commented-out suggestion lines follow after
+    a blank line. SYSTEM is written as a plain line because VASP treats
+    everything after '=' as the system name.
+
+    Args:
+        tags: Tag → value mapping (insertion order is preserved).
+        comments: Optional tag → comment table overriding the default.
+        suggestions: Optional commented-out tag → value lines appended
+            at the end; skipped when already present as active tags.
+
+    Returns:
+        INCAR file content as a string (LF endings, trailing newline).
+    """
+    table = INCAR_TAG_COMMENTS if comments is None else comments
+    lines: list[str] = []
+    for tag, value in tags.items():
+        if tag == "SYSTEM":
+            lines.append(f"SYSTEM = {_format_incar_value(value)}")
+        else:
+            lines.append(_format_incar_line(tag, value, table.get(tag), False))
+    if suggestions:
+        lines.append("")
+        for tag, value in suggestions.items():
+            if tag in tags:
+                continue
+            lines.append(_format_incar_line(tag, value, table.get(tag), True))
+    return "\n".join(lines) + "\n"
+
+
+_TAG_LINE_RE = re.compile(r"^\s*(\S+)\s*=\s*(.*)$")
+
+
+def parse_incar_content(text: str) -> tuple[dict[str, str], list[tuple[int, str, str]]]:
+    """Parse INCAR text back into ordered tags.
+
+    Round-trips the output of format_incar_content and also accepts
+    hand-written INCAR text.
+
+    Args:
+        text: INCAR content (generated or hand-edited).
+
+    Returns:
+        (tags, problems): tags preserves line order and the original tag
+        casing; trailing (comments) are stripped from values. problems
+        is a list of (line_no, kind, message) with kind "duplicate" or
+        "malformed".
+
+    Rules:
+        - Blank lines and lines whose first non-space char is '#' or
+          '!' are ignored (comment / commented-out suggestion lines).
+        - SYSTEM (case-insensitive) keeps the whole text after '=' —
+          VASP reads the full line as the system name.
+        - A line not matching ``TAG = ...`` is reported as malformed.
+        - A tag name that repeats (case-insensitive) is reported as a
+          duplicate; the first occurrence wins.
+    """
+    tags: dict[str, str] = {}
+    problems: list[tuple[int, str, str]] = []
+    seen: dict[str, str] = {}
+    for line_no, raw in enumerate(text.splitlines(), start=1):
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        if line.lstrip().startswith(("#", "!")):
+            continue
+        match = _TAG_LINE_RE.match(line)
+        if not match:
+            problems.append((line_no, "malformed", line.strip()))
+            continue
+        tag = match.group(1)
+        value = match.group(2).strip()
+        key = tag.casefold()
+        if key in seen:
+            problems.append((line_no, "duplicate", tag))
+            continue
+        seen[key] = tag
+        if tag.upper() != "SYSTEM":
+            value = re.sub(r"\s*\(.*\)\s*$", "", value).rstrip()
+        tags[tag] = value
+    return tags, problems
 
 # ======================================================================
 # KPOINTS Generation
@@ -551,8 +729,9 @@ def generate_all_inputs(
     preset.pop("_description", None)  # remove metadata key
     if incar_overrides:
         preset.update(incar_overrides)
-    incar_lines = [f"{tag} = {val}" for tag, val in preset.items()]
-    incar_content = "\n".join(incar_lines) + "\n"
+    incar_content = format_incar_content(
+        preset, suggestions=INCAR_SUGGESTIONS.get(incar_preset)
+    )
 
     # KPOINTS
     kp = kpoints_params or {}

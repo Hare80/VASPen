@@ -670,6 +670,53 @@ Files: {}</source>
     </message>
 </context>
 <context>
+    <name>IncarEditorDialog</name>
+    <message>
+        <source>Duplicate Tag</source>
+        <translation>参数重复</translation>
+    </message>
+    <message>
+        <source>Duplicate INCAR tags: {}. Remove or rename the extra rows.</source>
+        <translation>INCAR 参数重复：{}。请删除或重命名多余的行。</translation>
+    </message>
+    <message>
+        <source>Sync Table from Preview</source>
+        <translation>从预览更新表格</translation>
+    </message>
+    <message>
+        <source>Parse the edited preview text back into the tag table</source>
+        <translation>将编辑后的预览文本解析回参数表格</translation>
+    </message>
+    <message>
+        <source>line {}: {}</source>
+        <translation>第 {} 行：{}</translation>
+    </message>
+    <message>
+        <source>Cannot Sync from Preview</source>
+        <translation>无法从预览同步</translation>
+    </message>
+    <message>
+        <source>Fix the INCAR preview first:
+{}</source>
+        <translation>请先修正 INCAR 预览：
+{}</translation>
+    </message>
+    <message>
+        <source>Invalid INCAR Lines</source>
+        <translation>无效的 INCAR 行</translation>
+    </message>
+    <message>
+        <source>These lines are not valid INCAR tag lines:
+{}
+
+Save anyway?</source>
+        <translation>以下行不是有效的 INCAR 参数行：
+{}
+
+仍要保存吗？</translation>
+    </message>
+</context>
+<context>
     <name>KpointsEditorDialog</name>
     <message>
         <source>Generate KPOINTS</source>

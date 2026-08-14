@@ -7,6 +7,8 @@ Defaults follow community-standard settings.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -24,8 +26,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from vaspen.core.vasp_input import INCAR_PRESETS, INCAR_TAG_DESCRIPTIONS
+from vaspen.core.vasp_input import (
+    INCAR_PRESETS,
+    INCAR_SUGGESTIONS,
+    INCAR_TAG_DESCRIPTIONS,
+    format_incar_content,
+    parse_incar_content,
+)
 from vaspen.ui.menu_button import MenuButton
+from vaspen.utils.config import AppConfig
 
 
 class IncarEditorDialog(QDialog):
@@ -44,6 +53,8 @@ class IncarEditorDialog(QDialog):
         self._structure_model = structure_model
         self._tags: dict[str, str] = {}
         self._custom_tags: set[str] = set()
+        self._preset_key: str = "scf"
+        self._preview_dirty = False
 
         self.setWindowTitle(self.tr("Generate INCAR"))
         self.resize(800, 600)
@@ -103,14 +114,21 @@ class IncarEditorDialog(QDialog):
         tag_btn_row.addStretch()
         layout.addLayout(tag_btn_row)
 
-        # ── Bottom: Preview ──
-        preview_label = QLabel(self.tr("Preview:"))
-        layout.addWidget(preview_label)
+        # ── Bottom: Preview (editable — sync back via the button) ──
+        preview_row = QHBoxLayout()
+        preview_row.addWidget(QLabel(self.tr("Preview:")))
+        preview_row.addStretch()
+        self._sync_btn = QPushButton(self.tr("Sync Table from Preview"))
+        self._sync_btn.setToolTip(self.tr(
+            "Parse the edited preview text back into the tag table"))
+        self._sync_btn.clicked.connect(self._on_sync_from_preview)
+        preview_row.addWidget(self._sync_btn)
+        layout.addLayout(preview_row)
 
         self._preview = QTextEdit()
-        self._preview.setReadOnly(True)
         self._preview.setFontFamily("Consolas, monospace")
         self._preview.setMaximumHeight(200)
+        self._preview.textChanged.connect(self._on_preview_text_changed)
         layout.addWidget(self._preview)
 
         # ── Dialog buttons ──
@@ -131,6 +149,7 @@ class IncarEditorDialog(QDialog):
 
     def _load_preset(self, preset_name: str) -> None:
         """Load an INCAR preset into the table."""
+        self._preset_key = preset_name
         preset = dict(INCAR_PRESETS.get(preset_name, {}))
         preset.pop("_description", None)  # remove metadata key
 
@@ -178,6 +197,13 @@ class IncarEditorDialog(QDialog):
 
     def _add_custom_tag(self) -> None:
         """Add a new custom tag row."""
+        # Focus the pending row instead of stacking duplicate NEW_TAG rows
+        for r in range(self._table.rowCount()):
+            item = self._table.item(r, 0)
+            if item and item.text() == "NEW_TAG":
+                self._table.setCurrentCell(r, 1)
+                return
+
         row = self._table.rowCount()
         self._table.insertRow(row)
 
@@ -209,8 +235,59 @@ class IncarEditorDialog(QDialog):
             if tag_item and val_item:
                 self._tags[tag_item.text()] = val_item.text()
 
-        lines = [f"{tag} = {val}" for tag, val in self._tags.items()]
-        self._preview.setPlainText("\n".join(lines) + "\n")
+        # Same renderer as file generation — preview == generated INCAR
+        self._preview.blockSignals(True)
+        self._preview.setPlainText(format_incar_content(
+            self._tags, suggestions=INCAR_SUGGESTIONS.get(self._preset_key)
+        ))
+        self._preview.blockSignals(False)
+        self._preview_dirty = False  # programmatic rebuild is not a user edit
+
+    def _on_preview_text_changed(self) -> None:
+        """The user typed in the preview — it becomes the source of truth."""
+        self._preview_dirty = True
+
+    def _on_sync_from_preview(self) -> None:
+        """Parse the edited preview text back into the tag table."""
+        tags, problems = parse_incar_content(self._preview.toPlainText())
+        if problems:
+            lines = [
+                self.tr("line {}: {}").format(no, msg)
+                for no, _kind, msg in problems
+            ]
+            QMessageBox.warning(
+                self,
+                self.tr("Cannot Sync from Preview"),
+                self.tr("Fix the INCAR preview first:\n{}").format("\n".join(lines)),
+            )
+            return
+        self._tags = tags
+        preset_tags = INCAR_PRESETS.get(self._preset_key, {})
+        self._custom_tags = {
+            t for t in tags
+            if t.casefold() not in {k.casefold() for k in preset_tags}
+        }
+        self._refresh_table()  # preview is re-aligned/normalized
+
+    def _validate_tags(self) -> list[str]:
+        """Tag names that appear more than once (case-insensitive)."""
+        seen: dict[str, str] = {}
+        duplicates: list[str] = []
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, 0)
+            if not item:
+                continue
+            name = item.text().strip()
+            if not name:
+                continue
+            key = name.casefold()
+            if key in seen:
+                if seen[key] is not None:
+                    duplicates.append(seen[key])
+                    seen[key] = None
+            else:
+                seen[key] = name
+        return duplicates
 
     # ------------------------------------------------------------------
     # ENCUT estimation
@@ -237,12 +314,11 @@ class IncarEditorDialog(QDialog):
                 "ignore", message="POTCAR data with symbol .* is not known to pymatgen"
             )
 
-            config = __import__('vaspen.utils.config', fromlist=['AppConfig']).AppConfig()
+            config = AppConfig()
             potcar_path = config.potcar_library_path
             if not potcar_path:
                 raise ValueError("POTCAR library not configured")
 
-            from pathlib import Path
             from vaspen.core.vasp_input import (
                 get_potcar_recommendation,
                 resolve_potcar_dir,
@@ -296,16 +372,53 @@ class IncarEditorDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_accept(self) -> None:
-        self._update_preview()
-        content = self._preview.toPlainText()
+        # The edited preview is the source of truth; a clean preview is
+        # first refreshed from the table (pending cell edits committed).
+        if not self._preview_dirty:
+            duplicates = self._validate_tags()
+            if duplicates:
+                QMessageBox.warning(
+                    self,
+                    self.tr("Duplicate Tag"),
+                    self.tr("Duplicate INCAR tags: {}. Remove or rename the extra rows.")
+                    .format(", ".join(duplicates)),
+                )
+                return
+            self._update_preview()
 
+        content = self._preview.toPlainText()
+        _tags, problems = parse_incar_content(content)
+        duplicates = [msg for _no, kind, msg in problems if kind == "duplicate"]
+        if duplicates:
+            QMessageBox.warning(
+                self,
+                self.tr("Duplicate Tag"),
+                self.tr("Duplicate INCAR tags: {}. Remove or rename the extra rows.")
+                .format(", ".join(duplicates)),
+            )
+            return
+        malformed = [
+            self.tr("line {}: {}").format(no, msg)
+            for no, kind, msg in problems if kind == "malformed"
+        ]
+        if malformed:
+            reply = QMessageBox.question(
+                self,
+                self.tr("Invalid INCAR Lines"),
+                self.tr("These lines are not valid INCAR tag lines:\n{}\n\nSave anyway?")
+                .format("\n".join(malformed)),
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        config = AppConfig()
         filepath, _ = QFileDialog.getSaveFileName(
             self,
             self.tr("Save INCAR"),
-            "INCAR",
+            str(Path(config.last_directory) / "INCAR"),
             "INCAR files (*);;All files (*)",
         )
         if filepath:
-            from pathlib import Path
             Path(filepath).write_text(content, encoding="utf-8", newline="\n")
+            config.last_directory = str(Path(filepath).parent)
             self.accept()

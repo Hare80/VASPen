@@ -378,20 +378,38 @@ The INCAR strategy uses **layered defaults by calculation type**. Implemented in
 |-----|-----|-------------|------|-----|---------|
 | ENCUT | 400 | 400 | 400 | 400 | 400 |
 | ISMEAR | 0 | 0 | 0 | -5 | 0 |
-| SIGMA | 0.05 | 0.05 | 0.05 | 0.05 | 0.05 |
+| SIGMA | 0.05 | 0.05 | 0.05 | 0.05 | 0.01 |
 | EDIFF | 1E-6 | 1E-6 | 1E-6 | 1E-6 | 1E-6 |
 | EDIFFG | — | -0.01 | — | — | — |
 | IBRION | — | 2 | — | — | — |
 | ISIF | — | 3 | — | — | — |
 | NSW | — | 100 | — | — | — |
+| NELM | 60 | — | — | — | — |
+| ISPIN | 1 | 1 | 1 | 1 | 1 |
 | PREC | Normal | Normal | Normal | Normal | Normal |
 | LREAL | Auto | Auto | Auto | Auto | Auto |
 | LWAVE | F | F | F | F | F |
-| LCHARG | F | F | F | F | F |
+| LCHARG | F | F | T¹ | F | F |
 | LORBIT | — | — | — | 11 | — |
-| NEDOS | — | — | — | 2000 | 2000 |
+| NEDOS | — | — | — | 2001 | 2000 |
 | LOPTICS | — | — | — | — | T |
 | CSHIFT | — | — | — | — | 0.1 |
+
+¹ Band LCHARG=T: the preset uses ICHARG=11, which reads the CHGCAR the
+previous SCF run must have written.
+
+NEB preset: SCF base + EDIFFG -0.05, IBRION 3, POTIM 0, NSW 500,
+IMAGES 5, SPRING -5, LCLIMB T.
+
+**INCAR text format (settled 2026-08-14, values confirmed with the
+user):** `format_incar_content()` renders every tag exactly once
+(insertion order) as `  TAG    =  value          (comment)` — trailing
+parenthesized English comments from `INCAR_TAG_COMMENTS`, "(" aligned
+at column 26; booleans as `.TRUE.`/`.FALSE.`; `SYSTEM` is a plain line
+(VASP reads the whole line after "=" as the name, so no comment).
+Commented-out suggestion lines (`# MAGMOM`, `# IVDW = 11`,
+`# ISTART = 1`) follow after a blank line. The INCAR editor preview
+uses the same renderer, and its accept path rejects duplicate tag rows.
 
 ### 8.2 KPOINTS Modes
 
