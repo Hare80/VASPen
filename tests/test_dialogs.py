@@ -1262,3 +1262,38 @@ def test_surface_dialog_slab_input_shows_rebox_note(qtbot):
     z = np.sort(view.rendered[-1][0].positions[:, 2])
     levels = np.unique(np.round(z, 3))
     assert len(levels) == 4
+
+
+def test_surface_dialog_disordered_accept_warns(qtbot, monkeypatch,
+                                                disordered_atoms):
+    """Applying a cleave to a disordered structure requires confirmation
+    — the fractional occupancy cannot survive the cut (same policy as
+    symmetrize)."""
+    from PySide6.QtWidgets import QMessageBox
+
+    replies = []
+    monkeypatch.setattr(
+        "vaspen.ui.surface_dialog.QMessageBox.warning",
+        staticmethod(lambda *a, **k:
+                     replies.append(a) or QMessageBox.Cancel))
+    model = StructureModel()
+    model.load_atoms(disordered_atoms)
+    assert model.has_disorder
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    _wait_slabs(qtbot, dlg, view, 1)
+    dlg._on_accept()
+    assert replies  # the disorder warning fired
+    assert dlg.result_structure is None  # Cancel keeps the dialog open
+
+    # Yes applies the slab (disorder dropped from the result's occupancy)
+    replies.clear()
+    monkeypatch.setattr(
+        "vaspen.ui.surface_dialog.QMessageBox.warning",
+        staticmethod(lambda *a, **k:
+                     replies.append(a) or QMessageBox.Yes))
+    dlg._on_accept()
+    assert dlg.result_structure is not None
+    assert not dlg.result_structure.has_disorder

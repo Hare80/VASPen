@@ -2069,7 +2069,13 @@ Continue?</source>
             <source>In-plane supercell size (a × b). The vacuum direction (c) is never expanded.</source>
             <translation>面内超胞尺寸（a × b）。真空层方向（c）不扩展。</translation>
         </message>
-    <message><source>Computing slab…</source><translation>正在计算切面…</translation></message><message><source>  (re-boxed — input already carried vacuum)</source><translation>  (已重新装盒——输入已带真空)</translation></message></context>
+    <message><source>Computing slab…</source><translation>正在计算切面…</translation></message><message><source>  (re-boxed — input already carried vacuum)</source><translation>  (已重新装盒——输入已带真空)</translation></message><message><source>Partial Occupancy</source><translation>部分占据(无序)</translation></message><message><source>This structure has partial occupancy (disorder).
+Cleaving will discard the fractional occupancy information.
+
+Continue?</source><translation>此结构含有部分占据(无序)。
+切面将丢弃分数占据信息。
+
+是否继续?</translation></message></context>
     <context>
         <name>SettingsDialog</name>
         <message>

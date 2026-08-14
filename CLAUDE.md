@@ -572,7 +572,9 @@ them in place instead: `_rebox_slab` unwraps the layers (±c
 translations), re-applies the vacuum along c with the slab centered,
 in-plane cell untouched; a single `SlabInfo(reboxed=True)` is returned
 and the Miller index/layers are ignored (the dialog status shows the
-re-box note).
+re-box note). Cleaving a disordered structure asks for confirmation
+first (the fractional occupancy cannot survive the cut — same policy
+as the symmetrize confirm).
 
 ---
 
