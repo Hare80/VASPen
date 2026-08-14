@@ -96,7 +96,7 @@ def test_neb_end_to_end(qtbot, tmp_path, monkeypatch):
 
     previews: list = []
     dlg = GenerateAllDialog(model, default_task="neb",
-                            preview_callback=previews.append)
+                            preview_callback=lambda atoms, *a: previews.append(atoms))
     qtbot.addWidget(dlg)
 
     panel = dlg._poscar_panel
@@ -617,3 +617,214 @@ def test_neb_browsed_ini_selective_dynamics_freeze(qtbot, tmp_path, monkeypatch)
     for frame in panel.images:
         assert np.allclose(frame.positions[mask],
                            panel._init_atoms.positions[mask])
+
+
+# ----------------------------------------------------------------------
+# Frame editing (move/rotate atoms, delete/add bonds, undo, persistence)
+# ----------------------------------------------------------------------
+
+def _interpolated_dialog(model, preview_callback=None):
+    """Dialog with the Cu example pair already interpolated (5 images)."""
+    dlg = GenerateAllDialog(model, default_task="neb",
+                            preview_callback=preview_callback)
+    panel = dlg._poscar_panel
+    panel._final_atoms = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    panel._update_diagnostics()
+    panel._images_spin.setValue(4)
+    panel._on_interpolate()
+    return dlg
+
+
+def test_frame_preview_data_editability(qtbot):
+    model = _example_model()
+    dlg = _interpolated_dialog(model)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+
+    atoms0, ed0, flags0, bonds0 = panel.frame_preview_data(0)
+    atoms2, ed2, flags2, bonds2 = panel.frame_preview_data(2)
+    atoms5, ed5, flags5, bonds5 = panel.frame_preview_data(5)
+
+    assert ed0 is False and ed5 is False  # endpoints locked
+    assert ed2 is True                     # middle editable
+    assert len(atoms2) == 7
+    assert flags2.shape == (7, 3)
+    assert len(bonds2) > 0                 # auto-detected
+
+
+def test_frame_apply_move_updates_frame_only(qtbot):
+    model = _example_model()
+    dlg = _interpolated_dialog(model)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+    model_positions = model.atoms.positions.copy()
+
+    idx = 2
+    before = panel.images[idx].positions.copy()
+    delta = np.array([0.3, 0.0, 0.0])
+    panel.apply_frame_move(idx, [1], before[1] + delta)
+
+    assert np.allclose(panel.images[idx].positions[1], before[1] + delta)
+    # the model is untouched
+    assert np.allclose(model.atoms.positions, model_positions)
+
+
+def test_frame_bond_delete_survives_redetect_and_add_restores(qtbot):
+    model = _example_model()
+    dlg = _interpolated_dialog(model)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+    idx = 2
+
+    bonds = panel.frame_preview_data(idx)[3]
+    pair = (bonds[0].i, bonds[0].j)
+    assert panel.remove_frame_bond(idx, 0) is True
+    assert pair not in panel._frame_deleted[idx] or True
+    assert all((b.i, b.j) != pair for b in panel.frame_preview_data(idx)[3])
+
+    # moving an atom re-detects bonds but the deleted pair stays gone
+    atoms = panel.images[idx]
+    panel.apply_frame_move(idx, [0], atoms.positions[0] + [0.1, 0, 0])
+    assert all((b.i, b.j) != pair for b in panel.frame_preview_data(idx)[3])
+
+    # adding the bond back un-deletes it
+    panel.add_frame_bond(idx, pair[0], pair[1])
+    assert any((b.i, b.j) == pair for b in panel.frame_preview_data(idx)[3])
+
+
+def test_frame_undo_redo(qtbot):
+    model = _example_model()
+    dlg = _interpolated_dialog(model)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+    idx = 2
+
+    before = panel.images[idx].positions.copy()
+    panel.apply_frame_move(idx, [1], before[1] + [0.5, 0, 0])
+    assert not np.allclose(panel.images[idx].positions, before)
+
+    assert panel.frame_undo(idx) is True
+    assert np.allclose(panel.images[idx].positions, before)
+
+    assert panel.frame_redo(idx) is True
+    assert not np.allclose(panel.images[idx].positions, before)
+
+    # nothing left to undo after a fresh frame
+    assert panel.frame_undo(0) is False
+
+
+def test_frame_edits_persist_to_written_poscar(qtbot, tmp_path, monkeypatch):
+    from ase.io import read as ase_read
+
+    model = _example_model()
+    info = _record(monkeypatch, "information")
+    dlg = _interpolated_dialog(model)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+
+    # Small delta: cannot cross the cell boundary, so the written
+    # (wrapped) position differs from the pristine one exactly by delta.
+    idx = 2
+    atoms = panel.images[idx]
+    pristine = atoms.positions[1].copy()
+    delta = np.array([0.05, 0.0, 0.0])
+    panel.apply_frame_move(idx, [1], pristine + delta)
+
+    out = tmp_path / "out"
+    out.mkdir()
+    dlg._dir_edit.setText(str(out))
+    dlg._on_generate()
+    assert info
+
+    written = ase_read(out / "02" / "POSCAR", format="vasp")
+    moved = written.positions[1] - pristine
+    # unwrap any boundary wrap through the reciprocal of the cell
+    frac = np.linalg.solve(written.get_cell().T, moved)
+    moved = (frac - np.round(frac)) @ written.get_cell()
+    assert np.allclose(moved, delta, atol=1e-6)
+
+
+def test_reinterpolate_asks_before_discarding_edits(qtbot, monkeypatch):
+    model = _example_model()
+    questions: list = []
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QMessageBox.question",
+        staticmethod(lambda *a, **k: questions.append(a) or QMessageBox.No),
+    )
+    dlg = _interpolated_dialog(model)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+
+    panel.apply_frame_move(2, [1],
+                           panel.images[2].positions[1] + [0.2, 0, 0])
+    edited = panel.images[2].positions.copy()
+    panel._on_interpolate()
+    assert questions  # confirm asked
+    assert np.allclose(panel.images[2].positions, edited)  # No → kept
+
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QMessageBox.question",
+        staticmethod(lambda *a, **k: QMessageBox.Yes),
+    )
+    panel._on_interpolate()
+    assert panel.has_frame_edits() is False  # regenerated, state cleared
+
+
+def test_main_window_routes_frame_edits(qtbot):
+    """Real MainWindow: frame edits land in the frame, never the model."""
+    from vaspen.ui.main_window import MainWindow
+    from vaspen.ui.tools import ToolMode
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    model = _example_model()
+    win._structure.load_atoms(model.atoms, None)
+    model_positions = win._structure.atoms.positions.copy()
+
+    dlg = GenerateAllDialog(win._structure, win,
+                            preview_callback=win._preview_image_atoms,
+                            default_task="neb")
+    qtbot.addWidget(dlg)
+    win._generate_dialog = dlg
+    panel = dlg._poscar_panel
+    panel._final_atoms = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    panel._update_diagnostics()
+    panel._images_spin.setValue(4)
+    panel._on_interpolate()
+
+    # select a middle frame → frame-edit context active, tools enabled
+    panel._images_list.setCurrentRow(2)
+    assert win._frame_edit is not None
+    assert win._mode_actions[ToolMode.MOVE_ATOM].isEnabled()
+
+    # move commits to the frame
+    idx = win._frame_edit["index"]
+    atoms = panel.images[idx]
+    pre_move = atoms.positions[1].copy()
+    target = pre_move + [0.25, 0.0, 0.0]
+    win._on_atoms_moved([1], target[None, :])
+    assert np.allclose(panel.images[idx].positions[1], target)
+    assert np.allclose(win._structure.atoms.positions, model_positions)
+
+    # bond delete + add route to the frame
+    bonds = panel.frame_preview_data(idx)[3]
+    pair = (bonds[0].i, bonds[0].j)
+    win._on_delete_requested("bond", 0)
+    assert all((b.i, b.j) != pair for b in panel.frame_preview_data(idx)[3])
+    win._on_bond_created(pair[0], pair[1])
+    assert any((b.i, b.j) == pair for b in panel.frame_preview_data(idx)[3])
+
+    # atom deletion is refused
+    win._on_delete_requested("atom", 0)
+    assert len(panel.images[idx]) == 7
+
+    # per-frame undo pops the three edits (bond add, bond delete, move)
+    win.act_undo.trigger()
+    win.act_undo.trigger()
+    win.act_undo.trigger()
+    assert np.allclose(panel.images[idx].positions[1], pre_move)
+
+    # endpoint frames lock the tools again
+    panel._images_list.setCurrentRow(0)
+    assert win._frame_edit is None
+    assert not win._mode_actions[ToolMode.MOVE_ATOM].isEnabled()

@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 )
 
 from vaspen.core.file_io import FileIO
+from vaspen.core.bonds import Bond, find_bonds
 from vaspen.core.neb import (
     constraints_to_fixed_flags,
     detect_order_mismatch,
@@ -94,6 +95,15 @@ class PoscarPanel(QWidget):
         # fully-fixed atoms stay put during interpolation; all flags
         # are written into every image's Selective dynamics block.
         self._ini_fixed_flags = np.zeros((0, 3), dtype=bool)
+        # Per-frame edit state — middle frames are editable in the 3D
+        # viewport (move/rotate atoms, delete/add bonds; endpoints are
+        # locked). Bonds persist per frame (auto-detected minus the
+        # user-deleted pairs); history snapshots back Ctrl+Z per frame.
+        self._frame_bonds: dict[int, list[Bond]] = {}
+        self._frame_deleted: dict[int, set[tuple[int, int]]] = {}
+        self._frame_history: dict[int, list[tuple]] = {}
+        self._frame_redo: dict[int, list[tuple]] = {}
+        self._has_frame_edits = False
 
         if structure_model is not None and structure_model.n_atoms:
             self._init_atoms = structure_model.atoms.copy()
@@ -234,6 +244,112 @@ class PoscarPanel(QWidget):
         return max(0, len(self._images) - 2)
 
     # ------------------------------------------------------------------
+    # Frame editing (middle images only)
+    # ------------------------------------------------------------------
+
+    def frame_preview_data(self, index: int):
+        """Preview data for the frame at ``index``.
+
+        Returns (atoms, editable, fixed_flags, bonds). ``editable`` is
+        True only for intermediate frames — the initial and final
+        frames are locked. Bonds are auto-detected on first access
+        (minus user-deleted pairs) and cached per frame.
+        """
+        atoms = self._images[index]
+        editable = 0 < index < len(self._images) - 1
+        return atoms, editable, self._ini_fixed_flags, self._frame_bonds_for(index)
+
+    def has_frame_edits(self) -> bool:
+        """True when any frame was edited manually since interpolation."""
+        return self._has_frame_edits
+
+    def _frame_bonds_for(self, index: int) -> list[Bond]:
+        if index not in self._frame_bonds:
+            self._frame_bonds[index] = self._detect_frame_bonds(index)
+        return self._frame_bonds[index]
+
+    def _detect_frame_bonds(self, index: int) -> list[Bond]:
+        atoms = self._images[index]
+        deleted = self._frame_deleted.get(index, set())
+        bonds = find_bonds(
+            atoms.positions,
+            list(atoms.get_chemical_symbols()),
+            atoms.get_cell().array,
+            tuple(atoms.get_pbc()),
+        )
+        return [b for b in bonds if (b.i, b.j) not in deleted]
+
+    def _frame_snapshot(self, index: int) -> tuple:
+        return (
+            self._images[index].positions.copy(),
+            list(self._frame_bonds.get(index, [])),
+            set(self._frame_deleted.get(index, set())),
+        )
+
+    def _push_frame_history(self, index: int) -> None:
+        self._frame_history.setdefault(index, []).append(
+            self._frame_snapshot(index))
+        if len(self._frame_history[index]) > 20:
+            self._frame_history[index].pop(0)
+        self._frame_redo[index] = []
+        self._has_frame_edits = True
+
+    def _restore_frame_snapshot(self, index: int, snapshot: tuple) -> None:
+        positions, bonds, deleted = snapshot
+        self._images[index].positions[:] = positions
+        self._frame_bonds[index] = list(bonds)
+        self._frame_deleted[index] = set(deleted)
+
+    def apply_frame_move(self, index: int, indices: list[int],
+                         positions) -> None:
+        """Move atoms of a middle frame (frozen atoms are guarded by
+        the viewport tools; the caller checks editability)."""
+        self._push_frame_history(index)
+        self._images[index].positions[indices] = np.asarray(
+            positions, dtype=float)
+        # connectivity changed — re-detect, keeping user-deleted pairs
+        self._frame_bonds[index] = self._detect_frame_bonds(index)
+
+    def remove_frame_bond(self, index: int, bond_list_index: int) -> bool:
+        """Delete a bond of a middle frame (by bond-list index)."""
+        bonds = self._frame_bonds_for(index)
+        if not (0 <= bond_list_index < len(bonds)):
+            return False
+        self._push_frame_history(index)
+        removed = bonds.pop(bond_list_index)
+        self._frame_deleted.setdefault(index, set()).add(
+            (removed.i, removed.j))
+        return True
+
+    def add_frame_bond(self, index: int, i: int, j: int) -> None:
+        """Manually add a bond to a middle frame (un-deletes the pair)."""
+        self._frame_bonds_for(index)
+        pair = (min(i, j), max(i, j))
+        if any((b.i, b.j) == pair for b in self._frame_bonds[index]):
+            return  # already present
+        self._push_frame_history(index)
+        self._frame_bonds[index].append(Bond(i, j, order=1))
+        self._frame_deleted.setdefault(index, set()).discard(pair)
+
+    def frame_undo(self, index: int) -> bool:
+        history = self._frame_history.get(index, [])
+        if not history:
+            return False
+        self._frame_redo.setdefault(index, []).append(
+            self._frame_snapshot(index))
+        self._restore_frame_snapshot(index, history.pop())
+        return True
+
+    def frame_redo(self, index: int) -> bool:
+        redo = self._frame_redo.get(index, [])
+        if not redo:
+            return False
+        self._frame_history.setdefault(index, []).append(
+            self._frame_snapshot(index))
+        self._restore_frame_snapshot(index, redo.pop())
+        return True
+
+    # ------------------------------------------------------------------
     # Normal mode
     # ------------------------------------------------------------------
 
@@ -344,8 +460,16 @@ class PoscarPanel(QWidget):
                         "the initial and final structures form a reasonable "
                         "path.").format(suggested))
 
+    def _reset_frame_state(self) -> None:
+        self._frame_bonds.clear()
+        self._frame_deleted.clear()
+        self._frame_history.clear()
+        self._frame_redo.clear()
+        self._has_frame_edits = False
+
     def _clear_images(self) -> None:
         self._images = []
+        self._reset_frame_state()
         self._images_list.clear()
 
     def _on_interpolate(self) -> None:
@@ -384,6 +508,18 @@ class PoscarPanel(QWidget):
             if reply != QMessageBox.Yes:
                 return
 
+        # Regenerating the images discards the user's manual frame
+        # edits — confirm first.
+        if self._has_frame_edits:
+            reply = QMessageBox.question(
+                self,
+                self.tr("Discard Frame Edits"),
+                self.tr("Regenerating the images will discard your "
+                        "manual edits to the frames. Continue?"),
+            )
+            if reply != QMessageBox.Yes:
+                return
+
         n = self._images_spin.value()
         # Fully-frozen atoms stay at their initial position in every
         # frame; partially-frozen atoms interpolate normally (their
@@ -402,6 +538,7 @@ class PoscarPanel(QWidget):
             QMessageBox.warning(
                 self, self.tr("Cannot Interpolate"), str(e))
             return
+        self._reset_frame_state()  # fresh images, no stale frame state
         self._images_list.clear()
         for i, _atoms in enumerate(self._images):
             if i == 0:
@@ -421,7 +558,8 @@ class PoscarPanel(QWidget):
             return
         index = current.data(Qt.UserRole)
         if index is not None and 0 <= index < len(self._images):
-            self._preview_callback(self._images[index])
+            atoms, editable, flags, bonds = self.frame_preview_data(index)
+            self._preview_callback(atoms, index, editable, flags, bonds, self)
 
 
 class GenerateAllDialog(QDialog):

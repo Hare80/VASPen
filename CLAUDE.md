@@ -436,6 +436,19 @@ afterwards):
   BLOCKED with a message listing the atom (1-based) — a frozen atom
   cannot move during the NEB run either. `examples/neb_frozen/`
   provides pass/block case pairs.
+- **Frame editing (settled 2026-08-14):** clicking a MIDDLE frame in
+  the image list enters frame-edit mode — the viewport's move/rotate/
+  delete/create-bond tools (and per-frame Ctrl+Z/Ctrl+Shift+Z) become
+  active while the generate dialog is open, and every edit signal is
+  routed to the frame (MainWindow `_frame_edit` context) instead of
+  the model. Initial and final frames are locked (tools disabled).
+  Frozen atoms are guarded by the viewport tools (frame fixed flags
+  passed to `set_structure`); atoms cannot be deleted (rejected with a
+  status message); bonds are per-frame state (auto-detected minus
+  user-deleted pairs, kept deleted through re-detection after moves,
+  manual adds un-delete) with a per-frame snapshot history (depth 20).
+  Frame edits persist into the written `0N/POSCAR` files; clicking
+  Interpolate again asks before discarding manual edits.
 - Distance metric = Euclidean norm of the full 3N-atom minimal-image
   displacement vector (Å). Suggested images = `ceil(distance / 0.8)`.
   The implementation was cross-checked against the classic reference

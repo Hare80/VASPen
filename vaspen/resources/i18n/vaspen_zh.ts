@@ -655,6 +655,26 @@ Files: {}</source>
             <source>The structure is already periodic.</source>
             <translation>结构已是周期结构。</translation>
         </message>
+        <message>
+            <source>Editing NEB image {:02d} — frozen atoms locked, atoms cannot be deleted.</source>
+            <translation>正在编辑 NEB 图像 {:02d}——冻结原子锁定，原子不可删除。</translation>
+        </message>
+        <message>
+            <source>The initial and final frames are locked.</source>
+            <translation>初始与末态帧已锁定，不可编辑。</translation>
+        </message>
+        <message>
+            <source>Atoms cannot be deleted in NEB images.</source>
+            <translation>NEB 图像中的原子不可删除。</translation>
+        </message>
+        <message>
+            <source>Nothing to undo for this image.</source>
+            <translation>该图像没有可撤销的操作。</translation>
+        </message>
+        <message>
+            <source>Nothing to redo for this image.</source>
+            <translation>该图像没有可重做的操作。</translation>
+        </message>
     </context>
     <context>
         <name>Viewport3D</name>
@@ -1268,6 +1288,14 @@ Interpolate in strict file order anyway?</source>
         <message>
             <source>{} atoms frozen — kept fixed in all images</source>
             <translation>{} 个原子已冻结——在所有图像中保持不动</translation>
+        </message>
+        <message>
+            <source>Discard Frame Edits</source>
+            <translation>丢弃帧编辑</translation>
+        </message>
+        <message>
+            <source>Regenerating the images will discard your manual edits to the frames. Continue?</source>
+            <translation>重新生成图像将丢弃你对帧的手动编辑。是否继续？</translation>
         </message>
     </context>
     <context>

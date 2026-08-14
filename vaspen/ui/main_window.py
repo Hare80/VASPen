@@ -69,6 +69,11 @@ class MainWindow(QMainWindow):
         # True while the generate-all dialog previews NEB frames in the
         # viewport (the model itself is untouched during the preview)
         self._previewing_neb = False
+        # Frame-edit context while a middle NEB image is previewed:
+        # {"panel": PoscarPanel, "index": i}; viewport edit signals are
+        # routed to the frame instead of the model while set.
+        self._frame_edit: dict | None = None
+        self._frame_selection: set[int] = set()
 
         # Translator — owned by the window so the language can switch live
         self._translator = QTranslator(self)
@@ -142,7 +147,7 @@ class MainWindow(QMainWindow):
         self.act_undo.setShortcut(QKeySequence.Undo)
         self.act_undo.setShortcutContext(Qt.ApplicationShortcut)
         self.act_undo.setEnabled(False)
-        self.act_undo.triggered.connect(lambda: self._structure.undo())
+        self.act_undo.triggered.connect(self._on_undo)
 
         self.act_redo = QAction(self.tr("&Redo"), self)
         # QKeySequence.Redo maps to Ctrl+Y on this platform; Ctrl+Shift+Z
@@ -151,7 +156,7 @@ class MainWindow(QMainWindow):
             [QKeySequence.Redo, QKeySequence("Ctrl+Shift+Z"), QKeySequence("Ctrl+Y")])
         self.act_redo.setShortcutContext(Qt.ApplicationShortcut)
         self.act_redo.setEnabled(False)
-        self.act_redo.triggered.connect(lambda: self._structure.redo())
+        self.act_redo.triggered.connect(self._on_redo)
 
         self.act_preferences = QAction(self.tr("&Preferences..."), self)
         self.act_preferences.setStatusTip(self.tr("Configure settings"))
@@ -984,19 +989,24 @@ class MainWindow(QMainWindow):
         self._viewport.cancel_active_tool()
         dlg.show()
 
-    def _preview_image_atoms(self, atoms) -> None:
+    def _preview_image_atoms(self, atoms, index=None, editable=False,
+                             fixed=None, bonds=None, panel=None) -> None:
         """Temporarily show a NEB image frame in the 3D viewport.
 
         The model is untouched; the viewport is rebound to the model
         when the dialog closes. The camera refits on the first preview
         and is preserved across subsequent frames so the images can be
         compared directly.
+
+        Middle frames enter frame-edit mode: viewport edit signals are
+        routed to the frame (move/rotate atoms, delete/add bonds)
+        instead of the model; the initial and final frames stay locked.
         """
         self._viewport.set_structure(
             atoms,
             reset_view=not self._previewing_neb,
-            bonds=None,
-            fixed=None,
+            bonds=bonds,
+            fixed=fixed,
         )
         # set_structure() only schedules a repaint, and the GL viewport
         # can defer it for seconds — force an immediate synchronous
@@ -1004,8 +1014,24 @@ class MainWindow(QMainWindow):
         self._viewport.repaint()
         self._previewing_neb = True
 
+        if editable and panel is not None:
+            self._frame_edit = {"panel": panel, "index": index}
+            self._frame_selection = set()
+            self._viewport.set_highlight(set())
+            self._set_status(self.tr(
+                "Editing NEB image {:02d} — frozen atoms locked, atoms "
+                "cannot be deleted.").format(index))
+        else:
+            self._frame_edit = None
+            if index is not None:
+                self._set_status(
+                    self.tr("The initial and final frames are locked."))
+        self._update_frame_edit_actions(editable)
+
     def _on_generate_dialog_finished(self, dlg) -> None:
         """Restore viewport + editing entry points after the dialog closes."""
+        self._frame_edit = None
+        self._frame_selection = set()
         if self._generate_dialog is dlg:
             self._generate_dialog = None
             self._set_preview_editing_enabled(True)
@@ -1086,6 +1112,39 @@ class MainWindow(QMainWindow):
         self._element_more_btn.setEnabled(enabled)
         self._dock_structure.setEnabled(enabled)
         self._dock_props.setEnabled(enabled)
+
+    #: Modes usable while editing a middle NEB frame (add/measure/etc.
+    #: stay paused; DELETE is bond-only — atom deletion is rejected in
+    #: the handler).
+    _FRAME_EDIT_MODES = (
+        ToolMode.SELECT, ToolMode.MOVE_ATOM, ToolMode.ROTATE,
+        ToolMode.DELETE, ToolMode.CREATE_BOND,
+    )
+
+    def _update_frame_edit_actions(self, editable: bool) -> None:
+        """Enable/disable the frame-edit toolset inside the paused window.
+
+        Called whenever the selected NEB frame changes: middle frames
+        unlock move/rotate/delete/create-bond + per-frame undo/redo;
+        endpoint frames (and everything else) keep them disabled.
+        """
+        for mode, act in self._mode_actions.items():
+            if mode in self._FRAME_EDIT_MODES:
+                act.setEnabled(editable)
+        self.act_undo.setEnabled(editable)
+        self.act_redo.setEnabled(editable)
+
+    def _refresh_frame_edit_view(self) -> None:
+        """Re-push the edited frame into the viewport (bonds + flags)."""
+        if self._frame_edit is None:
+            return
+        panel = self._frame_edit["panel"]
+        index = self._frame_edit["index"]
+        atoms, _editable, flags, bonds = panel.frame_preview_data(index)
+        self._viewport.set_structure(atoms, reset_view=False,
+                                     bonds=bonds, fixed=flags)
+        self._viewport.set_highlight(self._frame_selection)
+        self._viewport.repaint()
 
     def _on_supercell(self) -> None:
         from vaspen.core.builder import StructureBuilder
@@ -1465,6 +1524,10 @@ class MainWindow(QMainWindow):
 
     def _on_background_clicked(self) -> None:
         """User clicked empty space in the 3D viewport."""
+        if self._frame_edit is not None:
+            self._frame_selection = set()
+            self._viewport.set_highlight(set())
+            return
         self._structure.clear_selection()
         self._structure.clear_bond_selection()
 
@@ -1483,7 +1546,21 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_atoms_selected(self, indices: list, mode: str) -> None:
-        """Selection from a viewport tool (click / box / modifiers)."""
+        """Selection from a viewport tool (click / box / modifiers).
+
+        While a middle NEB frame is being edited, the selection stays
+        viewport-local — the model's selection is untouched.
+        """
+        if self._frame_edit is not None:
+            if mode == "add":
+                self._frame_selection |= set(indices)
+            elif mode == "toggle":
+                for i in indices:
+                    self._frame_selection.symmetric_difference_update({i})
+            else:
+                self._frame_selection = set(indices)
+            self._viewport.set_highlight(self._frame_selection)
+            return
         if mode == "add":
             self._structure.add_to_selection(indices)
         elif mode == "toggle":
@@ -1519,14 +1596,42 @@ class MainWindow(QMainWindow):
             symbol, pos[0], pos[1], pos[2]
         ))
 
+    def _on_undo(self) -> None:
+        """Undo: per-frame history while editing a NEB frame, else the model."""
+        if self._frame_edit is not None:
+            if self._frame_edit["panel"].frame_undo(self._frame_edit["index"]):
+                self._refresh_frame_edit_view()
+            else:
+                self._set_status(self.tr("Nothing to undo for this image."))
+            return
+        self._structure.undo()
+
+    def _on_redo(self) -> None:
+        """Redo: per-frame history while editing a NEB frame, else the model."""
+        if self._frame_edit is not None:
+            if self._frame_edit["panel"].frame_redo(self._frame_edit["index"]):
+                self._refresh_frame_edit_view()
+            else:
+                self._set_status(self.tr("Nothing to redo for this image."))
+            return
+        self._structure.redo()
+
     def _on_atoms_moved(self, indices: list, positions) -> None:
         """Move tool committed a drag — one undoable model call.
 
-        Frozen atoms are rejected here with a status message and the
-        viewport is re-synced to the model: the rejected call does not
-        emit structure_modified, so the drag preview would otherwise
-        stay on screen.
+        While a middle NEB frame is being edited, the commit lands in
+        the frame instead of the model. Frozen atoms are rejected here
+        with a status message and the viewport is re-synced: the
+        rejected call does not emit structure_modified, so the drag
+        preview would otherwise stay on screen.
         """
+        if self._frame_edit is not None:
+            panel = self._frame_edit["panel"]
+            panel.apply_frame_move(
+                self._frame_edit["index"], list(indices),
+                np.asarray(positions, dtype=float))
+            self._refresh_frame_edit_view()
+            return
         if any(self._structure.is_fixed(i) for i in indices):
             self._set_status(
                 self.tr("Cannot move frozen atoms — unfreeze them first."))
@@ -1548,6 +1653,12 @@ class MainWindow(QMainWindow):
         self._viewport.set_bond_highlight(self._structure.selected_bonds)
 
     def _on_bond_created(self, i: int, j: int) -> None:
+        if self._frame_edit is not None:
+            panel = self._frame_edit["panel"]
+            panel.add_frame_bond(self._frame_edit["index"], i, j)
+            self._refresh_frame_edit_view()
+            self._set_status(self.tr("Bond created: {}–{}").format(i, j))
+            return
         try:
             self._structure.add_bond(i, j)
             self._set_status(self.tr("Bond created: {}–{}").format(i, j))
@@ -1562,7 +1673,20 @@ class MainWindow(QMainWindow):
             self._set_status(str(e))
 
     def _on_delete_requested(self, kind: str, index: int) -> None:
-        """Delete tool clicked an atom/bond, or deletes the selection."""
+        """Delete tool clicked an atom/bond, or deletes the selection.
+
+        While a middle NEB frame is being edited, only bond deletion
+        is allowed — atoms cannot be deleted from a NEB image.
+        """
+        if self._frame_edit is not None:
+            if kind == "bond":
+                panel = self._frame_edit["panel"]
+                if panel.remove_frame_bond(self._frame_edit["index"], index):
+                    self._refresh_frame_edit_view()
+            else:
+                self._set_status(
+                    self.tr("Atoms cannot be deleted in NEB images."))
+            return
         if kind == "selection":
             self._on_delete_selection()
         elif kind == "atom":
@@ -1576,6 +1700,8 @@ class MainWindow(QMainWindow):
 
     def _on_bond_clicked(self, index: int) -> None:
         """Select tool clicked a bond → select it (bond list index)."""
+        if self._frame_edit is not None:
+            return  # bond selection is a model feature — frames skip it
         self._structure.select_bond(index)
 
     def _on_bond_selection_changed(self) -> None:
