@@ -216,3 +216,22 @@ def test_measurement_roundtrip():
                                     "measurement_label_size": "x"})
     assert rs4.measurement_color == (0.0, 0.0, 0.0)
     assert rs4.measurement_label_size == 12
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def test_from_dict_rejects_wrong_length_rgb_tuple():
+    """Legacy/corrupt RGB tuples with the wrong length fall back to the
+    default (the viewport unpacks them by position)."""
+    rs = RenderSettings.from_dict({"background_color": [1, 2]})
+    assert rs.background_color == RenderSettings.default().background_color
+    rs = RenderSettings.from_dict({"background_color": [0.1, 0.2, 0.3, 0.4]})
+    assert rs.background_color == RenderSettings.default().background_color
+
+
+def test_from_dict_rejects_zero_gamma():
+    """gamma = 0 breaks 1/gamma in the shader — fall back to default."""
+    rs = RenderSettings.from_dict({"gamma": 0})
+    assert rs.gamma == RenderSettings.default().gamma

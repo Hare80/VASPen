@@ -126,9 +126,11 @@ def extract_fixed_flags(atoms: Atoms) -> np.ndarray | None:
             found = True
         elif isinstance(con, FixScaled):
             mask = np.asarray(con.mask, dtype=bool)
+            indices = np.atleast_1d(con.index)
             if mask.ndim == 1:
-                mask = mask[np.newaxis]  # (3,) broadcast over indices
-            for k, idx in enumerate(np.atleast_1d(con.index)):
+                # One (3,) mask applies to every index of the group.
+                mask = np.broadcast_to(mask, (len(indices), 3))
+            for k, idx in enumerate(indices):
                 flags[int(idx)] = mask[k]
             found = True
     return flags if found else None
@@ -176,8 +178,9 @@ def atoms_with_fixed_constraints(
 
 
 # Numeric prefix of an occupancy token: accepts "0.5", "1.0", "0.5(2)"
-# (error-bar notation) — the "(2)" suffix is dropped.
-_OCC_NUM_PREFIX = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)")
+# (error-bar notation — the "(2)" suffix is dropped) and scientific
+# notation "1.5e-1" (allowed by the CIF 1.1 standard).
+_OCC_NUM_PREFIX = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 
 
 def _sanitize_cif_occupancy(text: str) -> str:

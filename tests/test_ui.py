@@ -1470,3 +1470,90 @@ def test_incar_editor_without_magmoms_keeps_ispin_1(qtbot):
     assert "MAGMOM" not in table_tags
     assert table_tags["ISPIN"] == "1"
     dlg.close()
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+class _FakePreviewDialog(QObject):
+    """Fake non-modal preview dialog: close() emits finished like the
+    real dialogs, so the main window's finished handlers run."""
+
+    finished = Signal(int)
+
+    def __init__(self):
+        super().__init__()
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+        self.finished.emit(0)
+
+    def deleteLater(self):
+        pass
+
+
+def test_open_file_closes_live_preview_dialogs(window, monkeypatch):
+    """dropEvent / recent-files can load a file while a preview dialog
+    is open — the dialogs hold stale snapshots and must close first."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(fi.FileIO, "read", classmethod(lambda cls, p: atoms))
+    fake_surface = _FakePreviewDialog()
+    fake_generate = _FakePreviewDialog()
+    window._surface_dialog = fake_surface
+    window._generate_dialog = fake_generate
+    fake_surface.finished.connect(
+        lambda _r: window._on_surface_dialog_finished(fake_surface))
+    fake_generate.finished.connect(
+        lambda _r: window._on_generate_dialog_finished(fake_generate))
+
+    window._open_file("fake.xyz")
+
+    assert fake_surface.closed and fake_generate.closed
+    assert window._surface_dialog is None
+    assert window._generate_dialog is None
+    assert window._structure.n_atoms == 2
+
+
+def test_selection_ignored_during_non_frame_preview(window):
+    """The viewport shows a TEMPORARY structure during a slab/NEB
+    preview — frame indices must never become model indices."""
+    window._structure.load_atoms(Atoms("H2O", positions=np.eye(3) * 1.5))
+    window._surface_dialog = _FakePreviewDialog()
+    window._on_atoms_selected([0, 1], "replace")
+    assert window._structure.selected_indices == set()
+
+
+def test_pause_resume_paired_between_preview_dialogs(window):
+    """Editing stays paused until the LAST preview dialog closes."""
+    window._set_preview_editing_enabled(False)
+    assert not window.act_select_all.isEnabled()
+
+    window._surface_dialog = _FakePreviewDialog()
+    window._generate_dialog = _FakePreviewDialog()
+    window._on_generate_dialog_finished(window._generate_dialog)
+    assert not window.act_select_all.isEnabled()  # surface still open
+
+    window._on_surface_dialog_finished(window._surface_dialog)
+    assert window.act_select_all.isEnabled()
+
+
+def test_structure_loaded_clears_frame_edit_state(window):
+    window._frame_edit = {"panel": object(), "index": 2}
+    window._frame_selection = {1}
+    window._previewing_neb = True
+    window._on_structure_loaded()
+    assert window._frame_edit is None
+    assert window._frame_selection == set()
+    assert window._previewing_neb is False
+
+
+def test_model_selection_change_ignored_during_frame_edit(window, monkeypatch):
+    highlights = []
+    monkeypatch.setattr(
+        window._viewport, "set_highlight",
+        lambda s: highlights.append(s))
+    window._frame_edit = {"panel": object(), "index": 1}
+    window._on_selection_changed()
+    assert highlights == []  # the frame highlight stays untouched

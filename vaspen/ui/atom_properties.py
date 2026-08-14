@@ -18,6 +18,8 @@ re-translates live (CLAUDE.md §11.2 pattern).
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from ase.data import chemical_symbols
 
@@ -453,6 +455,9 @@ class AtomPropertiesPanel(QWidget):
         except ValueError:
             self._revert_edits()
             return
+        if not math.isfinite(value):
+            self._revert_edits()
+            return
         try:
             self._model.set_magmom(list(sel), value)
         except ValueError:
@@ -470,6 +475,9 @@ class AtomPropertiesPanel(QWidget):
         except ValueError:
             self._revert_edits()
             return
+        if not all(math.isfinite(v) for v in pos):
+            self._revert_edits()  # "nan"/"inf" must never reach the model
+            return
         try:
             self._model.set_atom_position(index, np.asarray(pos, dtype=float))
         except ValueError:  # movement guard (frozen atom) — backstop
@@ -486,6 +494,9 @@ class AtomPropertiesPanel(QWidget):
                     float(self._fz_edit.text())]
         except ValueError:
             self._revert_edits()
+            return
+        if not all(math.isfinite(v) for v in frac):
+            self._revert_edits()  # "nan"/"inf" must never reach the model
             return
         try:
             self._model.set_atom_scaled_position(index, np.asarray(frac, dtype=float))

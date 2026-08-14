@@ -9,6 +9,8 @@ deleted via the context menu.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from ase.data import chemical_symbols
 
@@ -323,6 +325,16 @@ class StructureTreePanel(QWidget):
                 self.tr("Position must be a number."),
             )
             self.refresh()  # revert the bad text
+            return
+        if not math.isfinite(new_value):
+            # float() accepts "nan"/"inf" — a non-finite position would
+            # poison the camera fit and the written files.
+            QMessageBox.warning(
+                self,
+                self.tr("Invalid Position"),
+                self.tr("Position must be a number."),
+            )
+            self.refresh()
             return
         if self._frac_mode and self._model.is_periodic:
             frac = self._model.scaled_positions[row].copy()

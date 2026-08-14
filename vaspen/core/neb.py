@@ -223,10 +223,18 @@ def _check_frozen_consistent(
     """
     if not frozen_mask.any():
         return
-    moved = np.linalg.norm(
-        final.positions[frozen_mask] - init.positions[frozen_mask],
-        axis=1,
-    ) > tolerance
+    # Minimal-image distance: the same periodic site may be written
+    # with different lattice translations at the two ends (unwrapped
+    # CONTCAR coordinates) — that must not count as movement.
+    cell = np.asarray(init.get_cell().array, dtype=float)
+    delta_frac = pbc_wrap(
+        final.get_scaled_positions()[frozen_mask]
+        - init.get_scaled_positions()[frozen_mask]
+    )
+    moved = np.array(
+        [np.linalg.norm(ws_minimal_image(cell, d)) > tolerance
+         for d in delta_frac]
+    )
     bad = np.flatnonzero(frozen_mask)[moved]
     if len(bad):
         raise ValueError(

@@ -1,5 +1,7 @@
 """Tests for the FileIO registry."""
 
+import io
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -496,3 +498,41 @@ def test_extract_fixed_flags_unit(si_bulk):
     assert flags[0].tolist() == [True, True, True]
     assert flags[1].tolist() == [True, False, True]
     assert not flags[2:].any()
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def test_extract_fixed_flags_grouped_fixscaled():
+    """FixScaled([0, 1], mask=(T,F,T)) applies ONE mask to every index —
+    the old np.newaxis path indexed mask[1] out of bounds and crashed."""
+    atoms = Atoms("H2O", positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+                  cell=[10, 10, 10], pbc=True)
+    atoms.set_constraint([FixScaled([0, 1], [True, False, True])])
+    flags = extract_fixed_flags(atoms)
+    assert flags is not None
+    assert flags[0].tolist() == [True, False, True]
+    assert flags[1].tolist() == [True, False, True]
+    assert not flags[2].any()
+
+
+def test_sanitize_cif_occupancy_scientific_notation():
+    """CIF 1.1 allows scientific notation ("1.5e-1"); the sanitizer must
+    keep the full number (the old regex truncated it to "1.5")."""
+    from vaspen.core.file_io import _sanitize_cif_occupancy
+
+    cif = ("data_x\n_cell_length_a 3.6\n_cell_length_b 3.6\n"
+           "_cell_length_c 3.6\n_cell_angle_alpha 90\n_cell_angle_beta 90\n"
+           "_cell_angle_gamma 90\n_symmetry_space_group_name_H-M 'P 1'\n"
+           "loop_\n_atom_site_label\n_atom_site_type_symbol\n"
+           "_atom_site_fract_x\n_atom_site_fract_y\n_atom_site_fract_z\n"
+           "_atom_site_occupancy\n"
+           "Fe1 Fe 0.0 0.0 0.0 1.5e-1\n")
+    cleaned = _sanitize_cif_occupancy(cif)
+    assert "1.5e-1" in cleaned
+    atoms = ase_read(io.StringIO(cleaned), format="cif")
+    from vaspen.core.file_io import extract_occupancy
+    occ = extract_occupancy(atoms)
+    assert occ is not None
+    assert occ[0] == {"Fe": 0.15}

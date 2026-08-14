@@ -1050,3 +1050,79 @@ def test_incar_editor_accept_blocks_empty_value_tags(qtbot, monkeypatch):
     dlg._on_accept()
     assert calls  # save dialog opened this time
     dlg.close()
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def _make_potcar_library(tmp_path):
+    root = tmp_path / "potlib" / "potpaw_PBE.54"
+    for name, tag in (("Fe", "Fe_plain"), ("Fe_d", "Fe_d_variant")):
+        d = root / name
+        d.mkdir(parents=True)
+        (d / "POTCAR").write_text(f"# {tag}\n", encoding="utf-8")
+    return root.parent
+
+
+def test_potcar_dialog_accept_regenerates_after_variant_change(
+        qtbot, tmp_path, monkeypatch):
+    """Changing a variant after Generate must not write the STALE cached
+    concatenation (the old OK reused the last preview content)."""
+    from vaspen.ui.potcar_dialog import PotcarDialog
+
+    lib = _make_potcar_library(tmp_path)
+    m = StructureModel()
+    m.load_atoms(Atoms("Fe", positions=[[2.0, 2.0, 2.0]],
+                       cell=[4.0, 4.0, 4.0], pbc=True))
+    dlg = PotcarDialog(m)
+    qtbot.addWidget(dlg)
+    panel = dlg._panel
+    panel._path_edit.setText(str(lib))
+    panel._refresh_elements()
+    panel._on_generate_clicked()
+    assert "# Fe_plain" in panel._potcar_content
+
+    panel._element_combos["Fe"].setCurrentText("Fe_d")
+    monkeypatch.setattr(
+        "vaspen.ui.potcar_dialog.QFileDialog.getSaveFileName",
+        lambda *a, **k: (str(tmp_path / "POTCAR"), ""),
+    )
+    dlg._on_accept()
+    written = (tmp_path / "POTCAR").read_text(encoding="utf-8")
+    assert "# Fe_d_variant" in written
+    assert "# Fe_plain" not in written
+
+
+def test_structure_tree_rejects_nan_position(qtbot, periodic_model, monkeypatch):
+    """float() accepts "nan" — the cell editor must reject it (a NaN
+    position poisons the camera fit and the written files)."""
+    from vaspen.ui.structure_tree import StructureTreePanel
+
+    warnings = []
+    monkeypatch.setattr(
+        "vaspen.ui.structure_tree.QMessageBox.warning",
+        staticmethod(lambda *a, **k: warnings.append(a)),
+    )
+    panel = StructureTreePanel(periodic_model)
+    qtbot.addWidget(panel)
+    before = periodic_model.positions.copy()
+    panel._table.item(0, 2).setText("nan")
+    panel._on_cell_changed(0, 2)
+    assert warnings
+    assert np.allclose(periodic_model.positions, before)
+
+
+def test_atom_properties_rejects_nan_coordinates(qtbot, periodic_model):
+    from vaspen.ui.atom_properties import AtomPropertiesPanel
+
+    panel = AtomPropertiesPanel(periodic_model)
+    qtbot.addWidget(panel)
+    periodic_model.set_selection([0])
+    before = periodic_model.positions.copy()
+    panel._x_edit.setText("nan")
+    panel._y_edit.setText("0")
+    panel._z_edit.setText("0")
+    panel._on_cartesian_edited()
+    assert np.allclose(periodic_model.positions, before)
+    assert panel._x_edit.text() != "nan"  # reverted to the model value

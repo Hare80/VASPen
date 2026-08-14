@@ -147,7 +147,10 @@ def rotate(
 
 def _orthonormal_basis(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     """Orthonormal basis (columns) from two non-parallel vectors."""
-    e1 = u / np.linalg.norm(u)
+    n1 = float(np.linalg.norm(u))
+    if not np.isfinite(n1) or n1 < 1e-12:
+        raise ValueError("The first direction has zero length.")
+    e1 = u / n1
     e2 = v - e1 * float(v @ e1)
     n2 = float(np.linalg.norm(e2))
     if n2 < 1e-12:

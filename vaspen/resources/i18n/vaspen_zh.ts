@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE TS>
+<?xml version='1.0' encoding='utf-8'?>
 <TS version="2.1" language="zh_CN" sourcelanguage="en_US">
     <context>
         <name>MainWindow</name>
@@ -746,7 +745,7 @@ Save anyway?</source>
             <source>INCAR tags without a value: {} — fill them in the INCAR editor.</source>
             <translation>INCAR 参数未填写数值：{}——请在 INCAR 编辑器中填写。</translation>
         </message>
-    </context>
+    <message><source>KSPACING must be positive (got {}).</source><translation>KSPACING 必须为正数(当前值:{}).</translation></message><message><source>KPOINTS requires a periodic structure (a full-rank cell with periodic boundary conditions).</source><translation>KPOINTS 需要周期性结构(满秩晶胞且带周期性边界条件).</translation></message></context>
     <context>
         <name>KpointsEditorPanel</name>
         <message>
@@ -1144,7 +1143,11 @@ Files: {}</source>
 
 文件：{}</translation>
         </message>
-    </context>
+    <message><source>{}
+
+Partially written files were removed.</source><translation>{}
+
+已删除本次已写入的文件.</translation></message></context>
     <context>
         <name>PoscarPanel</name>
         <message>
@@ -1297,7 +1300,11 @@ Interpolate in strict file order anyway?</source>
             <source>Regenerating the images will discard your manual edits to the frames. Continue?</source>
             <translation>重新生成图像将丢弃你对帧的手动编辑。是否继续？</translation>
         </message>
-    </context>
+    <message><source>Changing the initial/final structure discards the manual edits made to the images.
+
+Continue?</source><translation>更改初/末结构将丢弃对中间图像所做的手动编辑.
+
+是否继续?</translation></message></context>
     <context>
         <name>Neb</name>
         <message>

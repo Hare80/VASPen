@@ -594,6 +594,9 @@ def estimate_k_mesh(
         (k1, k2, k3) integer mesh.
     """
     # Normalized reciprocal lattice vectors (b_i·a_j = δ_ij)
+    if target_spacing <= 0:
+        raise ValueError(
+            _tr("KSPACING must be positive (got {}).").format(target_spacing))
     recip = np.linalg.inv(cell).T
     lengths = np.linalg.norm(recip, axis=1)
     mesh = np.maximum(1, np.ceil(lengths / target_spacing))
@@ -716,7 +719,9 @@ def available_variants(
     version_dir = resolve_potcar_dir(library, functional)
     variants: set[str] = set()
     if version_dir.exists():
-        pattern = rf"^{re.escape(element)}(_[A-Za-z]+)?(\.\d+)?$"
+        # Suffix groups may repeat ("Fe_sv_GW"), include digits ("X_3")
+        # or a fractional marker ("H.5") — every wiki variant name.
+        pattern = rf"^{re.escape(element)}(?:_[A-Za-z0-9]+)*(\.\d+)?$"
         for d in version_dir.iterdir():
             if d.is_dir() and re.match(pattern, d.name):
                 variants.add(d.name)
@@ -881,6 +886,14 @@ def generate_all_inputs(
 
     # KPOINTS
     kp = kpoints_params or {}
+    if (kpoints_mode in ("automatic", "line")
+            and not structure_model.is_periodic):
+        # Same contract as FileIO.write: the core layer raises a
+        # translatable error instead of leaking numpy internals
+        # (LinAlgError / spglib KeyError on a rank-0 cell).
+        raise ValueError(
+            _tr("KPOINTS requires a periodic structure (a full-rank "
+                "cell with periodic boundary conditions)."))
     if kpoints_mode == "automatic":
         kpoints_content = generate_kpoints_automatic(
             structure_model.cell,

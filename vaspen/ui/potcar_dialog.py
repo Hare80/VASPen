@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -58,7 +59,8 @@ class PotcarPanel(QWidget):
 
         # ── Functional ──
         func_row = QHBoxLayout()
-        func_row.addWidget(QLabel(self.tr("Functional:")))
+        self._functional_label = QLabel(self.tr("Functional:"))
+        func_row.addWidget(self._functional_label)
         self._functional_combo = MenuButton()
         self._functional_combo.addItems(list(POTCAR_FUNCTIONAL_VERSIONS.keys()))
         self._functional_combo.currentTextChanged.connect(self._refresh_elements)
@@ -68,15 +70,16 @@ class PotcarPanel(QWidget):
 
         # ── Library path ──
         path_row = QHBoxLayout()
-        path_row.addWidget(QLabel(self.tr("POTCAR Library:")))
+        self._library_label = QLabel(self.tr("POTCAR Library:"))
+        path_row.addWidget(self._library_label)
         self._path_edit = QLineEdit(self._config.potcar_library_path)
         self._path_edit.setPlaceholderText(
             self.tr("Path to pseudopotential library root (e.g. /path/to/potcar)")
         )
         path_row.addWidget(self._path_edit, 1)
-        browse_btn = QPushButton(self.tr("Browse..."))
-        browse_btn.clicked.connect(self._browse_library)
-        path_row.addWidget(browse_btn)
+        self._browse_btn = QPushButton(self.tr("Browse..."))
+        self._browse_btn.clicked.connect(self._browse_library)
+        path_row.addWidget(self._browse_btn)
         layout.addLayout(path_row)
 
         # ── Elements ──
@@ -85,12 +88,14 @@ class PotcarPanel(QWidget):
         self._elements_group.setLayout(self._elements_layout)
         layout.addWidget(self._elements_group)
 
-        refresh_btn = QPushButton(self.tr("Refresh Elements from Structure"))
-        refresh_btn.clicked.connect(self._refresh_elements)
-        layout.addWidget(refresh_btn)
+        self._refresh_btn = QPushButton(self.tr("Refresh Elements from Structure"))
+        self._refresh_btn.clicked.connect(self._refresh_elements)
+        layout.addWidget(self._refresh_btn)
 
         # ── Preview ──
-        layout.addWidget(QLabel(self.tr("POTCAR Preview (shows which files will be concatenated):")))
+        self._preview_label = QLabel(self.tr(
+            "POTCAR Preview (shows which files will be concatenated):"))
+        layout.addWidget(self._preview_label)
         self._preview = QTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setFontFamily("Consolas, monospace")
@@ -98,12 +103,33 @@ class PotcarPanel(QWidget):
         layout.addWidget(self._preview, 1)
 
         # ── Generate button ──
-        gen_btn = QPushButton(self.tr("Generate POTCAR Preview"))
-        gen_btn.clicked.connect(self._on_generate_clicked)
-        layout.addWidget(gen_btn)
+        self._gen_btn = QPushButton(self.tr("Generate POTCAR Preview"))
+        self._gen_btn.clicked.connect(self._on_generate_clicked)
+        layout.addWidget(self._gen_btn)
 
         # Populate
         self._refresh_elements()
+
+    # ------------------------------------------------------------------
+    # Language switching (embedded in the non-modal generate dialog)
+    # ------------------------------------------------------------------
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.LanguageChange:
+            self._retranslate()
+        super().changeEvent(event)
+
+    def _retranslate(self) -> None:
+        self._functional_label.setText(self.tr("Functional:"))
+        self._library_label.setText(self.tr("POTCAR Library:"))
+        self._path_edit.setPlaceholderText(
+            self.tr("Path to pseudopotential library root (e.g. /path/to/potcar)"))
+        self._browse_btn.setText(self.tr("Browse..."))
+        self._elements_group.setTitle(self.tr("Elements (in POSCAR order)"))
+        self._refresh_btn.setText(self.tr("Refresh Elements from Structure"))
+        self._preview_label.setText(self.tr(
+            "POTCAR Preview (shows which files will be concatenated):"))
+        self._gen_btn.setText(self.tr("Generate POTCAR Preview"))
 
     # ------------------------------------------------------------------
     # Public API
@@ -162,6 +188,9 @@ class PotcarPanel(QWidget):
                 self.tr("Load a structure to detect elements."),
             )
             return
+        # Regenerate from scratch — a failed run must not leave a stale
+        # concatenation from an earlier selection behind.
+        self._potcar_content = ""
         try:
             self._potcar_content = self.generate_content()
         except FileNotFoundError as e:
@@ -283,8 +312,10 @@ class PotcarDialog(QDialog):
 
     def _on_accept(self) -> None:
         panel = self._panel
-        if not panel._potcar_content:
-            panel._on_generate_clicked()
+        # Always regenerate from the CURRENT selections — the cached
+        # content goes stale when the variant/functional/library is
+        # changed after a preview (those only refresh the preview text).
+        panel._on_generate_clicked()
 
         if panel._potcar_content:
             filepath, _ = QFileDialog.getSaveFileName(

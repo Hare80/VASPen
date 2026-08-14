@@ -107,7 +107,10 @@ def test_undo_redo_delete_atom(model):
 
     model.undo()
     assert model.n_atoms == 3
-    assert model.is_dirty is True
+    # Undo restores the snapshot's dirty state — undoing the only edit
+    # after a load lands on a clean state again (no false "unsaved
+    # changes" prompt on close).
+    assert model.is_dirty is False
     assert not model.can_undo and model.can_redo
 
     model.redo()
@@ -1033,3 +1036,68 @@ def test_sort_atoms_permutes_magmoms():
     assert model.symbols == ["Cu", "Cu", "O"]
     assert model.magmom(1) == 5.0   # moment followed its atom
     assert model.magmom(2) is None
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def test_direct_construction_initializes_derived_state():
+    """StructureModel(atoms) must be fully usable: stable IDs, bonds,
+    undo/delete — not just a bare Atoms wrapped in a shell."""
+    atoms = Atoms("H2O", positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0]])
+    model = StructureModel(atoms)
+    assert model.atom_id(0) == 0
+    assert model.atom_id(2) == 2
+    assert model.bond_mode == "manual"
+    model.delete_atom(0)  # used to raise IndexError (empty _atom_ids)
+    assert model.n_atoms == 2
+    assert model.can_undo
+
+
+def test_undo_restores_saved_dirty_state():
+    """Undo restores the snapshot's dirty flag: undoing every edit after
+    a load leaves the model clean (no false unsaved-changes prompt)."""
+    model = StructureModel()
+    model.load_atoms(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]))
+    model.set_atom_position(0, [1.0, 0.0, 0.0])
+    model.set_atom_position(0, [2.0, 0.0, 0.0])
+    model.undo()
+    assert model.is_dirty is True  # one edit remains
+    model.undo()
+    assert model.is_dirty is False  # back to the loaded state
+    model.redo()
+    assert model.is_dirty is True
+
+
+def test_remove_absent_bond_is_a_noop():
+    """Removing a bond that does not exist must not consume an undo
+    entry, mark the model dirty, or emit structure_modified."""
+    model = StructureModel()
+    # 3 Å apart — no auto-detected bond between the two atoms
+    model.load_atoms(Atoms("H2", positions=[[0, 0, 0], [3.0, 0, 0]],
+                           cell=[10, 10, 10], pbc=True))
+    modified = _counter(model, "structure_modified")
+    assert not model.bonds  # nothing to remove
+    model.remove_bond(0, 1)
+    assert modified.count == 0
+    assert not model.can_undo
+    assert model.is_dirty is False
+
+
+def test_load_uses_fileio_registry(tmp_path):
+    """StructureModel.load() must behave like FileIO.read: CIF files
+    with a full cell get pbc=True (the raw ASE reader leaves it False)."""
+    path = tmp_path / "crystal.cif"
+    path.write_text(
+        "data_x\n_cell_length_a 3.6\n_cell_length_b 3.6\n"
+        "_cell_length_c 3.6\n_cell_angle_alpha 90\n_cell_angle_beta 90\n"
+        "_cell_angle_gamma 90\n_symmetry_space_group_name_H-M 'P 1'\n"
+        "loop_\n_atom_site_label\n_atom_site_type_symbol\n"
+        "_atom_site_fract_x\n_atom_site_fract_y\n_atom_site_fract_z\n"
+        "_atom_site_occupancy\n"
+        "Fe1 Fe 0.0 0.0 0.0 1.0\n", encoding="utf-8")
+    model = StructureModel()
+    model.load(path)
+    assert model.n_atoms == 1
+    assert model.atoms.pbc.any()

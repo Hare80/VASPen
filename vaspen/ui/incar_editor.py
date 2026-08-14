@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -78,7 +78,8 @@ class IncarEditorPanel(QWidget):
         # ── Top: Preset selector ──
         top_row = QHBoxLayout()
 
-        top_row.addWidget(QLabel(self.tr("Calculation Type:")))
+        self._calc_type_label = QLabel(self.tr("Calculation Type:"))
+        top_row.addWidget(self._calc_type_label)
         self._preset_combo = MenuButton()
         self._preset_combo.addItems([
             self.tr("SCF (Static)"),
@@ -127,7 +128,8 @@ class IncarEditorPanel(QWidget):
 
         # ── Bottom: Preview (editable — sync back via the button) ──
         preview_row = QHBoxLayout()
-        preview_row.addWidget(QLabel(self.tr("Preview:")))
+        self._preview_label = QLabel(self.tr("Preview:"))
+        preview_row.addWidget(self._preview_label)
         preview_row.addStretch()
         self._sync_btn = QPushButton(self.tr("Sync Table from Preview"))
         self._sync_btn.setToolTip(self.tr(
@@ -141,6 +143,62 @@ class IncarEditorPanel(QWidget):
         self._preview.setMaximumHeight(200)
         self._preview.textChanged.connect(self._on_preview_text_changed)
         layout.addWidget(self._preview)
+
+    # ------------------------------------------------------------------
+    # Language switching (embedded in the non-modal generate dialog)
+    # ------------------------------------------------------------------
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.LanguageChange:
+            self._retranslate()
+        super().changeEvent(event)
+
+    def _retranslate(self) -> None:
+        """Re-apply translatable texts; table edits and the preset survive."""
+        self._calc_type_label.setText(self.tr("Calculation Type:"))
+        index = self._preset_combo.currentIndex()
+        self._preset_combo.blockSignals(True)  # keep the user's table edits
+        self._preset_combo.clear()
+        self._preset_combo.addItems([
+            self.tr("SCF (Static)"),
+            self.tr("Optimization"),
+            self.tr("Band Structure"),
+            self.tr("DOS"),
+            self.tr("Optical"),
+            self.tr("NEB"),
+            self.tr("Custom"),
+        ])
+        self._preset_combo.setCurrentIndex(index)
+        self._preset_combo.blockSignals(False)
+        self._encut_estimate_btn.setText(self.tr("Estimate ENCUT from POTCAR"))
+        self._encut_estimate_btn.setToolTip(
+            self.tr("Read ENMAX from POTCAR and set ENCUT = 1.3 × ENMAX"))
+        self._table.setHorizontalHeaderLabels([
+            self.tr("Tag"), self.tr("Value"), self.tr("Description")
+        ])
+        self._add_tag_btn.setText(self.tr("Add Tag"))
+        self._remove_tag_btn.setText(self.tr("Remove Selected Tag"))
+        self._reset_btn.setText(self.tr("Reset to Preset"))
+        self._preview_label.setText(self.tr("Preview:"))
+        self._sync_btn.setText(self.tr("Sync Table from Preview"))
+        self._sync_btn.setToolTip(self.tr(
+            "Parse the edited preview text back into the tag table"))
+        # Description column follows the new language (custom rows keep
+        # their "Custom tag" label).
+        preset_tags = {
+            k.casefold() for k in INCAR_PRESETS.get(self._preset_key, {})
+        }
+        for row in range(self._table.rowCount()):
+            item = self._table.item(row, 0)
+            desc_item = self._table.item(row, 2)
+            if item is None or desc_item is None:
+                continue
+            tag = item.text()
+            desc_item.setText(
+                INCAR_TAG_DESCRIPTIONS.get(tag, "")
+                if tag.casefold() in preset_tags or tag not in self._custom_tags
+                else self.tr("Custom tag"))
+        self._update_preview()
 
     # ------------------------------------------------------------------
     # Preset handling

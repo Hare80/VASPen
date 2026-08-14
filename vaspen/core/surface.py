@@ -13,7 +13,6 @@ from dataclasses import dataclass
 
 import numpy as np
 from ase import Atoms
-from ase.build import cut as ase_cut
 from ase.build import surface as ase_surface
 from pymatgen.core import Element
 from pymatgen.core.surface import SlabGenerator
@@ -45,8 +44,14 @@ class SlabInfo:
 
 
 def _d_hkl(atoms: Atoms, miller: tuple[int, int, int]) -> float:
-    """Interplanar spacing along the Miller normal (Angstrom)."""
+    """Interplanar spacing along the Miller normal (Angstrom).
+
+    Raises:
+        ValueError: If the Miller indices are all zero.
+    """
     normal = np.array(miller, dtype=float)
+    if not np.any(normal):
+        raise ValueError("Miller indices must not all be zero.")
     return 1.0 / np.linalg.norm(np.linalg.solve(atoms.get_cell().T, normal))
 
 
@@ -254,31 +259,3 @@ class SurfaceCutter:
 
         slab_atoms = ase_surface(atoms, miller, layers=layers, vacuum=vacuum)
         return StructureModel(slab_atoms)
-
-    @staticmethod
-    def cut_arbitrary(
-        model: StructureModel,
-        origin: np.ndarray,
-        normal: np.ndarray,
-    ) -> StructureModel:
-        """Cut a slab with arbitrary origin and normal vectors.
-
-        Uses ASE's low-level ``cut`` function.
-
-        Args:
-            model: The bulk structure.
-            origin: (x, y, z) origin of the cut plane.
-            normal: (x, y, z) normal vector of the cut plane.
-
-        Returns:
-            New StructureModel with the cut structure.
-        """
-        atoms = model.atoms.copy()
-        origin = np.asarray(origin, dtype=float)
-        normal = np.asarray(normal, dtype=float)
-
-        # ASE cut returns a new Atoms with the specified plane
-        cut_atoms = ase_cut(atoms, a=normal, b=None, c=None, origo=origin, nlayers=None)
-        # Re-wrap
-        cut_atoms.center(vacuum=10.0)
-        return StructureModel(cut_atoms)

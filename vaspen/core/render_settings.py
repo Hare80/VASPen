@@ -202,7 +202,14 @@ class RenderSettings:
             current = getattr(rs, f.name)
             try:
                 if isinstance(current, tuple):
+                    # RGB tuples: wrong length (e.g. legacy 2/4-element
+                    # values) or non-finite entries fall back to the
+                    # default — the viewport unpacks them by position.
                     value = tuple(float(v) for v in raw)
+                    if len(value) != len(current) or not all(
+                            math.isfinite(v) for v in value):
+                        continue
+                    value = tuple(max(0.0, min(1.0, v)) for v in value)
                 elif isinstance(current, bool):
                     value = str(raw).lower() in ("true", "1")
                 elif isinstance(current, int):
@@ -211,6 +218,8 @@ class RenderSettings:
                     value = str(raw)
                 else:
                     value = float(raw)
+                    if f.name == "gamma" and value <= 0:
+                        continue  # 1/gamma in the shader — 0 breaks it
             except (TypeError, ValueError):
                 continue
             setattr(rs, f.name, value)

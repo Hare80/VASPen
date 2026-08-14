@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -63,7 +63,8 @@ class KpointsEditorPanel(QWidget):
 
         # ── Mode selector ──
         mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel(self.tr("KPOINTS Mode:")))
+        self._mode_label = QLabel(self.tr("KPOINTS Mode:"))
+        mode_row.addWidget(self._mode_label)
         self._mode_combo = MenuButton()
         self._mode_combo.addItems([
             self.tr("Automatic (KSPACING) — recommended"),
@@ -86,7 +87,8 @@ class KpointsEditorPanel(QWidget):
         layout.addWidget(self._estimate_label)
 
         # ── Preview ──
-        layout.addWidget(QLabel(self.tr("Preview:")))
+        self._preview_label = QLabel(self.tr("Preview:"))
+        layout.addWidget(self._preview_label)
         self._preview = QTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setFontFamily("Consolas, monospace")
@@ -94,6 +96,56 @@ class KpointsEditorPanel(QWidget):
         layout.addWidget(self._preview)
 
         self._on_mode_changed(0)
+
+    # ------------------------------------------------------------------
+    # Language switching (embedded in the non-modal generate dialog)
+    # ------------------------------------------------------------------
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.LanguageChange:
+            self._retranslate()
+        super().changeEvent(event)
+
+    def _retranslate(self) -> None:
+        """Re-apply translatable texts; mode/values/preview text survive."""
+        self._mode_label.setText(self.tr("KPOINTS Mode:"))
+        mode = self._mode_combo.currentIndex()
+        self._mode_combo.blockSignals(True)
+        self._mode_combo.clear()
+        self._mode_combo.addItems([
+            self.tr("Automatic (KSPACING) — recommended"),
+            self.tr("Manual Mesh (n1 × n2 × n3)"),
+            self.tr("Line-mode (Band Structure)"),
+        ])
+        self._mode_combo.setCurrentIndex(mode)
+        self._mode_combo.blockSignals(False)
+        self._kspacing_label.setText(self.tr("KSPACING (2π/Å):"))
+        self._kspacing_note.setText(
+            self.tr("Recommended: Insulators = 0.04, Metals = 0.03")
+            + "\n"
+            + self.tr("Fine = 0.02, Coarse = 0.05")
+        )
+        for label, combo in ((self._scheme_auto_label, self._gamma_auto),
+                             (self._scheme_manual_label, self._gamma_manual)):
+            label.setText(self.tr("Scheme:"))
+            index = combo.currentIndex()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems([self.tr("Gamma-centered"), self.tr("Monkhorst-Pack")])
+            combo.setCurrentIndex(index)
+            combo.blockSignals(False)
+        self._kmesh_label.setText(self.tr("k-mesh:"))
+        self._kpath_label.setText(self.tr("k-path:"))
+        self._band_path_edit.setToolTip(
+            self.tr("High-symmetry k-path, e.g. G-X|X-W|W-L|L-G|G-K"))
+        self._path_note.setText(
+            self.tr("Format: <start>-<end>|<start>-<end>|...\n"
+                    "Labels: G=Gamma, X, M, R, K, L, W, etc."))
+        self._npoints_label.setText(self.tr("Points per segment:"))
+        self._preview_label.setText(self.tr("Preview:"))
+        # Re-render so the '#'-notes appear in the new language.
+        self._update_estimate()
+        self._update_preview()
 
     # ------------------------------------------------------------------
     # Public API
@@ -156,7 +208,8 @@ class KpointsEditorPanel(QWidget):
         self._kspacing_spin.setMinimumWidth(90)
         self._kspacing_spin.valueChanged.connect(self._on_kspacing_spin)
         slider_row.addWidget(self._kspacing_spin)
-        form.addRow(self.tr("KSPACING (2π/Å):"), slider_row)
+        self._kspacing_label = QLabel(self.tr("KSPACING (2π/Å):"))
+        form.addRow(self._kspacing_label, slider_row)
 
         # Recommendation notes
         rec_text = (
@@ -171,7 +224,8 @@ class KpointsEditorPanel(QWidget):
         # Gamma-centered checkbox
         self._gamma_auto = MenuButton()
         self._gamma_auto.addItems([self.tr("Gamma-centered"), self.tr("Monkhorst-Pack")])
-        form.addRow(self.tr("Scheme:"), self._gamma_auto)
+        self._scheme_auto_label = QLabel(self.tr("Scheme:"))
+        form.addRow(self._scheme_auto_label, self._gamma_auto)
 
         self._gamma_auto.currentIndexChanged.connect(self._update_preview)
 
@@ -218,11 +272,13 @@ class KpointsEditorPanel(QWidget):
         mesh_row.addWidget(QLabel("n3:"))
         mesh_row.addWidget(self._k3_spin)
         mesh_row.addStretch()
-        form.addRow(self.tr("k-mesh:"), mesh_row)
+        self._kmesh_label = QLabel(self.tr("k-mesh:"))
+        form.addRow(self._kmesh_label, mesh_row)
 
         self._gamma_manual = MenuButton()
         self._gamma_manual.addItems([self.tr("Gamma-centered"), self.tr("Monkhorst-Pack")])
-        form.addRow(self.tr("Scheme:"), self._gamma_manual)
+        self._scheme_manual_label = QLabel(self.tr("Scheme:"))
+        form.addRow(self._scheme_manual_label, self._gamma_manual)
 
         for spin in (self._k1_spin, self._k2_spin, self._k3_spin):
             spin.valueChanged.connect(self._update_preview)
@@ -243,20 +299,22 @@ class KpointsEditorPanel(QWidget):
             self.tr("High-symmetry k-path, e.g. G-X|X-W|W-L|L-G|G-K")
         )
         self._band_path_edit.textChanged.connect(self._update_preview)
-        form.addRow(self.tr("k-path:"), self._band_path_edit)
+        self._kpath_label = QLabel(self.tr("k-path:"))
+        form.addRow(self._kpath_label, self._band_path_edit)
 
-        path_note = QLabel(
+        self._path_note = QLabel(
             self.tr("Format: <start>-<end>|<start>-<end>|...\n"
                     "Labels: G=Gamma, X, M, R, K, L, W, etc.")
         )
-        path_note.setWordWrap(True)
-        form.addRow("", path_note)
+        self._path_note.setWordWrap(True)
+        form.addRow("", self._path_note)
 
         self._band_npoints = QSpinBox()
         self._band_npoints.setRange(5, 100)
         self._band_npoints.setValue(20)
         self._band_npoints.valueChanged.connect(self._update_preview)
-        form.addRow(self.tr("Points per segment:"), self._band_npoints)
+        self._npoints_label = QLabel(self.tr("Points per segment:"))
+        form.addRow(self._npoints_label, self._band_npoints)
 
         return page
 

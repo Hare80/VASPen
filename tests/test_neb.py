@@ -449,3 +449,24 @@ def test_frozen_example_pass_block():
     with pytest.raises(ValueError, match="Frozen atoms"):
         interpolate_neb(bi, bf, 4,
                         frozen_mask=constraints_to_fixed_flags(bi).all(axis=1))
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def test_frozen_wrapped_equivalent_site_not_blocked():
+    """The same periodic site written with a different lattice
+    translation at the two ends (unwrapped CONTCAR coordinates) must not
+    count as frozen-atom movement."""
+    ini, fin = _ethane_pair()
+    mask = np.zeros(len(ini), dtype=bool)
+    mask[0] = True
+    # Shift the frozen atom by exactly one lattice vector — same site.
+    fin.positions[0] += np.asarray(fin.get_cell().array)[0]
+    frames = interpolate_neb(ini, fin, 3, frozen_mask=mask)
+    assert len(frames) == 5
+    # genuine movement (half a cell) must still block
+    fin.positions[0] += np.asarray(fin.get_cell().array)[0] * 0.5
+    with pytest.raises(ValueError, match="Frozen atoms"):
+        interpolate_neb(ini, fin, 3, frozen_mask=mask)

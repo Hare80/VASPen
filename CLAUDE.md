@@ -52,7 +52,9 @@ VASPen/
 │   │   ├── surface_dialog.py   # Miller index input, vacuum, slab preview
 │   │   ├── settings_dialog.py  # Preferences (paths, language, defaults)
 │   │   ├── periodic_wrap_dialog.py  # Vacuum padding dialog before saving molecules to periodic formats
-│   │   └── about_dialog.py     # About dialog
+│   │   ├── measurement.py            # Measurement manager + dock panel (right side)
+│   │   ├── display_options_dialog.py # Render settings dialog (live preview)
+│   │   └── tools.py                  # Viewport interaction tools (select/move/rotate/add/delete/bond/measure)
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── structure.py        # StructureModel — wraps ASE Atoms with signals
@@ -469,6 +471,65 @@ afterwards):
   Clicking a frame previews it in the 3D viewport (temporary; the
   viewport is rebound to the model when the dialog closes). An
   IMAGES/actual-count mismatch is confirmed before writing.
+
+---
+
+## 7.8 Code Review 2026-08-14 — Settled Behaviors (do not re-litigate)
+
+First full layered review (4 review agents + light sweep, ~11.7k lines, all
+findings adversarially verified; dispositions in `docs/review-2026-08-14.md`).
+Behaviors pinned by the fixes:
+
+**Preview dialog state machine (surface / generate-all):**
+- Opening a preview dialog leaves editing modes entirely:
+  `cancel_active_tool()` **plus `set_mode(SELECT)`** — a still-active
+  ADD/MOVE/DELETE tool keeps consuming clicks and mutating the model
+  during the "paused" preview.
+- Both preview dialogs can be open at once; editing entry points resume
+  only when the **last** one closes (each finished handler re-enables
+  only if the other dialog is `None`).
+- `_open_file` closes any live preview dialog first (their finished
+  handlers rebind the viewport) — dropEvent and the recent-files menu
+  reach it while entry points are paused.
+- Selection actions (select all/none/invert/neighbors/connected) are in
+  the pause list; model-selection signals never touch the viewport
+  highlight during frame edit; selection clicks during a non-frame
+  preview stay viewport-local (frame indices ≠ model indices).
+- Browsing NEB endpoints with frame edits asks before discarding;
+  clearing images notifies MainWindow via `preview_callback(None, …)`
+  which exits frame-edit and rebinds the viewport.
+
+**Model invariants:**
+- `StructureModel(atoms)` direct construction initializes derived state
+  (IDs/bonds/occupancy) exactly like `load_atoms` — usable immediately.
+- Undo/redo snapshots carry the `dirty` flag and restore it: undoing
+  every edit after a save leaves the model clean (no false
+  "unsaved changes" prompt).
+- `remove_bond` on an absent bond is a true no-op (no undo entry, no
+  dirty flag, no signal).
+- `StructureModel.load()` delegates to `FileIO.read` (same registry
+  behavior as the UI open path).
+
+**Core API contracts (translatable `ValueError`, never raw numpy/spglib):**
+- `estimate_k_mesh` rejects spacing ≤ 0; `generate_all_inputs` rejects
+  non-periodic models in automatic/line modes; `_d_hkl` rejects the
+  zero Miller index; `align` rejects zero-length directions (NaN basis).
+- `extract_fixed_flags` broadcasts one `FixScaled` (3,) mask over all
+  group indices; CIF occupancy sanitizing keeps scientific notation.
+- `_check_frozen_consistent` compares frozen endpoints by minimal image
+  (the same site written with a different lattice translation is not
+  movement).
+- POTCAR generation: the standalone dialog ALWAYS regenerates on OK
+  (cached content goes stale after variant/functional changes);
+  `available_variants` matches repeated `_suffix` groups (`Fe_sv_GW`).
+- Viewport: camera basis is NaN-safe for ±Y → Front/Back view
+  sequences; `project_to_screen` rejects points behind the camera
+  (ortho clip.w is always 1); `_fit_camera` ignores NaN coordinates.
+- Coordinate/magmom text inputs reject non-finite values (`nan`/`inf`).
+- Removed dead code: `SurfaceCutter.cut_arbitrary` (broken under ASE
+  3.29, no callers), the never-emitted `bond_removed` signal.
+- Generate-all write loop removes partially written files on failure
+  (no half-generated set that reads as complete).
 
 ---
 

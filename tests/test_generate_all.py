@@ -102,6 +102,9 @@ def test_neb_end_to_end(qtbot, tmp_path, monkeypatch):
     panel = dlg._poscar_panel
     assert panel.neb_mode
     panel._on_browse_fin()
+    # Browsing endpoints clears the images and resets the preview
+    # (the callback receives None so the main window leaves frame-edit).
+    assert previews == [None]
 
     # diagnostics: distance + suggested count prefill the spin box
     assert "2.5562" in panel._info_label.text()
@@ -121,8 +124,9 @@ def test_neb_end_to_end(qtbot, tmp_path, monkeypatch):
 
     # clicking a frame previews it via the callback
     panel._images_list.setCurrentRow(2)
-    assert len(previews) == 1
-    assert len(previews[0]) == 7
+    frames = [a for a in previews if a is not None]
+    assert len(frames) == 1
+    assert len(frames[0]) == 7
 
     # generate writes the vtst-style layout
     out = tmp_path / "out"
@@ -828,3 +832,126 @@ def test_main_window_routes_frame_edits(qtbot):
     panel._images_list.setCurrentRow(0)
     assert win._frame_edit is None
     assert not win._mode_actions[ToolMode.MOVE_ATOM].isEnabled()
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def _record_question(monkeypatch, answer) -> list:
+    """Record QMessageBox.question calls and always return ``answer``."""
+    calls: list = []
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QMessageBox.question",
+        staticmethod(lambda *a, **k: calls.append(a) or answer),
+    )
+    return calls
+
+
+def test_browse_with_frame_edits_asks_before_discarding(qtbot, tmp_path, monkeypatch):
+    """Changing endpoints after manual frame edits must ask — and keep
+    the edits (plus the cleared preview reset) when the user declines."""
+    from vaspen.ui.generate_all_dialog import PoscarPanel
+
+    model = _example_model()
+    previews: list = []
+    panel = PoscarPanel(model, preview_callback=lambda atoms, *a: previews.append(atoms))
+    qtbot.addWidget(panel)
+
+    fin_dir = tmp_path / "final"
+    fin_dir.mkdir(parents=True, exist_ok=True)
+    fin_path = _write_poscar(
+        FileIO.read(str(EXAMPLES / "final" / "POSCAR")), fin_dir / "POSCAR")
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(fin_path), ""),
+    )
+    panel._on_browse_fin()
+    panel._on_interpolate()
+    panel.apply_frame_move(2, [0], panel._images[2].positions[[0]] + 0.5)
+    assert panel.has_frame_edits()
+    n_before = panel.n_images
+
+    # decline → the dialog stays untouched
+    _record_question(monkeypatch, QMessageBox.No)
+    panel._on_browse_ini()
+    assert panel.n_images == n_before
+    assert panel.has_frame_edits()
+
+    # accept → the images (and their edits) are discarded, and the main
+    # window is told via the None reset callback
+    _record_question(monkeypatch, QMessageBox.Yes)
+    panel._on_browse_ini()
+    assert panel.n_images == 0
+    assert not panel.has_frame_edits()
+    assert previews and previews[-1] is None
+
+
+def test_frame_preview_data_out_of_range_returns_none(qtbot):
+    from vaspen.ui.generate_all_dialog import PoscarPanel
+
+    panel = PoscarPanel()
+    qtbot.addWidget(panel)
+    assert panel.frame_preview_data(0) is None
+    assert panel.frame_preview_data(5) is None
+
+
+def test_write_failure_removes_partial_files(qtbot, tmp_path, monkeypatch):
+    """A mid-write OSError must not leave a half-generated file set that
+    reads as fully generated."""
+    model = _example_model()
+    fin_dir = tmp_path / "final"
+    fin_dir.mkdir(parents=True, exist_ok=True)
+    fin_path = _write_poscar(
+        FileIO.read(str(EXAMPLES / "final" / "POSCAR")), fin_dir / "POSCAR")
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(fin_path), ""),
+    )
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    dlg._poscar_panel._on_browse_fin()
+    dlg._poscar_panel._on_interpolate()
+
+    out = tmp_path / "out"
+    out.mkdir()
+    dlg._dir_edit.setText(str(out))
+    critical = _record(monkeypatch, "critical")
+
+    real_write = Path.write_text
+
+    def failing_write(self, *a, **k):
+        if self.parent.name == "01" and self.name == "POSCAR":
+            raise OSError("disk full")
+        return real_write(self, *a, **k)
+
+    monkeypatch.setattr("pathlib.Path.write_text", failing_write)
+    dlg._on_generate()
+    assert critical
+    assert not (out / "INCAR").exists()
+    assert not (out / "00" / "POSCAR").exists()
+    assert not (out / "01" / "POSCAR").exists()
+
+
+def test_retranslate_preserves_selections(qtbot):
+    """Language-change events reach the non-modal dialog and its panels;
+    combo selections survive the rebuild."""
+    from PySide6.QtCore import QEvent
+
+    model = _example_model()
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    dlg._task_combo.setCurrentIndex(dlg._task_combo.findText("Band Structure"))
+    band_index = dlg._task_combo.currentIndex()
+    dlg._poscar_panel._coord_combo.setCurrentIndex(1)
+
+    dlg.changeEvent(QEvent(QEvent.Type.LanguageChange))
+    dlg._poscar_panel.changeEvent(QEvent(QEvent.Type.LanguageChange))
+    dlg._kpoints_panel.changeEvent(QEvent(QEvent.Type.LanguageChange))
+    dlg._incar_panel.changeEvent(QEvent(QEvent.Type.LanguageChange))
+    dlg._potcar_panel.changeEvent(QEvent(QEvent.Type.LanguageChange))
+
+    assert dlg._task_combo.currentIndex() == band_index
+    assert dlg._poscar_panel._coord_combo.currentIndex() == 1
+    assert dlg._kpoints_panel.mode() == "line"  # band rule still active
+    assert dlg._tabs.tabText(0)  # re-applied, non-empty

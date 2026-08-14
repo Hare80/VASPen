@@ -682,7 +682,6 @@ class Viewport3D(QOpenGLWidget):
     atom_place_requested = Signal(object, object)  # world position, anchor index|None
     atoms_moved = Signal(list, object)      # indices + new positions (K×3)
     bond_created = Signal(int, int)         # atom indices
-    bond_removed = Signal(int, int)         # atom indices
     delete_requested = Signal(str, int)     # "atom"|"bond" + index
     measurement_added = Signal(str, list)   # kind + atom indices
     mode_changed = Signal(object)           # new ToolMode
@@ -1146,11 +1145,18 @@ class Viewport3D(QOpenGLWidget):
                 [positions - self._cam_center,
                  self._cell_verts - self._cam_center], axis=0)
         else:
-            self._cam_center = positions.mean(axis=0).astype(np.float64)
+            self._cam_center = np.nanmean(positions, axis=0)
+            if not np.isfinite(self._cam_center).all():
+                self._cam_center = np.zeros(3)
             ref = positions - self._cam_center
         radii = np.linalg.norm(ref, axis=1)
+        # NaN coordinates in a corrupted file must not poison the
+        # camera (max(nan, 1.0) returns nan, and reset_view could
+        # never recover it) — ignore non-finite distances.
+        radius = (float(np.nanmax(radii)) if np.isfinite(radii).any()
+                  else 0.0)
         self._fit_radius = (
-            max(float(radii.max()), 1.0)
+            max(radius, 1.0)
             + float(self._atom_radius.max())
             + 0.5
         )
@@ -1192,9 +1198,18 @@ class Viewport3D(QOpenGLWidget):
         eye = self._cam_center + self._cam_distance * direction
         forward = self._cam_center - eye
         forward /= np.linalg.norm(forward)
-        right = np.cross(forward, self._cam_up)
-        if np.linalg.norm(right) < 1e-9:
-            right = np.cross(forward, np.array([0.0, 0.0, 1.0]))
+        # Screen-right from the up vector, re-orthogonalized against
+        # forward. A ±Y view leaves _cam_up ∥ forward for a following
+        # Front/Back view — the old z-vector fallback was parallel to
+        # forward there too and produced a NaN view matrix (the render
+        # went blank until Reset View).
+        up = self._cam_up - float(self._cam_up @ forward) * forward
+        if np.linalg.norm(up) < 1e-6:
+            fallback = ([0.0, 0.0, 1.0] if abs(forward[2]) < 0.9
+                        else [1.0, 0.0, 0.0])
+            up = (np.asarray(fallback, dtype=np.float64)
+                  - float(np.dot(fallback, forward)) * forward)
+        right = np.cross(forward, up)
         right /= np.linalg.norm(right)
         up = np.cross(right, forward)
 
@@ -2189,7 +2204,18 @@ class Viewport3D(QOpenGLWidget):
     def project_to_screen(self, world) -> np.ndarray | None:
         """Project a world point to widget (logical) pixels; None if behind."""
         proj, view = self._camera_matrices()
-        clip = proj @ view @ np.append(np.asarray(world, dtype=float), 1.0)
+        p = np.asarray(world, dtype=float)
+        # Ortho: clip.w is always 1, so the perspective "behind" guard
+        # never fires — test the point against the camera plane
+        # explicitly. Free zoom lets the camera pass through atoms;
+        # without this, labels/measurements of occluded atoms are drawn
+        # at mirror positions.
+        rot = view[:3, :3]
+        eye = -(rot.T @ view[:3, 3])
+        forward_w = -view[2, :3]
+        if float((p - eye) @ forward_w) <= 0.0:
+            return None
+        clip = proj @ view @ np.append(p, 1.0)
         w = clip[3]
         if w <= 0.0:
             return None

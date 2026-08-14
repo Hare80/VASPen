@@ -686,3 +686,39 @@ def test_suggest_band_path_non_periodic_returns_none():
     from vaspen.core.vasp_input import suggest_band_path
 
     assert suggest_band_path(molecule("H2O")) is None
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def test_available_variants_double_suffix(tmp_path):
+    """Wiki variants with two suffix groups ("Fe_sv_GW") must be
+    discovered — the old regex only allowed one group."""
+    version_dir = tmp_path / "potpaw_PBE.54"
+    (version_dir / "Fe").mkdir(parents=True)
+    (version_dir / "Fe_sv_GW").mkdir()
+    (version_dir / "Ge_d_GW").mkdir()
+    variants = available_variants(tmp_path, "PBE", "Fe")
+    assert "Fe_sv_GW" in variants
+    assert "Fe" in variants
+    assert "Ge_d_GW" not in variants  # other elements are not reported
+
+
+def test_estimate_k_mesh_rejects_nonpositive_spacing():
+    cell = np.eye(3) * 5.43
+    with pytest.raises(ValueError, match="KSPACING"):
+        estimate_k_mesh(cell, 0.0)
+    with pytest.raises(ValueError, match="KSPACING"):
+        estimate_k_mesh(cell, -0.04)
+
+
+def test_generate_all_inputs_non_periodic_raises():
+    """Core API must raise a translatable ValueError for molecules, not
+    leak numpy/spglib internals (LinAlgError / KeyError)."""
+    model = StructureModel()
+    model.load_atoms(Atoms("H2O", positions=np.eye(3) * 1.5))
+    with pytest.raises(ValueError, match="periodic"):
+        generate_all_inputs(model, kpoints_mode="automatic")
+    with pytest.raises(ValueError, match="periodic"):
+        generate_all_inputs(model, kpoints_mode="line")

@@ -1,7 +1,7 @@
-"""Pure-geometry tests for the viewport's cylinder baker (no GL)."""
 
 import numpy as np
 import pytest
+from ase import Atoms
 
 from vaspen.ui.viewport3d import (
     _center_fade,
@@ -154,3 +154,63 @@ def test_split_global_opacity_zero_all_transparent():
     opaque, trans = _split_opaque_transparent(depths, eff)
     assert len(opaque) == 0
     assert trans.tolist() == [1, 2, 0]  # far → near
+
+
+# ----------------------------------------------------------------------
+# Camera regression tests (code review 2026-08-14) — no GL needed:
+# matrix math runs before any OpenGL call.
+# ----------------------------------------------------------------------
+
+@pytest.fixture
+def viewport(qtbot):
+    from vaspen.ui.viewport3d import Viewport3D
+
+    vp = Viewport3D()
+    qtbot.addWidget(vp)
+    vp.set_structure(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]],
+                           cell=[10, 10, 10], pbc=True))
+    return vp
+
+
+def test_camera_stays_finite_after_y_then_front_view(viewport):
+    """View → Top (+y) leaves _cam_up ∥ forward for a following
+    Front (+z) — the old z-fallback produced a NaN view matrix and the
+    render went blank until Reset View."""
+    viewport.set_view_direction(0.0, 89.9, up=(0.0, 0.0, 1.0))
+    viewport.set_view_direction(0.0, 0.0, None)  # keeps the +z up
+    proj, view = viewport._camera_matrices()
+    assert np.isfinite(proj).all()
+    assert np.isfinite(view).all()
+    # and the bottom view after a top view works too
+    viewport.set_view_direction(0.0, -89.9, up=(0.0, 0.0, -1.0))
+    viewport.set_view_direction(180.0, 0.0, None)
+    _proj, view = viewport._camera_matrices()
+    assert np.isfinite(view).all()
+
+
+def test_project_to_screen_returns_none_behind_camera(viewport):
+    """Ortho projection makes clip.w always 1 — points behind the camera
+    must be rejected explicitly (labels of occluded atoms were drawn at
+    mirror positions)."""
+    proj, view = viewport._camera_matrices()
+    rot = view[:3, :3]
+    eye = -(rot.T @ view[:3, 3])
+    forward_w = -view[2, :3]
+    center = viewport._cam_center
+    assert viewport.project_to_screen(center) is not None
+    behind = eye - forward_w * 5.0
+    assert viewport.project_to_screen(behind) is None
+
+
+def test_fit_camera_survives_nan_position(viewport):
+    """NaN coordinates (corrupted file) must not poison the camera
+    permanently — max(nan, 1.0) returns nan and reset_view could not
+    recover it."""
+    atoms = Atoms("H2O", positions=[[0, 0, 0], [np.nan, 0, 0], [0, 1, 0]],
+                  cell=[10, 10, 10], pbc=True)
+    viewport.set_structure(atoms)
+    assert np.isfinite(viewport._fit_radius)
+    assert np.isfinite(viewport._cam_distance)
+    viewport.reset_view()
+    _proj, view = viewport._camera_matrices()
+    assert np.isfinite(view).all()

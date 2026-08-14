@@ -13,6 +13,7 @@ guesses — they are empirical.
 from collections import Counter
 
 import numpy as np
+import pytest
 from ase import Atoms
 from ase.build import bulk
 
@@ -187,3 +188,18 @@ def test_supercell_in_plane():
     assert tuple(expanded.get_pbc()) == (True, True, True)
     # repeated fractional coordinates: 2 base sites x 6 in-plane cells
     assert len({tuple(np.round(p, 6)) for p in expanded.get_scaled_positions()}) == 12
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def test_zero_miller_raises_value_error(si_bulk):
+    """(0,0,0) must raise the documented ValueError (not ZeroDivisionError)."""
+    cutter = SurfaceCutter(StructureModel(si_bulk.copy()))
+    # both paths must raise the documented ValueError (not
+    # ZeroDivisionError / OverflowError from 1/norm(0))
+    with pytest.raises(ValueError):
+        cutter.slabs((0, 0, 0), 4, 15.0)
+    with pytest.raises(ValueError):
+        cutter.cut_with_thickness((0, 0, 0), 10.0, 15.0)

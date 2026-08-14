@@ -71,11 +71,14 @@ class AppConfig:
 
     @property
     def wrap_padding(self) -> float:
-        """Remembered vacuum padding for the periodic-wrap dialog (Angstrom)."""
+        """Remembered vacuum padding for the periodic-wrap dialog (Angstrom).
+
+        Corrupt stored values fall back to the documented default (5 Å).
+        """
         try:
             return float(self.get("periodic_wrap_padding", 5.0))
         except (TypeError, ValueError):
-            return 10.0
+            return 5.0
 
     @wrap_padding.setter
     def wrap_padding(self, value: float) -> None:

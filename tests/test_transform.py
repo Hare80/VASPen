@@ -106,3 +106,16 @@ def test_align_molecule_keeps_geometry():
         for j in range(i + 1, len(h2o)):
             assert out.get_distance(i, j) == pytest.approx(
                 h2o.get_distance(i, j), abs=1e-10)
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14)
+# ----------------------------------------------------------------------
+
+def test_align_zero_length_direction_raises():
+    """align() must raise ValueError for a zero-length direction — the
+    old NaN basis silently turned every coordinate into NaN."""
+    atoms = molecule("H2O")
+    with pytest.raises(ValueError, match="zero length"):
+        align(atoms, (0.0, 0.0, 0.0), (1.0, 0.0, 0.0),
+              (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))

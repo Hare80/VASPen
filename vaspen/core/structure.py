@@ -25,7 +25,6 @@ from typing import Iterable
 import numpy as np
 from ase import Atoms
 from ase.geometry import cellpar_to_cell
-from ase.io import read as ase_read
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
 from vaspen.core.bonds import Bond, find_bonds
@@ -106,6 +105,7 @@ class _Snapshot:
     next_id: int
     fixed: np.ndarray
     magmoms: np.ndarray
+    dirty: bool
     selected_indices: frozenset[int]
     selected_bonds: frozenset[int]
 
@@ -170,6 +170,14 @@ class StructureModel(QObject):
         # unset atoms are written as 0.0 when the tag is generated
         # (settled 2026-08-14).
         self._magmoms: np.ndarray = np.full(len(self._atoms), np.nan)
+        # Direct construction with a non-empty Atoms (SurfaceCutter,
+        # dialog results) must leave the model fully usable: fill the
+        # stable IDs, bonds and occupancy exactly like load_atoms does.
+        # A bare Atoms would otherwise crash delete_atom (empty ID
+        # list) and starve measurements of stable IDs.
+        if len(self._atoms) > 0:
+            self._occupancy = extract_occupancy(self._atoms)
+            self._reset_derived_state()
 
     # ------------------------------------------------------------------
     # Properties
@@ -217,20 +225,14 @@ class StructureModel(QObject):
     def load(self, filepath: str | Path) -> None:
         """Load a structure from file (cif, xyz, POSCAR, CONTCAR, etc.).
 
-        ASE auto-detects the format from the file extension and content.
+        Delegates to the FileIO registry so extension resolution
+        (extensionless/lowercase POSCAR, CIF pbc and occupancy fixes)
+        behaves exactly like the UI open path.
         """
+        from vaspen.core.file_io import FileIO
+
         path = Path(filepath)
-        atoms = ase_read(str(path))
-        self._atoms = atoms
-        self._adopt_fixed_flags()
-        self._magmoms = np.full(len(atoms), np.nan)  # MAGMOM is not in structure files
-        self._occupancy = extract_occupancy(atoms)
-        self._filepath = str(path)
-        self._dirty = False
-        self._selected_indices = set()
-        self._reset_derived_state()
-        self._clear_history()
-        self.structure_loaded.emit()
+        self.load_atoms(FileIO.read(path), path)
 
     def load_atoms(self, atoms: Atoms, filepath: str | Path | None = None) -> None:
         """Replace contents with the given Atoms and mark as loaded.
@@ -805,6 +807,7 @@ class StructureModel(QObject):
             self._next_id,
             self._fixed.copy(),
             self._magmoms.copy(),
+            self._dirty,
             frozenset(self._selected_indices),
             frozenset(self._selected_bonds),
         )
@@ -860,7 +863,10 @@ class StructureModel(QObject):
         # Copy so snapshots never share the mutable array with the model.
         self._fixed = snapshot.fixed.copy()
         self._magmoms = snapshot.magmoms.copy()
-        self._dirty = True
+        # Restore the dirty state the snapshot was taken with — undoing
+        # the last edit after a save lands on a clean state and must
+        # not nag "unsaved changes" on close.
+        self._dirty = snapshot.dirty
         self._selected_indices = {
             i for i in snapshot.selected_indices if 0 <= i < len(self._atoms)
         }
@@ -1180,6 +1186,8 @@ class StructureModel(QObject):
         """Delete the bond between atoms i and j (no-op if absent)."""
         bond = Bond(i, j)
         self._validate_atom_pair(bond.i, bond.j)
+        if not any((b.i, b.j) == (bond.i, bond.j) for b in self._bonds):
+            return  # no-op: no undo entry, no dirty flag, no signal
         self._push_undo()
         self._switch_to_manual()
         self._bonds = [

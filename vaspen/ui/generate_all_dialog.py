@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 from ase import Atoms
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -130,7 +130,8 @@ class PoscarPanel(QWidget):
         layout = QVBoxLayout(page)
 
         coord_row = QHBoxLayout()
-        coord_row.addWidget(QLabel(self.tr("Coordinates:")))
+        self._coord_label = QLabel(self.tr("Coordinates:"))
+        coord_row.addWidget(self._coord_label)
         self._coord_combo = MenuButton()
         self._coord_combo.addItems([
             self.tr("Direct (fractional)"),
@@ -143,7 +144,8 @@ class PoscarPanel(QWidget):
         coord_row.addStretch()
         layout.addLayout(coord_row)
 
-        layout.addWidget(QLabel(self.tr("Preview:")))
+        self._preview_label = QLabel(self.tr("Preview:"))
+        layout.addWidget(self._preview_label)
         self._poscar_preview = QTextEdit()
         self._poscar_preview.setReadOnly(True)
         self._poscar_preview.setFontFamily("Consolas, monospace")
@@ -156,9 +158,11 @@ class PoscarPanel(QWidget):
 
         # Initial structure
         ini_row = QHBoxLayout()
-        ini_row.addWidget(QLabel(self.tr("Initial structure:")))
+        self._ini_label = QLabel(self.tr("Initial structure:"))
+        ini_row.addWidget(self._ini_label)
+        self._ini_default = self._init_atoms is not None
         self._ini_edit = QLineEdit(
-            self.tr("(current structure)") if self._init_atoms is not None else "")
+            self.tr("(current structure)") if self._ini_default else "")
         self._ini_edit.setReadOnly(True)
         ini_row.addWidget(self._ini_edit, 1)
         self._ini_browse = QPushButton(self.tr("Browse..."))
@@ -168,7 +172,8 @@ class PoscarPanel(QWidget):
 
         # Final structure
         fin_row = QHBoxLayout()
-        fin_row.addWidget(QLabel(self.tr("Final structure:")))
+        self._fin_label = QLabel(self.tr("Final structure:"))
+        fin_row.addWidget(self._fin_label)
         self._fin_edit = QLineEdit("")
         self._fin_edit.setReadOnly(True)
         fin_row.addWidget(self._fin_edit, 1)
@@ -189,7 +194,8 @@ class PoscarPanel(QWidget):
         # Interpolation algorithm (linear is the default; IDPP avoids
         # atoms passing through each other on the straight-line path)
         algo_row = QHBoxLayout()
-        algo_row.addWidget(QLabel(self.tr("Algorithm:")))
+        self._algo_label = QLabel(self.tr("Algorithm:"))
+        algo_row.addWidget(self._algo_label)
         self._algo_combo = MenuButton()
         self._algo_combo.addItems([self.tr("Linear"), self.tr("IDPP")])
         algo_row.addWidget(self._algo_combo)
@@ -198,7 +204,8 @@ class PoscarPanel(QWidget):
 
         # Interpolation controls
         interp_row = QHBoxLayout()
-        interp_row.addWidget(QLabel(self.tr("Intermediate images:")))
+        self._images_label = QLabel(self.tr("Intermediate images:"))
+        interp_row.addWidget(self._images_label)
         self._images_spin = QSpinBox()
         self._images_spin.setRange(1, 98)
         self._images_spin.setValue(1)
@@ -210,11 +217,52 @@ class PoscarPanel(QWidget):
         layout.addLayout(interp_row)
 
         # Image list (click to preview in the 3D viewport)
-        layout.addWidget(QLabel(self.tr("Image frames (click to preview):")))
+        self._images_list_label = QLabel(self.tr("Image frames (click to preview):"))
+        layout.addWidget(self._images_list_label)
         self._images_list = QListWidget()
         self._images_list.currentItemChanged.connect(self._on_image_selected)
         layout.addWidget(self._images_list, 1)
         return page
+
+    # ------------------------------------------------------------------
+    # Language switching (the panel lives inside the non-modal dialog)
+    # ------------------------------------------------------------------
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.LanguageChange:
+            self._retranslate()
+        super().changeEvent(event)
+
+    def _retranslate(self) -> None:
+        self._coord_label.setText(self.tr("Coordinates:"))
+        coord_index = self._coord_combo.currentIndex()
+        self._coord_combo.blockSignals(True)
+        self._coord_combo.clear()
+        self._coord_combo.addItems([
+            self.tr("Direct (fractional)"),
+            self.tr("Cartesian"),
+        ])
+        self._coord_combo.setCurrentIndex(coord_index)
+        self._coord_combo.blockSignals(False)
+        self._preview_label.setText(self.tr("Preview:"))
+        self._ini_label.setText(self.tr("Initial structure:"))
+        self._fin_label.setText(self.tr("Final structure:"))
+        if self._ini_default:
+            self._ini_edit.setText(self.tr("(current structure)"))
+        self._ini_browse.setText(self.tr("Browse..."))
+        self._fin_browse.setText(self.tr("Browse..."))
+        self._algo_label.setText(self.tr("Algorithm:"))
+        algo_index = self._algo_combo.currentIndex()
+        self._algo_combo.blockSignals(True)
+        self._algo_combo.clear()
+        self._algo_combo.addItems([self.tr("Linear"), self.tr("IDPP")])
+        self._algo_combo.setCurrentIndex(algo_index)
+        self._algo_combo.blockSignals(False)
+        self._images_label.setText(self.tr("Intermediate images:"))
+        self._interpolate_btn.setText(self.tr("Interpolate"))
+        self._images_list_label.setText(self.tr("Image frames (click to preview):"))
+        self._update_diagnostics()
+        self._refresh_poscar_preview()
 
     # ------------------------------------------------------------------
     # Public API
@@ -253,8 +301,11 @@ class PoscarPanel(QWidget):
         Returns (atoms, editable, fixed_flags, bonds). ``editable`` is
         True only for intermediate frames — the initial and final
         frames are locked. Bonds are auto-detected on first access
-        (minus user-deleted pairs) and cached per frame.
+        (minus user-deleted pairs) and cached per frame. Returns None
+        when the images were cleared (new endpoints browsed).
         """
+        if not (0 <= index < len(self._images)):
+            return None
         atoms = self._images[index]
         editable = 0 < index < len(self._images) - 1
         return atoms, editable, self._ini_fixed_flags, self._frame_bonds_for(index)
@@ -369,7 +420,21 @@ class PoscarPanel(QWidget):
     # NEB mode
     # ------------------------------------------------------------------
 
+    def _confirm_discard_frame_edits(self) -> bool:
+        """Ask before an action that silently discards manual frame edits."""
+        if not self.has_frame_edits():
+            return True
+        reply = QMessageBox.question(
+            self,
+            self.tr("Discard Frame Edits"),
+            self.tr("Changing the initial/final structure discards the "
+                    "manual edits made to the images.\n\nContinue?"),
+        )
+        return reply == QMessageBox.Yes
+
     def _on_browse_ini(self) -> None:
+        if not self._confirm_discard_frame_edits():
+            return
         filepath, _ = QFileDialog.getOpenFileName(
             self,
             self.tr("Select Initial Structure (POSCAR)"),
@@ -391,11 +456,14 @@ class PoscarPanel(QWidget):
         self._init_atoms = atoms
         self._ini_fixed_flags = constraints_to_fixed_flags(atoms)
         self._ini_edit.setText(filepath)
+        self._ini_default = False
         self._config.last_directory = str(Path(filepath).parent)
         self._clear_images()
         self._update_diagnostics()
 
     def _on_browse_fin(self) -> None:
+        if not self._confirm_discard_frame_edits():
+            return
         filepath, _ = QFileDialog.getOpenFileName(
             self,
             self.tr("Select Final Structure (POSCAR)"),
@@ -471,6 +539,10 @@ class PoscarPanel(QWidget):
         self._images = []
         self._reset_frame_state()
         self._images_list.clear()
+        # Tell the main window the frames are gone — an active frame-edit
+        # context would otherwise keep pointing at a cleared list.
+        if self._preview_callback is not None:
+            self._preview_callback(None, None, False, None, None, self)
 
     def _on_interpolate(self) -> None:
         if self._init_atoms is None:
@@ -581,12 +653,49 @@ class GenerateAllDialog(QDialog):
             default_task = "scf"
         self._sync_task(default_task, source="init")
 
+    # ------------------------------------------------------------------
+    # Language switching (non-modal/persistent → live retranslate,
+    # CLAUDE.md §11.2; the embedded panels handle their own strings)
+    # ------------------------------------------------------------------
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.Type.LanguageChange:
+            self._retranslate()
+        super().changeEvent(event)
+
+    def _retranslate(self) -> None:
+        self.setWindowTitle(self.tr("Generate All Input Files"))
+        self._task_label.setText(self.tr("Calculation Type:"))
+        index = self._task_combo.currentIndex()
+        self._task_combo.blockSignals(True)  # no task re-sync on retranslate
+        self._task_combo.clear()
+        self._task_combo.addItems([
+            self.tr("SCF (Static)"),
+            self.tr("Optimization"),
+            self.tr("Band Structure"),
+            self.tr("DOS"),
+            self.tr("Optical"),
+            self.tr("NEB"),
+            self.tr("Custom"),
+        ])
+        self._task_combo.setCurrentIndex(index)
+        self._task_combo.blockSignals(False)
+        self._tabs.setTabText(0, self.tr("POSCAR"))
+        self._tabs.setTabText(1, self.tr("INCAR"))
+        self._tabs.setTabText(2, self.tr("KPOINTS"))
+        self._tabs.setTabText(3, self.tr("POTCAR"))
+        self._dir_label.setText(self.tr("Output directory:"))
+        self._dir_browse_btn.setText(self.tr("Browse..."))
+        self._generate_btn.setText(self.tr("Generate"))
+        self._cancel_btn.setText(self.tr("Cancel"))
+
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # ── Task selector ──
         task_row = QHBoxLayout()
-        task_row.addWidget(QLabel(self.tr("Calculation Type:")))
+        self._task_label = QLabel(self.tr("Calculation Type:"))
+        task_row.addWidget(self._task_label)
         self._task_combo = MenuButton()
         self._task_combo.addItems([
             self.tr("SCF (Static)"),
@@ -620,12 +729,13 @@ class GenerateAllDialog(QDialog):
 
         # ── Output directory ──
         dir_row = QHBoxLayout()
-        dir_row.addWidget(QLabel(self.tr("Output directory:")))
+        self._dir_label = QLabel(self.tr("Output directory:"))
+        dir_row.addWidget(self._dir_label)
         self._dir_edit = QLineEdit(self._config.last_directory)
         dir_row.addWidget(self._dir_edit, 1)
-        browse_btn = QPushButton(self.tr("Browse..."))
-        browse_btn.clicked.connect(self._browse_output_dir)
-        dir_row.addWidget(browse_btn)
+        self._dir_browse_btn = QPushButton(self.tr("Browse..."))
+        self._dir_browse_btn.clicked.connect(self._browse_output_dir)
+        dir_row.addWidget(self._dir_browse_btn)
         layout.addLayout(dir_row)
 
         # ── Buttons ──
@@ -633,10 +743,10 @@ class GenerateAllDialog(QDialog):
         btn_row.addStretch()
         self._generate_btn = QPushButton(self.tr("Generate"))
         self._generate_btn.clicked.connect(self._on_generate)
-        cancel_btn = QPushButton(self.tr("Cancel"))
-        cancel_btn.clicked.connect(self.reject)
+        self._cancel_btn = QPushButton(self.tr("Cancel"))
+        self._cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(self._generate_btn)
-        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(self._cancel_btn)
         layout.addLayout(btn_row)
 
     # ------------------------------------------------------------------
@@ -804,6 +914,7 @@ class GenerateAllDialog(QDialog):
             files["POTCAR"] = potcar
 
         out = Path(out_text)
+        written: list[Path] = []
         try:
             for name, content in files.items():
                 target = out / name
@@ -811,9 +922,19 @@ class GenerateAllDialog(QDialog):
                 # UTF-8 + LF: VASP input files must not carry the
                 # locale encoding (GBK) or CRLF line endings
                 target.write_text(content, encoding="utf-8", newline="\n")
+                written.append(target)
         except OSError as e:
+            # Best-effort cleanup of this run's partial output — do not
+            # leave a half-written set that reads as fully generated.
+            for path in reversed(written):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             QMessageBox.critical(
-                self, self.tr("Generation Failed"), str(e))
+                self, self.tr("Generation Failed"),
+                self.tr("{}\n\nPartially written files were removed.")
+                .format(e))
             return
 
         self._config.last_directory = str(out)

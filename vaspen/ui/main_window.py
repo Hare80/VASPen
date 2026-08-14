@@ -689,7 +689,6 @@ class MainWindow(QMainWindow):
         self._viewport.atom_place_requested.connect(self._on_atom_place_requested)
         self._viewport.atoms_moved.connect(self._on_atoms_moved)
         self._viewport.bond_created.connect(self._on_bond_created)
-        self._viewport.bond_removed.connect(self._on_bond_removed)
         self._viewport.delete_requested.connect(self._on_delete_requested)
         self._viewport.measurement_added.connect(self._on_measurement_added)
         self._viewport.mode_changed.connect(self._on_mode_changed)
@@ -749,6 +748,14 @@ class MainWindow(QMainWindow):
 
     def _open_file(self, filepath: str) -> None:
         """Load a structure from the given path."""
+        # Live preview dialogs hold a stale snapshot of the model
+        # (cached slabs / interpolated images) — close them first; their
+        # finished handlers rebind the viewport before the new structure
+        # loads. dropEvent and the recent-files menu reach this method
+        # while the editing entry points are paused.
+        for dlg in (self._surface_dialog, self._generate_dialog):
+            if dlg is not None:
+                dlg.close()
         try:
             atoms = FileIO.read(filepath)
             self._structure.load_atoms(atoms, filepath)  # emits structure_loaded once
@@ -987,6 +994,10 @@ class MainWindow(QMainWindow):
         self._generate_dialog = dlg
         self._set_preview_editing_enabled(False)
         self._viewport.cancel_active_tool()
+        # Leave editing modes entirely — an active ADD/MOVE/DELETE tool
+        # would keep consuming clicks and mutate the model during the
+        # "paused" preview (the mode buttons are disabled, not the tool).
+        self._viewport.set_mode(ToolMode.SELECT)
         dlg.show()
 
     def _preview_image_atoms(self, atoms, index=None, editable=False,
@@ -1002,6 +1013,16 @@ class MainWindow(QMainWindow):
         routed to the frame (move/rotate atoms, delete/add bonds)
         instead of the model; the initial and final frames stay locked.
         """
+        if atoms is None:
+            # The dialog cleared its images (new endpoints were
+            # browsed) — exit frame-edit and re-show the model.
+            self._frame_edit = None
+            self._frame_selection = set()
+            self._previewing_neb = False
+            self._rebind_viewport_to_model()
+            self._update_frame_edit_actions(False)
+            self._update_edit_actions()
+            return
         self._viewport.set_structure(
             atoms,
             reset_view=not self._previewing_neb,
@@ -1034,8 +1055,11 @@ class MainWindow(QMainWindow):
         self._frame_selection = set()
         if self._generate_dialog is dlg:
             self._generate_dialog = None
-            self._set_preview_editing_enabled(True)
             self._update_edit_actions()
+            # Both preview dialogs can be open at once — editing stays
+            # paused until the LAST one closes.
+            if self._surface_dialog is None:
+                self._set_preview_editing_enabled(True)
         self._previewing_neb = False
         self._rebind_viewport_to_model()
         dlg.deleteLater()
@@ -1063,6 +1087,10 @@ class MainWindow(QMainWindow):
                         "conditions)."),
             )
             return
+        if self._surface_dialog is not None:
+            self._surface_dialog.raise_()
+            self._surface_dialog.activateWindow()
+            return
 
         # Non-modal: the viewport stays rotatable while the dialog is
         # open. Editing entry points are paused to prevent conflicts
@@ -1073,6 +1101,7 @@ class MainWindow(QMainWindow):
         self._surface_dialog = dlg
         self._set_preview_editing_enabled(False)
         self._viewport.cancel_active_tool()
+        self._viewport.set_mode(ToolMode.SELECT)
         dlg.show()
 
     def _apply_surface_result(self, dlg) -> None:
@@ -1086,8 +1115,11 @@ class MainWindow(QMainWindow):
         """Re-enable editing entry points after the dialog closes."""
         if self._surface_dialog is dlg:
             self._surface_dialog = None
-            self._set_preview_editing_enabled(True)
             self._update_edit_actions()  # undo/redo reflect the applied cut
+            # Both preview dialogs can be open at once — editing stays
+            # paused until the LAST one closes.
+            if self._generate_dialog is None:
+                self._set_preview_editing_enabled(True)
             dlg.deleteLater()
 
     def _set_preview_editing_enabled(self, enabled: bool) -> None:
@@ -1102,7 +1134,10 @@ class MainWindow(QMainWindow):
                     self.act_supercell, self.act_edit_lattice,
                     self.act_symmetry,
                     self.act_delete_selection, self.act_undo, self.act_redo,
-                    self.act_detect_bonds, self.act_freeze, self.act_unfreeze):
+                    self.act_detect_bonds, self.act_freeze, self.act_unfreeze,
+                    self.act_select_all, self.act_select_none,
+                    self.act_select_invert, self.act_select_neighbors,
+                    self.act_select_connected):
             act.setEnabled(enabled)
         for mode, act in self._mode_actions.items():
             if mode is not ToolMode.SELECT:
@@ -1140,7 +1175,13 @@ class MainWindow(QMainWindow):
             return
         panel = self._frame_edit["panel"]
         index = self._frame_edit["index"]
-        atoms, _editable, flags, bonds = panel.frame_preview_data(index)
+        data = panel.frame_preview_data(index)
+        if data is None:
+            # The dialog cleared its images (new endpoints) — the frame
+            # context is gone.
+            self._frame_edit = None
+            return
+        atoms, _editable, flags, bonds = data
         self._viewport.set_structure(atoms, reset_view=False,
                                      bonds=bonds, fixed=flags)
         self._viewport.set_highlight(self._frame_selection)
@@ -1455,6 +1496,13 @@ class MainWindow(QMainWindow):
         self._update_recent_menu()
 
     def _on_structure_loaded(self) -> None:
+        # Any NEB frame-edit context refers to the PREVIOUS structure —
+        # the viewport is rebound below and edit signals must never
+        # reach a frame of the replaced model (backstop: _open_file
+        # already closes the preview dialogs).
+        self._frame_edit = None
+        self._frame_selection = set()
+        self._previewing_neb = False
         # Measurements belong to the PREVIOUS structure — their atom IDs
         # would silently resolve to unrelated atoms of the new one.
         self._measurement_manager.clear()
@@ -1488,10 +1536,14 @@ class MainWindow(QMainWindow):
 
     def _on_selection_cleared(self) -> None:
         """Selection cleared via the model (e.g. the selected atom was deleted)."""
+        if self._frame_edit is not None:
+            return  # frame selection is viewport-local
         self._viewport.highlight_atom(None)
 
     def _on_selection_changed(self) -> None:
         """Selection set changed (multi-select aware)."""
+        if self._frame_edit is not None:
+            return  # model selection must not overwrite the frame highlight
         self._viewport.set_highlight(self._structure.selected_indices)
         self._update_selection_status()
         has_sel = bool(self._structure.selected_indices)
@@ -1549,7 +1601,10 @@ class MainWindow(QMainWindow):
         """Selection from a viewport tool (click / box / modifiers).
 
         While a middle NEB frame is being edited, the selection stays
-        viewport-local — the model's selection is untouched.
+        viewport-local — the model's selection is untouched. During a
+        non-frame preview (surface slab, endpoint images) the viewport
+        shows a TEMPORARY structure — frame indices must never become
+        model indices, so the selection stays viewport-local there too.
         """
         if self._frame_edit is not None:
             if mode == "add":
@@ -1560,6 +1615,9 @@ class MainWindow(QMainWindow):
             else:
                 self._frame_selection = set(indices)
             self._viewport.set_highlight(self._frame_selection)
+            return
+        if self._previewing_neb or self._surface_dialog is not None:
+            self._viewport.set_highlight(set(indices))
             return
         if mode == "add":
             self._structure.add_to_selection(indices)
@@ -1662,13 +1720,6 @@ class MainWindow(QMainWindow):
         try:
             self._structure.add_bond(i, j)
             self._set_status(self.tr("Bond created: {}–{}").format(i, j))
-        except ValueError as e:
-            self._set_status(str(e))
-
-    def _on_bond_removed(self, i: int, j: int) -> None:
-        try:
-            self._structure.remove_bond(i, j)
-            self._set_status(self.tr("Bond removed: {}–{}").format(i, j))
         except ValueError as e:
             self._set_status(str(e))
 
