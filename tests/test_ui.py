@@ -1322,3 +1322,126 @@ def test_wrap_periodic_action_refuses_empty(window, monkeypatch):
 
     assert opened == []
     assert infos
+
+
+# ----------------------------------------------------------------------
+# MAGMOM — properties panel + INCAR editor injection
+# ----------------------------------------------------------------------
+
+def test_properties_panel_magmom_group_edits(window, monkeypatch):
+    model = _load_h3(window, monkeypatch)
+    panel = window._atom_props
+    model.select_atom(0)
+
+    # initially unset
+    assert not panel._magmom_check.isChecked()
+    assert panel._magmom_edit.text() == ""
+    assert model.magmom(0) is None
+
+    # check → prefilled with 1.0, focus lands in the value field
+    panel._magmom_check.setChecked(True)
+    assert model.magmom(0) == 1.0
+    assert panel._magmom_edit.text() == "1"
+    # the prefill is selected so typing replaces it (hasFocus itself
+    # depends on the test process being the foreground window — skip)
+    assert panel._magmom_edit.selectedText() == "1"
+
+    # 1-based display, matching the structure tree's Index column
+    assert "Atom 1 (H)" in panel._status_label.text()
+    assert panel._id_label.text() == "1"
+
+    # edit the value
+    panel._magmom_edit.setText("5")
+    panel._on_magmom_edited()
+    assert model.magmom(0) == 5.0
+
+    # invalid input reverts
+    panel._magmom_edit.setText("abc")
+    panel._on_magmom_edited()
+    assert model.magmom(0) == 5.0
+    assert panel._magmom_edit.text() == "5"
+
+    # uncheck → unset
+    panel._magmom_check.setChecked(False)
+    assert model.magmom(0) is None
+    assert not model.any_magmom
+
+
+def test_properties_panel_magmom_multi_select(window, monkeypatch):
+    model = _load_h3(window, monkeypatch)
+    panel = window._atom_props
+    model.set_selection([0, 1])
+
+    # batch set via checkbox → 1.0 for both
+    assert panel._magmom_check.isEnabled()
+    panel._magmom_check.setChecked(True)
+    assert model.magmom(0) == 1.0 and model.magmom(1) == 1.0
+
+    # batch edit the value → both updated
+    panel._magmom_edit.setText("-5")
+    panel._on_magmom_edited()
+    assert model.magmom(0) == -5.0 and model.magmom(1) == -5.0
+
+    # mixed state: unset atom 0 via the model → shown as unchecked
+    # (no tristate — a click always checks directly)
+    model.set_selection([0, 1, 2])
+    model.set_magmom(0, None)
+    assert not panel._magmom_check.isChecked()
+
+    # checking a mixed selection prefills only the unset atoms
+    panel._magmom_check.setChecked(True)
+    assert model.magmom(0) == 1.0   # refilled
+    assert model.magmom(1) == -5.0  # existing value survives
+    assert model.magmom(2) == 1.0
+
+
+def test_incar_editor_injects_magmoms(qtbot):
+    from vaspen.core.structure import StructureModel
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "Fe2O3",
+        positions=np.eye(5, 3) * 1.5,
+        cell=[5, 5, 5],
+        pbc=True,
+    ))
+    model.set_magmom([0, 1], np.array([5.0, -5.0]))
+
+    dlg = IncarEditorDialog(model)
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+
+    table_tags = {
+        dlg._table.item(r, 0).text(): dlg._table.item(r, 1).text()
+        for r in range(dlg._table.rowCount())
+    }
+    assert table_tags["MAGMOM"].split() == ["5", "-5", "0", "0", "0"]
+    assert table_tags["ISPIN"] == "2"
+    # preview shows the active MAGMOM line, not the commented suggestion
+    preview = dlg._preview.toPlainText()
+    assert "  MAGMOM =  5 -5 0 0 0" in preview
+    assert not any(l.startswith("  # MAGMOM") for l in preview.splitlines())
+    dlg.close()
+
+
+def test_incar_editor_without_magmoms_keeps_ispin_1(qtbot):
+    from vaspen.core.structure import StructureModel
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "H3", positions=np.eye(3, 3) * 1.5, cell=[5, 5, 5], pbc=True,
+    ))
+
+    dlg = IncarEditorDialog(model)
+    qtbot.addWidget(dlg)
+    dlg._load_preset("scf")
+
+    table_tags = {
+        dlg._table.item(r, 0).text(): dlg._table.item(r, 1).text()
+        for r in range(dlg._table.rowCount())
+    }
+    assert "MAGMOM" not in table_tags
+    assert table_tags["ISPIN"] == "1"
+    dlg.close()

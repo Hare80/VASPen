@@ -12,6 +12,12 @@ from typing import Any
 
 import numpy as np
 from ase.dft.kpoints import get_special_points as ase_get_special_points
+from PySide6.QtCore import QCoreApplication
+
+
+def _tr(text: str) -> str:
+    """Translate a user-visible VaspInput message (hand-maintained .ts)."""
+    return QCoreApplication.translate("VaspInput", text)
 
 # ======================================================================
 # INCAR Presets — community-standard defaults
@@ -114,15 +120,19 @@ INCAR_PRESETS: dict[str, dict[str, Any]] = {
         "ISMEAR": 0,
         "SIGMA": 0.05,
         "EDIFF": 1e-6,
-        "EDIFFG": -0.05,
-        "IBRION": 3,   # Damped MD (recommended for NEB)
-        "POTIM": 0.0,
+        "EDIFFG": -0.02,  # force criterion (eV/A)
+        "IBRION": 3,   # damped MD — ion motion is taken over by IOPT
+        "POTIM": 0.0,  # zero time step: VASP itself never moves the ions
+        "IOPT": 1,     # 1-LBFGS (optimizes the whole band globally)
+        "ICHAIN": 0,   # 0-NEB, 2-dimer, 3-Lanczos
         "NSW": 500,
         "PREC": "Normal",
         "LREAL": "Auto",
         "LWAVE": False,
         "LCHARG": False,
-        "IMAGES": 5,   # Number of intermediate images
+        "IMAGES": "",  # required: number of intermediate images — system-
+                       # dependent, the user must fill it in (settled
+                       # 2026-08-14; both generation paths block on empty)
         "SPRING": -5,  # Spring constant
         "LCLIMB": True,
         "ISPIN": 1,
@@ -138,7 +148,7 @@ INCAR_TAG_COMMENTS: dict[str, str] = {
     "SIGMA": "smearing width in eV",
     "EDIFF": "electronic convergence in eV",
     "EDIFFG": "ionic convergence in eV/A; negative = force",
-    "IBRION": "ions: -1-fixed, 0-MD, 1-quasi-Newton, 2-CG",
+    "IBRION": "ions: -1-fixed, 0-MD, 1-quasi-Newton, 2-CG, 3-damped MD",
     "ISIF": "2-ions only, 3-ions + cell",
     "NSW": "max ionic steps",
     "NELM": "max electronic SCF steps",
@@ -152,10 +162,13 @@ INCAR_TAG_COMMENTS: dict[str, str] = {
     "CSHIFT": "complex shift for Kramers-Kronig in eV",
     "ICHARG": "charge init: 11-read CHGCAR (non-SCF)",
     "ISPIN": "spin: 1-non-polarized, 2-collinear",
-    "IMAGES": "intermediate images between endpoints",
+    "IMAGES": "no. of intermediate images (required)",
+    "IOPT": "1-LBFGS, 2-CG, 3-quick-min, 7-FIRE",
+    "ICHAIN": "0-NEB, 2-dimer, 3-Lanczos",
+    "LNEBCELL": "variable-cell NEB",
     "SPRING": "spring constant in eV/A^2",
     "LCLIMB": "climbing image NEB",
-    "POTIM": "time step in fs (MD) / displacement",
+    "POTIM": "time step in fs (MD); 0 = VASP does not move the ions",
     "MAGMOM": "initial magnetic moments per atom; with ISPIN=2",
     "ISTART": "1-read existing WAVECAR if present",
     "IVDW": "11-DFT-D3 van der Waals correction",
@@ -173,6 +186,8 @@ _COMMON_SUGGESTIONS: dict[str, Any] = {
 INCAR_SUGGESTIONS: dict[str, dict[str, Any]] = {
     preset: dict(_COMMON_SUGGESTIONS) for preset in INCAR_PRESETS
 }
+# NEB-specific extra suggestion (variable-cell NEB)
+INCAR_SUGGESTIONS["neb"]["LNEBCELL"] = False
 
 INCAR_TAG_DESCRIPTIONS: dict[str, str] = {
     "SYSTEM": "Descriptive name for the calculation",
@@ -196,9 +211,12 @@ INCAR_TAG_DESCRIPTIONS: dict[str, str] = {
     "CSHIFT": "Complex shift for Kramers-Kronig (eV)",
     "ICHARG": "Charge initialization: 11=read CHGCAR for non-SCF",
     "IMAGES": "Number of intermediate images for NEB",
+    "IOPT": "Optimizer for force-based methods: 1-LBFGS, 2-CG, 3-quick-min, 7-FIRE",
+    "ICHAIN": "Method: 0-NEB, 2-dimer, 3-Lanczos",
+    "LNEBCELL": "Variable-cell NEB",
     "SPRING": "Spring constant for NEB",
     "LCLIMB": "Use climbing image NEB",
-    "POTIM": "Time step for MD / damped MD (IBRION=3)",
+    "POTIM": "Time step for MD / damped MD (IBRION=3); 0 = VASP does not move the ions",
     "MAGMOM": "Initial magnetic moments per atom",
 }
 
@@ -206,6 +224,17 @@ INCAR_TAG_DESCRIPTIONS: dict[str, str] = {
 # ======================================================================
 # INCAR text formatting
 # ======================================================================
+
+def magmom_line(magmoms: np.ndarray) -> str:
+    """Format per-atom moments as a MAGMOM value list.
+
+    One value per atom in atom order (collinear); NaN (unset) atoms are
+    written as 0.0 (settled 2026-08-14).
+    """
+    return " ".join(
+        "0" if np.isnan(v) else f"{v:g}" for v in np.asarray(magmoms, dtype=float)
+    )
+
 
 def _format_incar_value(val: Any) -> str:
     """Format an INCAR value VASP-style (bools as .TRUE./.FALSE.)."""
@@ -727,8 +756,22 @@ def generate_all_inputs(
     # INCAR
     preset = dict(INCAR_PRESETS.get(incar_preset, INCAR_PRESETS["scf"]))
     preset.pop("_description", None)  # remove metadata key
+    if structure_model.any_magmom:
+        # GUI-set initial moments: one value per atom in atom order
+        # (unset atoms are written as 0.0), with collinear spin enabled.
+        # Overrides applied below still win over these injections.
+        preset["MAGMOM"] = magmom_line(structure_model.magmoms)
+        preset["ISPIN"] = 2
     if incar_overrides:
         preset.update(incar_overrides)
+    empty = [tag for tag, val in preset.items() if str(val).strip() == ""]
+    if empty:
+        # e.g. NEB IMAGES — system-dependent and intentionally left blank
+        # so the user has to fill it in (settled 2026-08-14).
+        raise ValueError(
+            _tr("INCAR tags without a value: {} — fill them in the INCAR editor.")
+            .format(", ".join(empty))
+        )
     incar_content = format_incar_content(
         preset, suggestions=INCAR_SUGGESTIONS.get(incar_preset)
     )

@@ -889,3 +889,147 @@ def test_make_supercell_tiles_fixed_flags_block_order():
         assert model.is_fixed(i)
     for i in (0, 2, 3, 5):
         assert not model.is_fixed(i)
+
+
+# ----------------------------------------------------------------------
+# MAGMOM (initial magnetic moments, VASP)
+# ----------------------------------------------------------------------
+
+def _magnetic_model():
+    """Fe2O3-like model: Fe at 0,1; O at 2,3,4."""
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "Fe2O3",
+        positions=np.eye(5, 3) * 1.5,
+        cell=[5, 5, 5],
+        pbc=True,
+    ))
+    return model
+
+
+def test_magmoms_default_all_unset():
+    model = _magnetic_model()
+    assert not model.any_magmom
+    assert np.isnan(model.magmoms).all()
+    assert model.magmom(0) is None
+
+
+def test_set_magmom_scalar_and_array():
+    model = _magnetic_model()
+    model.set_magmom([0, 1], 5.0)
+    assert model.magmom(0) == 5.0 and model.magmom(1) == 5.0
+    assert model.magmom(2) is None
+    # per-atom array (AFM ordering)
+    model.set_magmom([0, 1], np.array([5.0, -5.0]))
+    assert model.magmom(0) == 5.0 and model.magmom(1) == -5.0
+
+
+def test_set_magmom_none_unsets():
+    model = _magnetic_model()
+    model.set_magmom(0, 5.0)
+    model.set_magmom(0, None)
+    assert model.magmom(0) is None
+    assert not model.any_magmom
+
+
+def test_set_magmom_no_change_no_undo():
+    model = _magnetic_model()
+    model.set_magmom(0, 5.0)
+    undo_len = len(model._undo_stack)
+    model.set_magmom(0, 5.0)  # identical value
+    assert len(model._undo_stack) == undo_len
+
+
+def test_set_magmom_out_of_range_raises():
+    model = _magnetic_model()
+    with pytest.raises(ValueError, match="out of bounds"):
+        model.set_magmom(99, 1.0)
+    with pytest.raises(ValueError, match="scalar or a"):
+        model.set_magmom([0, 1], np.array([1.0, 2.0, 3.0]))
+
+
+def test_magmom_undo_redo():
+    model = _magnetic_model()
+    model.set_magmom(0, 5.0)
+    model.undo()
+    assert model.magmom(0) is None
+    model.redo()
+    assert model.magmom(0) == 5.0
+
+
+def test_magmoms_follow_extend_delete():
+    model = _magnetic_model()
+    model.set_magmom(0, 5.0)
+    model.extend_atoms(Atoms("O", positions=[[0, 0, 9]]))
+    assert model.magmom(0) == 5.0
+    assert model.magmom(5) is None  # appended atom unset
+    model.delete_atoms([0])
+    assert model.magmom(0) is None  # atom 1 (O) shifted to index 0
+    assert np.isnan(model.magmoms).all()
+
+
+def test_replace_atoms_clears_or_carries_magmoms():
+    model = _magnetic_model()
+    model.set_magmom(0, 5.0)
+    # default: cleared
+    model.replace_atoms(model.atoms.copy())
+    assert not model.any_magmom
+    # explicit carry + shape validation
+    model.set_magmom(0, 5.0)
+    model.replace_atoms(model.atoms.copy(), magmoms=model.magmoms)
+    assert model.magmom(0) == 5.0
+    with pytest.raises(ValueError, match="magmoms must have shape"):
+        model.replace_atoms(model.atoms.copy(), magmoms=np.array([1.0]))
+
+
+def test_load_resets_magmoms(tmp_path):
+    model = _magnetic_model()
+    model.set_magmom(0, 5.0)
+    path = tmp_path / "s.xyz"
+    from ase.io import write as ase_write
+    ase_write(str(path), model.atoms)
+    model.load(path)
+    assert not model.any_magmom
+
+
+def test_replace_element_preserves_magmoms():
+    from vaspen.core.builder import StructureBuilder
+
+    model = _magnetic_model()
+    model.set_magmom(0, 5.0)
+    StructureBuilder.replace_element(model, 0, "Co")
+    assert model.magmom(0) == 5.0
+    assert model.symbols[0] == "Co"
+
+
+def test_supercell_tiles_magmoms_blockwise():
+    from vaspen.core.builder import StructureBuilder
+
+    model = _magnetic_model()
+    model.set_magmom([0, 1], np.array([5.0, -5.0]))
+    StructureBuilder.make_supercell(model, (2, 1, 1))
+    assert model.n_atoms == 10
+    for i in (0, 5):   # Fe #1 in both images
+        assert model.magmom(i) == 5.0
+    for i in (1, 6):   # Fe #2 (AFM) in both images
+        assert model.magmom(i) == -5.0
+    for i in (2, 3, 4, 7, 8, 9):
+        assert model.magmom(i) is None
+
+
+def test_sort_atoms_permutes_magmoms():
+    from vaspen.core.builder import StructureBuilder
+
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "OCu2",
+        positions=np.eye(3, 3) * 1.5,
+        cell=[5, 5, 5],
+        pbc=True,
+    ))
+    model.set_magmom(2, 5.0)  # the Cu at index 2
+    StructureBuilder.sort_atoms(model)
+    # ASE sorts by chemical symbol: O Cu Cu -> Cu Cu O
+    assert model.symbols == ["Cu", "Cu", "O"]
+    assert model.magmom(1) == 5.0   # moment followed its atom
+    assert model.magmom(2) is None

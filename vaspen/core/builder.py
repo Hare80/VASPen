@@ -59,8 +59,10 @@ class StructureBuilder:
         if 0 <= index < len(atoms):
             atoms[index].symbol = new_symbol
             selection = model.selected_indices
-            # Element replacement keeps the fixed flags (the atom stays).
-            model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
+            # Element replacement keeps the fixed flags and moments
+            # (the atom stays).
+            model.replace_atoms(atoms, fixed_flags=model.fixed_flags,
+                                magmoms=model.magmoms)
             if selection:
                 model.set_selection(selection)
 
@@ -78,9 +80,11 @@ class StructureBuilder:
         P = np.diag(scaling)
         new_atoms = make_supercell(model.atoms, P)
         # Diagonal-P supercells are block-ordered (new index = block*N + i),
-        # so tiling the per-atom flags replicates them per image.
-        flags = np.tile(model.fixed_flags, (int(np.prod(scaling)), 1))
-        model.replace_atoms(new_atoms, fixed_flags=flags)
+        # so tiling the per-atom flags/moments replicates them per image.
+        n_blocks = int(np.prod(scaling))
+        flags = np.tile(model.fixed_flags, (n_blocks, 1))
+        model.replace_atoms(new_atoms, fixed_flags=flags,
+                            magmoms=np.tile(model.magmoms, n_blocks))
 
     @staticmethod
     def translate_atoms(
@@ -107,7 +111,8 @@ class StructureBuilder:
             for i in indices:
                 if 0 <= i < len(atoms):
                     atoms[i].position += vec
-        model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
+        model.replace_atoms(atoms, fixed_flags=model.fixed_flags,
+                            magmoms=model.magmoms)
 
     @staticmethod
     def sort_atoms(model: StructureModel) -> None:
@@ -119,8 +124,11 @@ class StructureBuilder:
         them) — not wired into the UI.
         """
         new_atoms = ase_sort(model.atoms)
-        order = np.argsort(model.atoms.numbers, kind="stable")
-        model.replace_atoms(new_atoms, fixed_flags=model.fixed_flags[order])
+        # ASE sorts by chemical symbol (stable) — the permutation must
+        # match it exactly so per-atom flags/moments follow their atoms.
+        order = np.argsort(model.atoms.get_chemical_symbols(), kind="stable")
+        model.replace_atoms(new_atoms, fixed_flags=model.fixed_flags[order],
+                            magmoms=model.magmoms[order])
 
     @staticmethod
     def wrap_atoms(model: StructureModel) -> None:
@@ -131,7 +139,8 @@ class StructureBuilder:
         """
         atoms = model.atoms.copy()
         atoms.wrap()
-        model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
+        model.replace_atoms(atoms, fixed_flags=model.fixed_flags,
+                            magmoms=model.magmoms)
 
     @staticmethod
     def center_atoms(model: StructureModel, axis: tuple[bool, bool, bool] = (True, True, True)) -> None:
@@ -141,7 +150,8 @@ class StructureBuilder:
         """
         atoms = model.atoms.copy()
         atoms.center()
-        model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
+        model.replace_atoms(atoms, fixed_flags=model.fixed_flags,
+                            magmoms=model.magmoms)
 
     @staticmethod
     def build_molecule(symbol: str) -> StructureModel:

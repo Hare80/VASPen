@@ -398,8 +398,10 @@ The INCAR strategy uses **layered defaults by calculation type**. Implemented in
 ¹ Band LCHARG=T: the preset uses ICHARG=11, which reads the CHGCAR the
 previous SCF run must have written.
 
-NEB preset: SCF base + EDIFFG -0.05, IBRION 3, POTIM 0, NSW 500,
-IMAGES 5, SPRING -5, LCLIMB T.
+NEB preset (VTST-style, settled 2026-08-14): SCF base + EDIFFG -0.02,
+IBRION 3, POTIM 0, IOPT 1 (LBFGS), ICHAIN 0, NSW 500, SPRING -5,
+LCLIMB T; IMAGES defaults to EMPTY and must be filled in by the user
+(both generation paths block on empty-value tags).
 
 **INCAR text format (settled 2026-08-14, values confirmed with the
 user):** `format_incar_content()` renders every tag exactly once

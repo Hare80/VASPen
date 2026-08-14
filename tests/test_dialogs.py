@@ -1006,3 +1006,47 @@ def test_incar_editor_accept_blocks_duplicate_in_preview(qtbot, monkeypatch):
     assert len(warnings) == 1
     assert calls == []  # save dialog never opened
     dlg.close()
+
+
+# ----------------------------------------------------------------------
+# INCAR editor — empty-value tags block saving (NEB IMAGES guard)
+# ----------------------------------------------------------------------
+
+def test_incar_editor_accept_blocks_empty_value_tags(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+
+    from vaspen.ui.incar_editor import IncarEditorDialog
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    dlg._load_preset("neb")  # IMAGES is intentionally blank
+
+    warnings = []
+    calls = []
+    monkeypatch.setattr(
+        "vaspen.ui.incar_editor.QMessageBox.warning",
+        lambda *a, **k: warnings.append(a),
+    )
+    monkeypatch.setattr(
+        QFileDialog, "getSaveFileName",
+        lambda *a, **k: calls.append(a) or ("", ""),
+    )
+
+    # IOPT/ICHAIN rows carry descriptions in the table (user feedback)
+    for r in range(dlg._table.rowCount()):
+        tag = dlg._table.item(r, 0).text()
+        if tag in ("IOPT", "ICHAIN"):
+            assert dlg._table.item(r, 2).text().strip(), tag
+
+    dlg._on_accept()
+    assert len(warnings) == 1 and "IMAGES" in warnings[0][2]
+    assert calls == []  # save dialog never opened
+
+    # fill IMAGES in the table → accept proceeds to the save dialog
+    for r in range(dlg._table.rowCount()):
+        if dlg._table.item(r, 0).text() == "IMAGES":
+            dlg._table.item(r, 1).setText("5")
+            break
+    dlg._on_accept()
+    assert calls  # save dialog opened this time
+    dlg.close()

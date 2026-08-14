@@ -715,6 +715,17 @@ Save anyway?</source>
 
 仍要保存吗？</translation>
     </message>
+    <message>
+        <source>Tags without a value: {}</source>
+        <translation>未填写数值的参数：{}</translation>
+    </message>
+</context>
+<context>
+    <name>VaspInput</name>
+    <message>
+        <source>INCAR tags without a value: {} — fill them in the INCAR editor.</source>
+        <translation>INCAR 参数未填写数值：{}——请在 INCAR 编辑器中填写。</translation>
+    </message>
 </context>
 <context>
     <name>KpointsEditorDialog</name>
@@ -1082,6 +1093,22 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <message>
             <source>Fixed (selective dynamics)</source>
             <translation>固定（选择性动力学）</translation>
+        </message>
+        <message>
+            <source>MAGMOM</source>
+            <translation>MAGMOM</translation>
+        </message>
+        <message>
+            <source>MAGMOM (initial magnetic moments)</source>
+            <translation>MAGMOM（初始磁矩）</translation>
+        </message>
+        <message>
+            <source>Set initial magnetic moments per atom (VASP MAGMOM); unset atoms are written as 0.0</source>
+            <translation>设置每原子初始磁矩（VASP MAGMOM）；未设置的原子写为 0.0</translation>
+        </message>
+        <message>
+            <source>Initial magnetic moment in μB (e.g. 5 or -5)</source>
+            <translation>初始磁矩（μB，如 5 或 -5）</translation>
         </message>
 </context>
 <context>

@@ -31,6 +31,7 @@ from vaspen.core.vasp_input import (
     INCAR_SUGGESTIONS,
     INCAR_TAG_DESCRIPTIONS,
     format_incar_content,
+    magmom_line,
     parse_incar_content,
 )
 from vaspen.ui.menu_button import MenuButton
@@ -154,6 +155,12 @@ class IncarEditorDialog(QDialog):
         preset.pop("_description", None)  # remove metadata key
 
         self._tags = {k: str(v) for k, v in preset.items()}
+        # GUI-set initial moments are injected into every preset load
+        # (the user can still hand-edit the rows / preview afterwards).
+        if (self._structure_model is not None
+                and self._structure_model.any_magmom):
+            self._tags["MAGMOM"] = magmom_line(self._structure_model.magmoms)
+            self._tags["ISPIN"] = "2"
         self._custom_tags = set()
         self._refresh_table()
 
@@ -395,6 +402,14 @@ class IncarEditorDialog(QDialog):
                 self.tr("Duplicate Tag"),
                 self.tr("Duplicate INCAR tags: {}. Remove or rename the extra rows.")
                 .format(", ".join(duplicates)),
+            )
+            return
+        empty_tags = [tag for tag, val in _tags.items() if not val.strip()]
+        if empty_tags:
+            QMessageBox.warning(
+                self,
+                self.tr("Invalid INCAR Lines"),
+                self.tr("Tags without a value: {}").format(", ".join(empty_tags)),
             )
             return
         malformed = [

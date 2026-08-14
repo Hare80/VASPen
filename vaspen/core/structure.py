@@ -105,6 +105,7 @@ class _Snapshot:
     atom_ids: list[int]
     next_id: int
     fixed: np.ndarray
+    magmoms: np.ndarray
     selected_indices: frozenset[int]
     selected_bonds: frozenset[int]
 
@@ -164,6 +165,11 @@ class StructureModel(QObject):
         # supercell building and CIF writing).
         self._fixed: np.ndarray = np.zeros((len(self._atoms), 3), dtype=bool)
         self._adopt_fixed_flags()
+        # Per-atom initial magnetic moments (N,) float for the VASP
+        # MAGMOM tag (collinear, one value per atom); NaN = unset —
+        # unset atoms are written as 0.0 when the tag is generated
+        # (settled 2026-08-14).
+        self._magmoms: np.ndarray = np.full(len(self._atoms), np.nan)
 
     # ------------------------------------------------------------------
     # Properties
@@ -217,6 +223,7 @@ class StructureModel(QObject):
         atoms = ase_read(str(path))
         self._atoms = atoms
         self._adopt_fixed_flags()
+        self._magmoms = np.full(len(atoms), np.nan)  # MAGMOM is not in structure files
         self._occupancy = extract_occupancy(atoms)
         self._filepath = str(path)
         self._dirty = False
@@ -234,6 +241,7 @@ class StructureModel(QObject):
         """
         self._atoms = atoms
         self._adopt_fixed_flags()
+        self._magmoms = np.full(len(atoms), np.nan)  # MAGMOM is not in structure files
         self._occupancy = extract_occupancy(atoms)
         if filepath is not None:
             self._filepath = str(Path(filepath))
@@ -489,6 +497,75 @@ class StructureModel(QObject):
         self._dirty = True
         self.structure_modified.emit()
 
+    # ------------------------------------------------------------------
+    # Initial magnetic moments (VASP MAGMOM, collinear)
+    # ------------------------------------------------------------------
+
+    @property
+    def magmoms(self) -> np.ndarray:
+        """Per-atom initial magnetic moments (N, float, copy).
+
+        NaN = unset; when the MAGMOM tag is generated, unset atoms are
+        written as 0.0 (settled 2026-08-14).
+        """
+        return self._magmoms.copy()
+
+    @property
+    def any_magmom(self) -> bool:
+        """True when at least one atom has an initial moment set."""
+        return bool(np.isfinite(self._magmoms).any())
+
+    def magmom(self, index: int) -> float | None:
+        """Initial moment of one atom; None when unset or out of range."""
+        if not 0 <= index < len(self._magmoms):
+            return None
+        value = self._magmoms[index]
+        return None if np.isnan(value) else float(value)
+
+    def set_magmom(
+        self,
+        indices: int | Iterable[int],
+        value: float | None | np.ndarray,
+    ) -> None:
+        """Set initial magnetic moments for atoms — one undo step.
+
+        No-op when the values do not actually change (no undo entry, no
+        signal).
+
+        Args:
+            indices: Atom index or iterable of atom indices.
+            value: A scalar applied to every target atom, None (unset
+                the atoms — stored as NaN), or a (K,) array with one
+                value per target atom.
+
+        Raises:
+            ValueError: For out-of-range indices or an array value whose
+                length does not match the indices.
+        """
+        idx = [indices] if isinstance(indices, int) else list(indices)
+        if not idx:
+            return
+        if not all(0 <= i < len(self._atoms) for i in idx):
+            raise ValueError("Atom index out of bounds.")
+        if value is None:
+            rows = np.full(len(idx), np.nan)
+        elif isinstance(value, np.ndarray) or isinstance(value, (list, tuple)):
+            arr = np.asarray(value, dtype=float)
+            if arr.shape != (len(idx),):
+                raise ValueError(
+                    f"MAGMOM values must be a scalar or a ({len(idx)},) "
+                    f"array, got {arr.shape}."
+                )
+            rows = arr
+        else:
+            rows = np.full(len(idx), float(value))
+        if np.array_equal(self._magmoms[idx], rows, equal_nan=True):
+            return  # no actual change: no undo entry, no signal
+        self._push_undo()
+        self._magmoms[idx] = rows
+        self._dirty = True
+        self.structure_modified.emit()
+
     def _ensure_movable(self, indices: Iterable[int] | None = None) -> None:
         """Raise if any target atom is fixed (movement guard).
 
@@ -623,18 +700,21 @@ class StructureModel(QObject):
         self,
         new_atoms: Atoms,
         fixed_flags: np.ndarray | None = None,
+        magmoms: np.ndarray | None = None,
     ) -> None:
         """Replace the entire structure with a new Atoms object.
 
         Bonds reset to auto-connectivity (indices of the derived
-        structure are unrelated to the previous ones). Fixed flags are
-        cleared by default (derived structures get fresh, free atoms —
-        surface, symmetrize); pass ``fixed_flags`` with shape (N,3) to
-        carry them over (element replacement, supercell tiling). Any
-        constraints on the incoming atoms are stripped.
+        structure are unrelated to the previous ones). Fixed flags and
+        magnetic moments are cleared by default (derived structures get
+        fresh atoms — surface, symmetrize); pass ``fixed_flags`` with
+        shape (N,3) / ``magmoms`` with shape (N,) to carry them over
+        (element replacement, supercell tiling). Any constraints on the
+        incoming atoms are stripped.
 
         Raises:
-            ValueError: If ``fixed_flags`` does not have shape (N, 3).
+            ValueError: If ``fixed_flags`` does not have shape (N, 3) or
+                ``magmoms`` does not have shape (N,).
         """
         flags: np.ndarray | None = None
         if fixed_flags is not None:
@@ -644,6 +724,14 @@ class StructureModel(QObject):
                     f"fixed_flags must have shape ({len(new_atoms)}, 3), "
                     f"got {flags.shape}."
                 )
+        moments: np.ndarray | None = None
+        if magmoms is not None:
+            moments = np.asarray(magmoms, dtype=float)
+            if moments.shape != (len(new_atoms),):
+                raise ValueError(
+                    f"magmoms must have shape ({len(new_atoms)},), "
+                    f"got {moments.shape}."
+                )
         self._push_undo()
         self._atoms = new_atoms
         if self._atoms.constraints:
@@ -651,6 +739,9 @@ class StructureModel(QObject):
         self._fixed = (flags.copy()
                        if flags is not None
                        else np.zeros((len(new_atoms), 3), dtype=bool))
+        self._magmoms = (moments.copy()
+                         if moments is not None
+                         else np.full(len(new_atoms), np.nan))
         self._clear_occupancy()
         self._dirty = True
         self._selected_indices = set()
@@ -713,6 +804,7 @@ class StructureModel(QObject):
             list(self._atom_ids),
             self._next_id,
             self._fixed.copy(),
+            self._magmoms.copy(),
             frozenset(self._selected_indices),
             frozenset(self._selected_bonds),
         )
@@ -767,6 +859,7 @@ class StructureModel(QObject):
         self._next_id = snapshot.next_id
         # Copy so snapshots never share the mutable array with the model.
         self._fixed = snapshot.fixed.copy()
+        self._magmoms = snapshot.magmoms.copy()
         self._dirty = True
         self._selected_indices = {
             i for i in snapshot.selected_indices if 0 <= i < len(self._atoms)
@@ -915,7 +1008,8 @@ class StructureModel(QObject):
     def extend_atoms(self, other: Atoms | StructureModel) -> None:
         """Append atoms from another Atoms or StructureModel.
 
-        New atoms are appended free (all fixed flags False).
+        New atoms are appended free (all fixed flags False) with unset
+        magnetic moments (NaN).
         """
         if isinstance(other, StructureModel):
             other = other._atoms
@@ -923,6 +1017,8 @@ class StructureModel(QObject):
         self._atoms.extend(other)
         self._fixed = np.vstack(
             [self._fixed, np.zeros((len(other), 3), dtype=bool)])
+        self._magmoms = np.concatenate(
+            [self._magmoms, np.full(len(other), np.nan)])
         self._clear_occupancy()
         self._atom_ids.extend(range(self._next_id, self._next_id + len(other)))
         self._next_id += len(other)
@@ -1020,6 +1116,7 @@ class StructureModel(QObject):
             del self._atoms[d]
             del self._atom_ids[d]
         self._fixed = np.delete(self._fixed, deleted, axis=0)
+        self._magmoms = np.delete(self._magmoms, deleted)
         self._clear_occupancy()
 
         self._dirty = True

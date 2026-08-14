@@ -354,7 +354,10 @@ def test_incar_no_duplicate_tags():
         "OFe2", positions=np.eye(3) * 1.5, cell=[3, 3, 3], pbc=True,
     ))
     for preset in INCAR_PRESETS:
-        content = generate_all_inputs(model, incar_preset=preset)["INCAR"]
+        overrides = {"IMAGES": 5} if preset == "neb" else None
+        content = generate_all_inputs(
+            model, incar_preset=preset, incar_overrides=overrides
+        )["INCAR"]
         tags = _active_tags(content)
         assert len(tags) == len(set(tags)), f"{preset}: {tags}"
     # overrides replace an existing tag instead of duplicating it
@@ -520,3 +523,95 @@ def test_parse_empty_value():
     tags, problems = parse_incar_content("MAGMOM =\n")
     assert problems == []
     assert tags["MAGMOM"] == ""
+
+
+# ----------------------------------------------------------------------
+# MAGMOM — GUI-set moments → INCAR generation
+# ----------------------------------------------------------------------
+
+def _fe2o3_model():
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "Fe2O3",
+        positions=np.eye(5, 3) * 1.5,
+        cell=[5, 5, 5],
+        pbc=True,
+    ))
+    return model
+
+
+def test_generate_all_with_magmoms_writes_ordered_line():
+    model = _fe2o3_model()
+    model.set_magmom([0, 1], np.array([5.0, -5.0]))  # AFM Fe pair; O unset
+
+    files = generate_all_inputs(model)
+
+    incar = files["INCAR"]
+    tags, problems = parse_incar_content(incar)
+    assert problems == []
+    assert tags["MAGMOM"].split() == ["5", "-5", "0", "0", "0"]  # atom order
+    assert re.search(r"^\s*ISPIN\s*=\s*2\b", incar, re.M)
+    # the commented suggestion disappears once MAGMOM is active
+    assert not any(
+        l.startswith("  # MAGMOM") for l in incar.splitlines()
+    )
+
+
+def test_generate_all_without_magmoms_plain():
+    files = generate_all_inputs(_fe2o3_model())
+    assert not re.search(r"^\s*MAGMOM\s*=", files["INCAR"], re.M)
+    assert re.search(r"^\s*ISPIN\s*=\s*1\b", files["INCAR"], re.M)
+    assert any(
+        l.startswith("  # MAGMOM") for l in files["INCAR"].splitlines()
+    )
+
+
+def test_generate_all_magmom_overrides_win():
+    model = _fe2o3_model()
+    model.set_magmom(0, 5.0)
+    files = generate_all_inputs(
+        model, incar_overrides={"MAGMOM": "1 1 1 1 1", "ISPIN": 1}
+    )
+    assert re.search(r"^\s*MAGMOM\s*=\s*1 1 1 1 1", files["INCAR"], re.M)
+    assert re.search(r"^\s*ISPIN\s*=\s*1\b", files["INCAR"], re.M)
+    tags = [l for l in files["INCAR"].splitlines() if "MAGMOM" in l]
+    assert len(tags) == 1  # never duplicated
+
+
+def test_magmom_line_formats():
+    from vaspen.core.vasp_input import magmom_line
+
+    assert magmom_line(np.array([5.0, -5.0, np.nan, 0.0, 2.5])) == "5 -5 0 0 2.5"
+
+
+# ----------------------------------------------------------------------
+# NEB preset — VTST-complete (IOPT/ICHAIN) with required IMAGES
+# ----------------------------------------------------------------------
+
+def test_neb_preset_vtst_complete():
+    content = _preset_incar("neb")
+    for tag, value in (("IOPT", "1"), ("ICHAIN", "0"), ("IBRION", "3"),
+                       ("POTIM", "0"), ("EDIFFG", "-0.02"),
+                       ("LCLIMB", ".TRUE."), ("SPRING", "-5")):
+        assert re.search(rf"^\s*{tag}\s*=\s*{re.escape(value)}(?:\s|$)",
+                         content, re.M), tag
+    # IMAGES intentionally blank — the user must fill it in
+    tags, _problems = parse_incar_content(content)
+    assert tags["IMAGES"] == ""
+    # NEB-specific suggestion; absent from other presets
+    assert any(l.startswith("  # LNEBCELL") for l in content.splitlines())
+    assert not any(l.startswith("  # LNEBCELL")
+                   for l in _preset_incar("scf").splitlines())
+
+
+def test_generate_all_neb_without_images_raises():
+    model = _fe2o3_model()
+    with pytest.raises(ValueError, match="IMAGES"):
+        generate_all_inputs(model, incar_preset="neb")
+    # filling IMAGES (overrides win) generates normally
+    files = generate_all_inputs(model, incar_preset="neb",
+                                incar_overrides={"IMAGES": 5})
+    tags, problems = parse_incar_content(files["INCAR"])
+    assert problems == []
+    assert tags["IMAGES"] == "5"
+    assert tags["IOPT"] == "1" and tags["ICHAIN"] == "0"

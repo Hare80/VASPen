@@ -909,7 +909,7 @@ def test_properties_panel_edits_selection(window, monkeypatch):
 
     window._structure.select_atom(0)
     assert panel._element_edit.text() == "O"
-    assert panel._id_label.text() == "0"
+    assert panel._id_label.text() == "1"  # 1-based display (tree-consistent)
 
     panel._element_edit.setText("Fe")
     panel._on_element_edited()

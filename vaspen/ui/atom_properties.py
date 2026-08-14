@@ -120,6 +120,29 @@ class AtomPropertiesPanel(QWidget):
         dir_layout.addStretch()
         layout.addRow("", dir_row)
 
+        # Initial magnetic moments — VASP MAGMOM (collinear, one value
+        # per atom). Checking prefills 1.0 (VASP's default when the tag
+        # is absent); unchecking unsets. Works for multi-selections
+        # (mixed state shows as partially checked).
+        self._magmom_check = QCheckBox(self.tr("MAGMOM"))
+        self._magmom_check.toggled.connect(self._on_magmom_toggled)
+        self._magmom_caption = QLabel(self.tr("MAGMOM (initial magnetic moments)"))
+        self._magmom_caption.setToolTip(self.tr(
+            "Set initial magnetic moments per atom (VASP MAGMOM); "
+            "unset atoms are written as 0.0"))
+        layout.addRow(self._magmom_caption, self._magmom_check)
+        self._magmom_edit = QLineEdit()
+        self._magmom_edit.setToolTip(self.tr(
+            "Initial magnetic moment in μB (e.g. 5 or -5)"))
+        self._magmom_edit.editingFinished.connect(self._on_magmom_edited)
+        magmom_row = QWidget(self)
+        magmom_layout = QHBoxLayout(magmom_row)
+        magmom_layout.setContentsMargins(0, 0, 0, 0)
+        magmom_layout.setSpacing(2)
+        magmom_layout.addWidget(self._magmom_edit, 1)
+        magmom_layout.addWidget(QLabel("μB"))
+        layout.addRow("", magmom_row)
+
         # Site composition (partially-occupied structures only; hidden
         # otherwise — see refresh()).
         self._composition_label = QLabel("")
@@ -208,6 +231,13 @@ class AtomPropertiesPanel(QWidget):
         self._frac_caption.setText(self.tr("Fractional (periodic only)"))
         self._fixed_check.setText(self.tr("Fixed"))
         self._fixed_caption.setText(self.tr("Fixed (selective dynamics)"))
+        self._magmom_check.setText(self.tr("MAGMOM"))
+        self._magmom_caption.setText(self.tr("MAGMOM (initial magnetic moments)"))
+        self._magmom_caption.setToolTip(self.tr(
+            "Set initial magnetic moments per atom (VASP MAGMOM); "
+            "unset atoms are written as 0.0"))
+        self._magmom_edit.setToolTip(self.tr(
+            "Initial magnetic moment in μB (e.g. 5 or -5)"))
         self._composition_caption.setText(self.tr("Composition"))
         self._charge_caption.setText(self.tr("Charge:"))
         self._force_caption.setText(self.tr("Force:"))
@@ -230,7 +260,10 @@ class AtomPropertiesPanel(QWidget):
             else:
                 index = next(iter(sel))
                 symbol = model.symbols[index]
-                self._status_label.setText(self.tr("Atom {} ({})").format(index, symbol))
+                # 1-based display to match the structure tree's Index
+                # column (internal indices stay 0-based — see model).
+                self._status_label.setText(
+                    self.tr("Atom {} ({})").format(index + 1, symbol))
 
             for w in (self._element_edit, self._element_pick_btn, self._id_label,
                       self._x_edit, self._y_edit, self._z_edit,
@@ -239,6 +272,23 @@ class AtomPropertiesPanel(QWidget):
                       self._fz_fixed,
                       self._charge_label, self._force_label, self._velocity_label):
                 w.setEnabled(single)
+            # MAGMOM works for multi-selections too (batch assignment)
+            for w in (self._magmom_check, self._magmom_edit):
+                w.setEnabled(bool(sel))
+
+            # MAGMOM state: checked = all selected set, unchecked = none,
+            # partially checked = mixed. The value box shows the common
+            # value (empty when mixed or differing).
+            magmoms = [model.magmom(i) for i in sel]
+            set_all = bool(magmoms) and all(m is not None for m in magmoms)
+            # Mixed selections show as unchecked; checking then fills
+            # only the unset atoms (set values survive).
+            self._magmom_check.setChecked(bool(sel) and set_all)
+            values = {m for m in magmoms if m is not None}
+            if set_all and len(values) == 1:
+                self._magmom_edit.setText(f"{next(iter(values)):g}")
+            else:
+                self._magmom_edit.setText("")
 
             self._charge_label.setText("")
             self._force_label.setText("")
@@ -265,7 +315,9 @@ class AtomPropertiesPanel(QWidget):
             if single:
                 index = next(iter(sel))
                 self._element_edit.setText(model.symbols[index])
-                self._id_label.setText(str(model.atom_id(index)))
+                # 1-based display (stable ID + 1); the 0-based ID itself
+                # is internal (measurements reference it).
+                self._id_label.setText(str(model.atom_id(index) + 1))
                 pos = model.positions[index]
                 self._x_edit.setText(f"{pos[0]:.6f}")
                 self._y_edit.setText(f"{pos[1]:.6f}")
@@ -365,6 +417,44 @@ class AtomPropertiesPanel(QWidget):
         mask[axis] = bool(checked)
         try:
             self._model.set_fixed(index, mask)
+        except ValueError:
+            self._revert_edits()
+
+    def _on_magmom_toggled(self, checked: bool) -> None:
+        if self._refreshing or self._model is None:
+            return
+        sel = self._model.selected_indices
+        if not sel:
+            return
+        try:
+            if checked:
+                # Prefill 1.0 only for currently unset atoms — values of
+                # already-set atoms (mixed selection) survive.
+                values = [
+                    self._model.magmom(i) if self._model.magmom(i) is not None
+                    else 1.0 for i in sel
+                ]
+                self._model.set_magmom(list(sel), values)
+                self._magmom_edit.setFocus()
+                self._magmom_edit.selectAll()  # typing replaces the prefill
+            else:
+                self._model.set_magmom(list(sel), None)
+        except ValueError:
+            self._revert_edits()
+
+    def _on_magmom_edited(self) -> None:
+        if self._refreshing or self._model is None:
+            return
+        sel = self._model.selected_indices
+        if not sel:
+            return
+        try:
+            value = float(self._magmom_edit.text().strip())
+        except ValueError:
+            self._revert_edits()
+            return
+        try:
+            self._model.set_magmom(list(sel), value)
         except ValueError:
             self._revert_edits()
 
