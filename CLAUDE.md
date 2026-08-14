@@ -562,6 +562,18 @@ a ∥ x, b in the xy-plane — the VESTA-style presentation; spglib's own
 basis reads as a skewed box). Pure rotation — atom distances unchanged.
 See examples/Cu_bulk_primitive.vasp (fcc primitive, a=3.61/√2, 60°).
 
+**Re-cutting a slab input (settled 2026-08-15, user request):** pymatgen
+SlabGenerator assumes a dense bulk (per its manual); a vacuum-carrying
+input makes its termination shifts wrap layers across the periodic
+boundary (detached layers). `slabs()` detects such inputs
+(`_is_vacuum_carrying`: largest fractional-c gap > 3× the smallest —
+conservative; layered bulks like graphite are not flagged) and re-boxes
+them in place instead: `_rebox_slab` unwraps the layers (±c
+translations), re-applies the vacuum along c with the slab centered,
+in-plane cell untouched; a single `SlabInfo(reboxed=True)` is returned
+and the Miller index/layers are ignored (the dialog status shows the
+re-box note).
+
 ---
 
 ## 8. Default-Value Reference (community standards)

@@ -1238,3 +1238,27 @@ def test_symmetry_dialog_primitive_cell_selection(qtbot, si_bulk):
     dlg._cell_type_combo.setCurrentIndex(0)
     dlg._on_symmetrize()
     assert len(dlg.result_atoms) == 8  # conventional diamond cell
+
+
+def test_surface_dialog_slab_input_shows_rebox_note(qtbot):
+    """A vacuum-carrying input is re-boxed: one termination, the status
+    label explains the re-box."""
+    from pathlib import Path
+
+    from ase.io import read
+
+    slab_in = read(Path(__file__).parent.parent / "examples"
+                   / "Cu_111_slab.vasp")
+    model = StructureModel()
+    model.load_atoms(slab_in)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    _wait_slabs(qtbot, dlg, view, 1)
+    assert dlg._termination_combo.count() == 1
+    assert "re-boxed" in dlg._status_label.text()
+    # the previewed slab is contiguous — nothing detached
+    z = np.sort(view.rendered[-1][0].positions[:, 2])
+    levels = np.unique(np.round(z, 3))
+    assert len(levels) == 4

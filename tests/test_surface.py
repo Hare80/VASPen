@@ -20,6 +20,7 @@ from ase.build import bulk
 from vaspen.core.surface import (
     SlabInfo,
     SurfaceCutter,
+    _is_vacuum_carrying,
     _subscript_formula,
     _surface_compositions,
     supercell_in_plane,
@@ -240,3 +241,69 @@ def test_slab_vacuum_exact_and_centered():
     cell = np.asarray(slab.atoms.get_cell().array)
     assert (z.max() - z.min()) + 15.0 == pytest.approx(cell[2, 2], abs=1e-6)
     assert (z.min() + z.max()) / 2 == pytest.approx(cell[2, 2] / 2, abs=1e-6)
+
+
+# ----------------------------------------------------------------------
+# Vacuum-carrying input → re-box instead of re-cut (2026-08-15, user)
+# ----------------------------------------------------------------------
+
+def _cu111_slab() -> Atoms:
+    """36-atom 4-layer Cu(111) slab with vacuum (examples/Cu_111_slab.vasp)."""
+    from ase.io import read
+
+    from pathlib import Path
+    return read(Path(__file__).parent.parent / "examples" / "Cu_111_slab.vasp")
+
+
+def test_vacuum_detection():
+    """Only vacuum-carrying cells are flagged — dense bulks (including
+    layered ones) are not; the threshold is deliberately conservative."""
+    from ase.build import bulk, fcc111
+
+    assert _is_vacuum_carrying(_cu111_slab())
+    assert not _is_vacuum_carrying(bulk("Cu", "fcc", a=3.61))
+    # graphite: layered bulk with a 2× gap ratio — must NOT be flagged
+    assert not _is_vacuum_carrying(
+        Atoms("C4", cell=[2.46, 2.46, 6.7], pbc=True,
+              positions=[[0, 0, 0], [1.23, 0.71, 0], [0, 0.82, 3.35],
+                         [1.23, 1.53, 3.35]]))
+    # very thin vacuum (3 Å < 3× layer spacing) is below the threshold
+    assert not _is_vacuum_carrying(
+        fcc111("Cu", size=(1, 1, 2), a=3.61, vacuum=3.0))
+
+
+def test_slab_input_recut_reboxes():
+    """Re-cutting a vacuum-carrying slab must NOT re-slab it: one
+    termination, the same contiguous 4 layers, exact vacuum, centered."""
+    slabs = SurfaceCutter(StructureModel(_cu111_slab())).slabs(
+        (0, 0, 1), 1, 15.0)
+    assert len(slabs) == 1
+    assert slabs[0].reboxed
+    out = slabs[0].atoms
+    assert len(out) == 36
+    z = np.sort(out.positions[:, 2])
+    levels = np.unique(np.round(z, 3))
+    assert len(levels) == 4  # contiguous 4-layer slab, nothing detached
+    gaps = np.diff(levels)
+    assert np.allclose(gaps, gaps[0], atol=1e-3)  # uniform layer spacing
+    cell = np.asarray(out.get_cell().array)
+    assert (z.max() - z.min()) + 15.0 == pytest.approx(cell[2, 2], abs=1e-6)
+    assert (z.min() + z.max()) / 2 == pytest.approx(cell[2, 2] / 2, abs=1e-6)
+    # in-plane cell untouched by the re-box
+    assert np.allclose(cell[:2], np.asarray(_cu111_slab().get_cell().array)[:2],
+                       atol=1e-6)
+
+
+def test_slab_input_rebox_preserves_atom_set():
+    """Re-boxing only translates atoms along c — the structure (minimum-
+    image distance multiset, invariant to lattice translations and rigid
+    shifts) is identical to the input."""
+    from ase.geometry import get_distances
+
+    inp = _cu111_slab()
+    out = SurfaceCutter(StructureModel(inp)).slabs((0, 0, 1), 1, 15.0)[0].atoms
+    cell = np.asarray(inp.get_cell().array)
+    pbc = inp.get_pbc()
+    _v, din = get_distances(inp.positions, inp.positions, cell=cell, pbc=pbc)
+    _v, dout = get_distances(out.positions, out.positions, cell=cell, pbc=pbc)
+    assert np.allclose(np.sort(din.ravel()), np.sort(dout.ravel()), atol=1e-4)

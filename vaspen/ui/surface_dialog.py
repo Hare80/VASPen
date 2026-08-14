@@ -380,9 +380,11 @@ class SurfaceDialog(QDialog):
                 top=_subscript_formula(info.top_composition),
                 bottom=_subscript_formula(info.bottom_composition),
             ))
+        note = (self.tr("  (re-boxed — input already carried vacuum)")
+                if info.reboxed else "")
         self._status_label.setText(
             self.tr("{n} atoms · {v} Å vacuum").format(
-                n=len(atoms), v=f"{self._vacuum_spin.value():.1f}"))
+                n=len(atoms), v=f"{self._vacuum_spin.value():.1f}") + note)
 
     def _set_hint(self, state: str | None, detail: str = "") -> None:
         """Show/clear the error hint; state is remembered for retranslate."""
