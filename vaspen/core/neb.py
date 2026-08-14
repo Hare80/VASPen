@@ -26,6 +26,7 @@ from collections import Counter
 
 import numpy as np
 from ase import Atoms
+from ase.constraints import FixAtoms, FixScaled
 from PySide6.QtCore import QCoreApplication
 
 
@@ -177,6 +178,64 @@ def detect_order_mismatch(init: Atoms, final: Atoms) -> float | None:
     return None
 
 
+def constraints_to_fixed_flags(atoms: Atoms) -> np.ndarray:
+    """(N, 3) fixed-flag mask from the ASE constraints of a structure.
+
+    FixAtoms marks all three directions fixed; FixScaled marks only its
+    listed directions. Used to carry selective dynamics read from a
+    POSCAR into the NEB flow.
+    """
+    flags = np.zeros((len(atoms), 3), dtype=bool)
+    for constraint in atoms.constraints:
+        if isinstance(constraint, FixAtoms):
+            flags[np.atleast_1d(constraint.index), :] = True
+        elif isinstance(constraint, FixScaled):
+            mask = np.asarray(constraint.mask, dtype=bool)
+            if mask.ndim == 1:
+                mask = mask[None, :]
+            flags[np.atleast_1d(constraint.index), :] |= mask
+    return flags
+
+
+def _normalize_frozen_mask(n_atoms: int, frozen_mask) -> np.ndarray:
+    """Per-atom bool mask (or all-False when None), shape-checked."""
+    if frozen_mask is None:
+        return np.zeros(n_atoms, dtype=bool)
+    mask = np.asarray(frozen_mask, dtype=bool)
+    if mask.shape != (n_atoms,):
+        raise ValueError(
+            _tr("Frozen-atom mask must have one entry per atom "
+                "({} atoms, got shape {}).").format(n_atoms, mask.shape))
+    return mask
+
+
+def _check_frozen_consistent(
+    init: Atoms,
+    final: Atoms,
+    frozen_mask: np.ndarray,
+    tolerance: float = 1e-4,
+) -> None:
+    """Block interpolation when a frozen atom moves between the ends.
+
+    An atom frozen in every image cannot move during the real NEB run
+    either — if the final structure puts it somewhere else, the pair is
+    contradictory (settled 2026-08-14: block, list the atoms).
+    """
+    if not frozen_mask.any():
+        return
+    moved = np.linalg.norm(
+        final.positions[frozen_mask] - init.positions[frozen_mask],
+        axis=1,
+    ) > tolerance
+    bad = np.flatnonzero(frozen_mask)[moved]
+    if len(bad):
+        raise ValueError(
+            _tr("Frozen atoms have different positions in the initial "
+                "and final structures: {} (1-based). Unfreeze them or "
+                "align the two ends.")
+            .format(", ".join(str(i + 1) for i in bad)))
+
+
 def suggest_n_images(
     distance: float,
     spacing: float = DEFAULT_IMAGE_SPACING,
@@ -197,12 +256,26 @@ def _frame_copy(atoms: Atoms) -> Atoms:
     return out
 
 
+def _attach_frozen(frames: list[Atoms], frozen_mask: np.ndarray) -> None:
+    """Attach FixAtoms for the frozen atoms to every frame.
+
+    The IDPP relaxation honours these constraints; the writer emits the
+    corresponding "Selective dynamics" rows.
+    """
+    frozen_idx = np.flatnonzero(frozen_mask)
+    if len(frozen_idx) == 0:
+        return
+    for frame in frames:
+        frame.constraints = [FixAtoms(indices=frozen_idx.tolist())]
+
+
 def interpolate_idpp(
     init: Atoms,
     final: Atoms,
     n_images: int,
     fmax: float = 0.1,
     steps: int = 100,
+    frozen_mask=None,
 ) -> list[Atoms]:
     """Interpolate a NEB path with the IDPP method (image-dependent
     pair potential).
@@ -217,26 +290,35 @@ def interpolate_idpp(
     no electronic-structure calculator is involved. The endpoints are
     not moved (their target distances equal their own geometry).
 
+    Frozen atoms (``frozen_mask`` True) stay at their initial position
+    in every frame (FixAtoms honoured by the relaxation, plus a
+    deterministic snap-back after it).
+
     Args:
         init: Initial structure (periodic).
         final: Final structure (periodic, same cell and composition).
         n_images: Number of intermediate images (1..98).
         fmax: Force convergence for the IDPP relaxation.
         steps: Maximum relaxation steps.
+        frozen_mask: Optional per-atom bool array; True = atom stays at
+            its initial position in every frame.
 
     Returns:
         List of ``n_images + 2`` Atoms frames (endpoints included).
 
     Raises:
-        ValueError: Pair mismatch, or n_images out of range.
+        ValueError: Pair mismatch, n_images out of range, or a frozen
+            atom has different positions in init and final.
     """
     _validate_neb_pair(init, final)
     if not (1 <= n_images <= MAX_IMAGES):
         raise ValueError(
             _tr("Number of images must be between 1 and {} (got {}).")
             .format(MAX_IMAGES, n_images))
+    frozen_mask = _normalize_frozen_mask(len(init), frozen_mask)
+    _check_frozen_consistent(init, final, frozen_mask)
 
-    frames = interpolate_neb(init, final, n_images)
+    frames = interpolate_neb(init, final, n_images, frozen_mask=frozen_mask)
 
     from ase.mep import idpp_interpolate as _ase_idpp
 
@@ -251,7 +333,8 @@ def interpolate_idpp(
 
     # Endpoints are restored to exact copies (the optimizer should
     # leave them untouched, but zero force is only approximate), and
-    # intermediate frames are wrapped back into the cell.
+    # intermediate frames are wrapped back into the cell. Frozen atoms
+    # are snapped back to their initial positions as a guarantee.
     frames[0] = _frame_copy(init)
     frames[-1] = _frame_copy(final)
     for k in range(1, n_images + 1):
@@ -262,10 +345,19 @@ def interpolate_idpp(
         frames[k].set_scaled_positions(frac)
         frames[k].constraints = []
         frames[k].info = {}
+    _attach_frozen(frames, frozen_mask)
+    if frozen_mask.any():
+        for frame in frames:
+            frame.positions[frozen_mask] = init.positions[frozen_mask]
     return frames
 
 
-def interpolate_neb(init: Atoms, final: Atoms, n_images: int) -> list[Atoms]:
+def interpolate_neb(
+    init: Atoms,
+    final: Atoms,
+    n_images: int,
+    frozen_mask=None,
+) -> list[Atoms]:
     """Linearly interpolate a NEB path between two structures.
 
     The path has ``n_images`` intermediate images plus both endpoints
@@ -276,27 +368,37 @@ def interpolate_neb(init: Atoms, final: Atoms, n_images: int) -> list[Atoms]:
     wrapped back into the cell. The lattice of every frame equals the
     initial lattice. Strict file order is used for atom pairing.
 
+    Frozen atoms (``frozen_mask`` True) keep their initial position in
+    every frame and are attached as FixAtoms constraints, so the IDPP
+    relaxation and the VASP run both keep them in place.
+
     Args:
         init: Initial structure (periodic).
         final: Final structure (periodic, same cell and composition).
         n_images: Number of intermediate images (1..98).
+        frozen_mask: Optional per-atom bool array; True = atom stays at
+            its initial position in every frame.
 
     Returns:
         List of ``n_images + 2`` Atoms frames: the initial structure,
         the intermediates in order, then the final structure.
 
     Raises:
-        ValueError: Pair mismatch, or n_images out of range.
+        ValueError: Pair mismatch, n_images out of range, or a frozen
+            atom has different positions in init and final.
     """
     _validate_neb_pair(init, final)
     if not (1 <= n_images <= MAX_IMAGES):
         raise ValueError(
             _tr("Number of images must be between 1 and {} (got {}).")
             .format(MAX_IMAGES, n_images))
+    frozen_mask = _normalize_frozen_mask(len(init), frozen_mask)
+    _check_frozen_consistent(init, final, frozen_mask)
 
     frac_i = init.get_scaled_positions(wrap=False)
     frac_f = final.get_scaled_positions(wrap=False)
     delta = pbc_wrap(frac_f - frac_i)
+    delta[frozen_mask] = 0.0  # frozen atoms never move
 
     frames: list[Atoms] = [_frame_copy(init)]
     for k in range(1, n_images + 1):
@@ -311,4 +413,5 @@ def interpolate_neb(init: Atoms, final: Atoms, n_images: int) -> list[Atoms]:
         frame.set_scaled_positions(frac)
         frames.append(frame)
     frames.append(_frame_copy(final))
+    _attach_frozen(frames, frozen_mask)
     return frames

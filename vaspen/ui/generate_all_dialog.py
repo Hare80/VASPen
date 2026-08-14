@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.file_io import FileIO
 from vaspen.core.neb import (
+    constraints_to_fixed_flags,
     detect_order_mismatch,
     interpolate_idpp,
     interpolate_neb,
@@ -89,11 +90,16 @@ class PoscarPanel(QWidget):
         self._init_atoms: Atoms | None = None
         self._final_atoms: Atoms | None = None
         self._images: list[Atoms] = []
+        # Per-atom per-direction fixed flags of the INITIAL structure:
+        # fully-fixed atoms stay put during interpolation; all flags
+        # are written into every image's Selective dynamics block.
+        self._ini_fixed_flags = np.zeros((0, 3), dtype=bool)
 
         if structure_model is not None and structure_model.n_atoms:
             self._init_atoms = structure_model.atoms.copy()
-            self._init_atoms.constraints = []
             self._init_atoms.info = {}
+            self._ini_fixed_flags = np.asarray(
+                structure_model.fixed_flags, dtype=bool).copy()
 
         self._build_ui()
         self._refresh_poscar_preview()
@@ -267,6 +273,7 @@ class PoscarPanel(QWidget):
         if atoms is None:
             return
         self._init_atoms = atoms
+        self._ini_fixed_flags = constraints_to_fixed_flags(atoms)
         self._ini_edit.setText(filepath)
         self._config.last_directory = str(Path(filepath).parent)
         self._clear_images()
@@ -323,10 +330,14 @@ class PoscarPanel(QWidget):
             return
         suggested = suggest_n_images(distance)
         self._images_spin.setValue(min(max(suggested, 1), 98))
-        self._info_label.setText(
-            self.tr("Path distance: {:.4f} Å\n"
-                    "Suggested images: {} (≈ 0.8 Å per image)")
-            .format(distance, suggested))
+        text = self.tr("Path distance: {:.4f} Å\n"
+                       "Suggested images: {} (≈ 0.8 Å per image)")
+        text = text.format(distance, suggested)
+        n_frozen = int(self._ini_fixed_flags.all(axis=1).sum())
+        if n_frozen:
+            text += "\n" + self.tr(
+                "{} atoms frozen — kept fixed in all images").format(n_frozen)
+        self._info_label.setText(text)
         if suggested > 25:
             self._warn_label.setText(
                 self.tr("The path is long ({} images suggested). Check that "
@@ -374,10 +385,23 @@ class PoscarPanel(QWidget):
                 return
 
         n = self._images_spin.value()
-        if self._algo_combo.currentIndex() == 1:  # IDPP
-            self._images = interpolate_idpp(self._init_atoms, self._final_atoms, n)
-        else:  # Linear (default)
-            self._images = interpolate_neb(self._init_atoms, self._final_atoms, n)
+        # Fully-frozen atoms stay at their initial position in every
+        # frame; partially-frozen atoms interpolate normally (their
+        # FixScaled flags are enforced by VASP at run time).
+        frozen_mask = self._ini_fixed_flags.all(axis=1)
+        try:
+            if self._algo_combo.currentIndex() == 1:  # IDPP
+                self._images = interpolate_idpp(
+                    self._init_atoms, self._final_atoms, n,
+                    frozen_mask=frozen_mask)
+            else:  # Linear (default)
+                self._images = interpolate_neb(
+                    self._init_atoms, self._final_atoms, n,
+                    frozen_mask=frozen_mask)
+        except ValueError as e:
+            QMessageBox.warning(
+                self, self.tr("Cannot Interpolate"), str(e))
+            return
         self._images_list.clear()
         for i, _atoms in enumerate(self._images):
             if i == 0:
@@ -553,11 +577,22 @@ class GenerateAllDialog(QDialog):
     # Generate
     # ------------------------------------------------------------------
 
-    def _render_poscar_text(self, atoms: Atoms) -> str:
+    def _render_poscar_text(self, atoms: Atoms,
+                            fixed_flags: np.ndarray | None = None) -> str:
+        """Render a NEB frame as POSCAR text (with Selective dynamics)."""
         from ase.io import write as ase_write
 
+        from vaspen.core.file_io import (
+            atoms_with_fixed_constraints,
+            vasp_write_atoms,
+        )
+
+        frame = atoms.copy()
+        frame.constraints = []  # flags are the single source of truth
+        out = atoms_with_fixed_constraints(
+            vasp_write_atoms(frame, True), fixed_flags)
         buf = io.StringIO()
-        ase_write(buf, atoms, format="vasp", vasp5=True, direct=True)
+        ase_write(buf, out, format="vasp", vasp5=True, direct=True)
         return buf.getvalue()
 
     def _on_generate(self) -> None:
@@ -621,7 +656,8 @@ class GenerateAllDialog(QDialog):
                 if reply != QMessageBox.Yes:
                     return
             for i, atoms in enumerate(images):
-                files[f"{i:02d}/POSCAR"] = self._render_poscar_text(atoms)
+                files[f"{i:02d}/POSCAR"] = self._render_poscar_text(
+                    atoms, self._poscar_panel._ini_fixed_flags)
         else:
             files["POSCAR"] = generate_poscar(
                 self._structure_model, poscar_direct=self._poscar_panel.poscar_direct)

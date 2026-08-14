@@ -514,3 +514,106 @@ def test_neb_linear_algorithm_collides_ethane(qtbot, monkeypatch):
     panel._on_interpolate()  # default Linear
 
     assert min(_min_pair_distance(f) for f in panel.images) < 0.75
+
+
+# ----------------------------------------------------------------------
+# Frozen atoms in the NEB flow
+# ----------------------------------------------------------------------
+
+FROZEN = REPO / "examples" / "neb_frozen"
+
+
+def test_neb_frozen_atoms_flow_pass(qtbot, tmp_path, monkeypatch):
+    """Opening a POSCAR with selective dynamics freezes those atoms:
+    frames keep them put and the written POSCARs carry F F F rows."""
+    model = StructureModel()
+    model.load_atoms(FileIO.read(str(FROZEN / "pass" / "initial" / "POSCAR")))
+    assert model.fixed_flags.all(axis=1).sum() == 6
+
+    fin_dir = tmp_path / "final"
+    fin_dir.mkdir(parents=True, exist_ok=True)
+    fin_path = _write_poscar(
+        FileIO.read(str(FROZEN / "pass" / "final" / "POSCAR")), fin_dir / "POSCAR")
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(fin_path), ""),
+    )
+    info = _record(monkeypatch, "information")
+
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+    panel._on_browse_fin()
+
+    assert "6 atoms frozen" in panel._info_label.text()
+    panel._on_interpolate()
+
+    mask = model.fixed_flags.all(axis=1)
+    for frame in panel.images:
+        assert np.allclose(frame.positions[mask],
+                           model.atoms.positions[mask])
+    # the moving atom actually moved
+    moving = ~mask
+    assert not np.allclose(panel.images[2].positions[moving],
+                           model.atoms.positions[moving])
+
+    out = tmp_path / "out"
+    out.mkdir()
+    dlg._dir_edit.setText(str(out))
+    dlg._on_generate()
+    assert info
+
+    text = (out / "02" / "POSCAR").read_text(encoding="utf-8")
+    assert "Selective dynamics" in text
+    assert text.count("F   F   F") == 6
+
+
+def test_neb_frozen_atoms_block_flow(qtbot, tmp_path, monkeypatch):
+    """The final moving a frozen atom blocks interpolation."""
+    model = StructureModel()
+    model.load_atoms(FileIO.read(str(FROZEN / "block" / "initial" / "POSCAR")))
+    fin_dir = tmp_path / "final"
+    fin_dir.mkdir(parents=True, exist_ok=True)
+    fin_path = _write_poscar(
+        FileIO.read(str(FROZEN / "block" / "final" / "POSCAR")), fin_dir / "POSCAR")
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(fin_path), ""),
+    )
+    warnings = _record(monkeypatch, "warning")
+
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+    panel._on_browse_fin()
+    panel._on_interpolate()
+
+    assert warnings  # Cannot Interpolate box
+    assert panel.n_images == 0
+
+
+def test_neb_browsed_ini_selective_dynamics_freeze(qtbot, tmp_path, monkeypatch):
+    """Flags from a browsed initial file (not the model) also apply."""
+    model = _example_model()
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+
+    ini_dir = tmp_path / "ini"
+    ini_dir.mkdir(parents=True, exist_ok=True)
+    ini_path = _write_poscar(
+        FileIO.read(str(FROZEN / "pass" / "initial" / "POSCAR")), ini_dir / "POSCAR")
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(ini_path), ""),
+    )
+    panel._on_browse_ini()
+
+    assert panel._ini_fixed_flags.all(axis=1).sum() == 6
+    panel._final_atoms = FileIO.read(str(FROZEN / "pass" / "final" / "POSCAR"))
+    panel._update_diagnostics()
+    panel._on_interpolate()
+    mask = panel._ini_fixed_flags.all(axis=1)
+    for frame in panel.images:
+        assert np.allclose(frame.positions[mask],
+                           panel._init_atoms.positions[mask])

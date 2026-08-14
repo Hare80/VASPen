@@ -9,6 +9,7 @@ import pytest
 from ase import Atoms
 
 from vaspen.core.neb import (
+    constraints_to_fixed_flags,
     detect_order_mismatch,
     interpolate_idpp,
     interpolate_neb,
@@ -371,3 +372,80 @@ def test_ethane_example_files_regression():
     idpp = interpolate_idpp(ini, fin, 5)
     assert min(_min_pair_distance(f) for f in linear) < 0.75
     assert min(_min_pair_distance(f) for f in idpp) > 0.9
+
+
+# ----------------------------------------------------------------------
+# Frozen atoms in interpolation
+# ----------------------------------------------------------------------
+
+FROZEN = REPO / "examples" / "neb_frozen"
+
+
+def test_constraints_to_fixed_flags_conversion():
+    from ase.constraints import FixAtoms, FixScaled
+
+    atoms = Atoms("H2O", positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0]])
+    atoms.constraints = [FixAtoms(indices=[0]), FixScaled([1], [False, False, True])]
+    flags = constraints_to_fixed_flags(atoms)
+    assert flags.shape == (3, 3)
+    assert flags[0].all()
+    assert flags[1].tolist() == [False, False, True]
+    assert not flags[2].any()
+
+
+def test_interpolate_frozen_atoms_stay_put_linear():
+    from ase.constraints import FixAtoms
+
+    ini, fin = _ethane_pair()
+    mask = np.zeros(len(ini), dtype=bool)
+    mask[0] = True  # freeze the first carbon
+    frames = interpolate_neb(ini, fin, 4, frozen_mask=mask)
+    for f in frames:
+        assert np.allclose(f.positions[0], ini.positions[0])
+    # and the constraint is attached (written as Selective dynamics)
+    assert any(isinstance(c, FixAtoms) for f in frames for c in f.constraints)
+
+
+def test_interpolate_frozen_atoms_stay_put_idpp():
+    ini, fin = _ethane_pair()
+    mask = np.zeros(len(ini), dtype=bool)
+    mask[0] = True
+    frames = interpolate_idpp(ini, fin, 4, frozen_mask=mask)
+    for f in frames:
+        assert np.allclose(f.positions[0], ini.positions[0])
+
+
+def test_interpolate_frozen_contradiction_raises():
+    ini, fin = _ethane_pair()
+    mask = np.zeros(len(ini), dtype=bool)
+    mask[0] = True
+    fin.positions[0] += [1.0, 0.0, 0.0]  # frozen atom moved
+    with pytest.raises(ValueError, match="Frozen atoms"):
+        interpolate_neb(ini, fin, 3, frozen_mask=mask)
+    with pytest.raises(ValueError, match="1 \(1-based\)"):
+        interpolate_idpp(ini, fin, 3, frozen_mask=mask)
+
+
+def test_interpolate_frozen_mask_shape_check():
+    a = _cubic(Atoms("Cu2", positions=[[0.0, 0, 0], [2.5, 0, 0]]))
+    b = a.copy()
+    with pytest.raises(ValueError, match="one entry per atom"):
+        interpolate_neb(a, b, 1, frozen_mask=np.array([True]))
+
+
+def test_frozen_example_pass_block():
+    """The committed pass/block example pair."""
+    pi = FileIO.read(str(FROZEN / "pass" / "initial" / "POSCAR"))
+    pf = FileIO.read(str(FROZEN / "pass" / "final" / "POSCAR"))
+    mask = constraints_to_fixed_flags(pi).all(axis=1)
+    assert mask.sum() == 6
+    for frames in (interpolate_neb(pi, pf, 4, frozen_mask=mask),
+                   interpolate_idpp(pi, pf, 4, frozen_mask=mask)):
+        for f in frames:
+            assert np.allclose(f.positions[mask], pi.positions[mask])
+
+    bi = FileIO.read(str(FROZEN / "block" / "initial" / "POSCAR"))
+    bf = FileIO.read(str(FROZEN / "block" / "final" / "POSCAR"))
+    with pytest.raises(ValueError, match="Frozen atoms"):
+        interpolate_neb(bi, bf, 4,
+                        frozen_mask=constraints_to_fixed_flags(bi).all(axis=1))

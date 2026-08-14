@@ -424,6 +424,18 @@ afterwards):
   mic=True, fmax=0.1, steps=100, no traj/log files); the endpoints
   are restored to exact copies and frames are wrapped back into the
   cell. `examples/neb_ethane_rotation/` demonstrates the contrast.
+- **Frozen atoms (settled 2026-08-14):** fully-frozen atoms of the
+  initial structure (fixed flags on all three directions) keep their
+  initial position in EVERY frame (linear delta=0; IDPP honours the
+  attached FixAtoms + a post-relaxation snap-back). Partially-frozen
+  atoms interpolate normally — their FixScaled flags are enforced by
+  VASP at run time. Every written image POSCAR carries the initial
+  structure's Selective dynamics flags (via
+  `atoms_with_fixed_constraints`). If a frozen atom has different
+  positions in the initial and final structures, interpolation is
+  BLOCKED with a message listing the atom (1-based) — a frozen atom
+  cannot move during the NEB run either. `examples/neb_frozen/`
+  provides pass/block case pairs.
 - Distance metric = Euclidean norm of the full 3N-atom minimal-image
   displacement vector (Å). Suggested images = `ceil(distance / 0.8)`.
   The implementation was cross-checked against the classic reference

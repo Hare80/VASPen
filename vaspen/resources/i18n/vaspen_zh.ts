@@ -1265,6 +1265,10 @@ Interpolate in strict file order anyway?</source>
             <source>IDPP</source>
             <translation>IDPP</translation>
         </message>
+        <message>
+            <source>{} atoms frozen — kept fixed in all images</source>
+            <translation>{} 个原子已冻结——在所有图像中保持不动</translation>
+        </message>
     </context>
     <context>
         <name>Neb</name>
@@ -1287,6 +1291,14 @@ Interpolate in strict file order anyway?</source>
         <message>
             <source>Number of images must be between 1 and {} (got {}).</source>
             <translation>插点数量必须在 1 到 {} 之间（当前为 {}）。</translation>
+        </message>
+        <message>
+            <source>Frozen atoms have different positions in the initial and final structures: {} (1-based). Unfreeze them or align the two ends.</source>
+            <translation>冻结原子在初末态结构中位置不同：{}（编号从 1 开始）。请先解冻或将两端对齐。</translation>
+        </message>
+        <message>
+            <source>Frozen-atom mask must have one entry per atom ({} atoms, got shape {}).</source>
+            <translation>冻结标记必须每个原子一个（{} 个原子，实际形状 {}）。</translation>
         </message>
     </context>
     <context>
