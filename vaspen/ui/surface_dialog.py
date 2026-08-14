@@ -83,16 +83,36 @@ class _SlabTask(QRunnable):
         self._order = order
 
     def run(self) -> None:
+        if not self._notify(self._holder.total, self._generation,
+                            self._total_hint()):
+            return
         try:
-            total = slab_count(self._atoms, *self._key)
-            self._holder.total.emit(
-                self._generation, total if total is not None else -1)
             for index, info in iter_slabs(self._atoms, *self._key,
                                           order=self._order):
-                self._holder.item.emit(self._generation, index, info)
-            self._holder.done.emit(self._generation, None, self._key)
+                if not self._notify(self._holder.item, self._generation,
+                                    index, info):
+                    return
+            self._notify(self._holder.done, self._generation, None, self._key)
         except Exception as e:  # noqa: BLE001 — surfaced in the dialog
-            self._holder.done.emit(self._generation, e, self._key)
+            self._notify(self._holder.done, self._generation, e, self._key)
+
+    def _total_hint(self) -> int:
+        try:
+            total = slab_count(self._atoms, *self._key)
+            return total if total is not None else -1
+        except Exception:  # noqa: BLE001 — unknown pymatgen internals
+            return -1
+
+    @staticmethod
+    def _notify(signal, *args) -> bool:
+        """Emit a signal, or return False when the dialog (and its
+        holder) was destroyed while the task was running — a cancelled
+        task can outlive the dialog briefly; nothing left to notify."""
+        try:
+            signal.emit(*args)
+            return True
+        except RuntimeError:
+            return False
 
 
 class SurfaceDialog(QDialog):
@@ -121,15 +141,15 @@ class SurfaceDialog(QDialog):
         self._debounce: QTimer | None = None
         self._hint_state: str | None = None
         self._hint_detail = ""
-        # Async computation on the global thread pool, one task at a
-        # time: a generation counter guards against out-of-order
-        # results; parameter changes arriving while a task runs are
-        # queued as _pending_key and chained on completion. The shared
-        # compute-order hint lets a click on an unloaded item jump the
-        # queue (main thread writes, worker reads — GIL-atomic).
+        # Async computation on the global thread pool: a generation
+        # counter guards against out-of-order results. Parameter changes
+        # cancel the running task cooperatively (shared order hint,
+        # main thread writes / worker reads — GIL-atomic) and start the
+        # new computation immediately — the user never waits for the
+        # old termination list to finish. The shared hint also lets a
+        # click on an unloaded item jump the queue.
         self._generation = 0
         self._busy = False
-        self._pending_key: tuple | None = None
         self._order = _ComputeOrder()
         self._result_holder = _SlabResultHolder()
         self._result_holder.total.connect(self._on_slabs_total)
@@ -296,10 +316,11 @@ class SurfaceDialog(QDialog):
         self._cache_key = key
 
         if key[0] == (0, 0, 0):
-            # Invalidate any in-flight/queued computation — its result
-            # must not overwrite the zero-index error state.
+            # Invalidate any in-flight computation — its result must
+            # not overwrite the zero-index error state.
             self._generation += 1
-            self._pending_key = None
+            self._order.cancelled = True
+            self._busy = False
             self._slab_infos = []
             self._ok_button.setEnabled(False)
             self._rebuild_termination_combo()
@@ -310,16 +331,16 @@ class SurfaceDialog(QDialog):
 
     def _start_compute(self, key: tuple) -> None:
         """Run slab generation on the thread pool (the GUI must not
-        freeze — pymatgen takes seconds per parameter change). At most
-        one task runs at a time; a key requested mid-run is queued as
-        ``_pending_key`` and chained on completion."""
-        if self._busy:
-            self._pending_key = key  # the running task chains it
-            return
-        self._pending_key = None
-        self._busy = True
+        freeze — pymatgen takes seconds per parameter change).
+
+        A parameter change while a task runs cancels it cooperatively
+        (it stops at the next item boundary, ~0.1 s) and starts the new
+        computation immediately — the new preview never waits for the
+        old termination list to finish."""
         self._generation += 1
-        self._order = _ComputeOrder()  # fresh hint per computation
+        self._order.cancelled = True   # stop the previous task (if any)
+        self._order = _ComputeOrder()  # fresh hint for the new task
+        self._busy = True
         # Stale protection: drop the old list immediately so items of
         # the PREVIOUS parameters can never be clicked mid-compute.
         self._slab_infos = []
@@ -363,22 +384,23 @@ class SurfaceDialog(QDialog):
 
     def _on_slabs_done(self, generation: int, error,
                        key: tuple) -> None:
-        """Computation finished (or failed) — chain a queued newer key."""
+        """The CURRENT computation finished (or failed).
+
+        Stale generations (cancelled/superseded tasks) are ignored
+        entirely — in particular they must not touch ``_busy``, which
+        now tracks the current task only."""
+        if generation != self._generation:
+            return
         self._busy = False
-        if generation == self._generation:
-            if error is not None:
-                self._slab_infos = []
-                self._ok_button.setEnabled(False)
-                self._rebuild_termination_combo()
-                self._set_hint("error", str(error))
-                self._status_label.setText("")
-            else:
-                self._ok_button.setEnabled(bool(self._slab_infos))
-                self._set_hint(None)
-        if self._pending_key is not None:
-            next_key = self._pending_key
-            self._pending_key = None
-            self._start_compute(next_key)
+        if error is not None:
+            self._slab_infos = []
+            self._ok_button.setEnabled(False)
+            self._rebuild_termination_combo()
+            self._set_hint("error", str(error))
+            self._status_label.setText("")
+        else:
+            self._ok_button.setEnabled(bool(self._slab_infos))
+            self._set_hint(None)
 
     def _rebuild_termination_combo(self) -> None:
         """Re-populate the termination combo, keeping the current index.

@@ -285,19 +285,22 @@ def supercell_in_plane(atoms: Atoms, a: int, b: int) -> Atoms:
 
 
 class _ComputeOrder:
-    """Compute-order hint for :func:`iter_slabs` (no locks by design).
+    """Compute-order/cancellation hint for :func:`iter_slabs` (no locks
+    by design).
 
-    The main thread writes ``priority`` (the index the user clicked);
-    the worker reads it once per item — a single int read/write is
-    atomic under the GIL. A priority that was already computed is
-    simply not in ``pending`` anymore and is ignored, so it never has
-    to be cleared explicitly.
+    The main thread writes ``priority`` (the index the user clicked)
+    and ``cancelled`` (parameters changed — stop as soon as the current
+    item finishes); the worker reads them once per item — single
+    int/bool read/writes are atomic under the GIL. A priority that was
+    already computed is simply not in ``pending`` anymore and is
+    ignored, so it never has to be cleared explicitly.
     """
 
-    __slots__ = ("priority",)
+    __slots__ = ("priority", "cancelled")
 
     def __init__(self) -> None:
         self.priority: int = -1
+        self.cancelled: bool = False
 
 
 def _slab_info(slab, vacuum: float) -> SlabInfo:
@@ -448,6 +451,11 @@ def iter_slabs(
     pending = set(range(total))
     sequential = iter(range(total))
     while pending:
+        # cooperative cancellation: parameters changed in the dialog —
+        # stop before the next item (the caller's generation guard
+        # discards everything we emitted so far)
+        if order is not None and order.cancelled:
+            return
         if order is not None and order.priority in pending:
             index = order.priority  # clicked item jumps the queue
         else:

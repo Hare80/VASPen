@@ -1215,7 +1215,6 @@ def test_surface_dialog_rapid_param_changes_serialize(qtbot, srtio3, monkeypatch
 
     qtbot.wait(600)                    # nothing outstanding remains
     assert dlg._slab_infos[0].top_composition == "L5"
-    assert dlg._pending_key is None
     assert dlg._termination_combo.itemText(0).startswith("1/1")
 
 
@@ -1358,6 +1357,8 @@ class _SequencedSlabs:
         pending = set(range(self.n))
         sequential = iter(range(self.n))
         while pending:
+            if order is not None and order.cancelled:
+                return  # cooperative cancellation (param changed)
             if order is not None and order.priority in pending:
                 k = order.priority  # clicked item jumps the queue
             else:
@@ -1398,3 +1399,61 @@ def test_surface_dialog_placeholders_and_click_jumps_queue(qtbot, srtio3,
     qtbot.waitUntil(lambda: not dlg._busy)
     assert seq.yielded == [0, 2, 1]
     assert all(dlg._slab_infos)  # all slots filled
+
+
+def test_surface_dialog_param_change_during_load_is_immediate(qtbot, srtio3,
+                                                              monkeypatch):
+    """Changing the Miller index while terminations are still loading
+    must show the NEW index's first preview right away — the old task
+    is cancelled cooperatively instead of being waited out."""
+    import time
+
+    seq = _SequencedSlabs(srtio3.copy(), n=5)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq.count)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq.gen)
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    qtbot.waitUntil(lambda: dlg._termination_combo.count() == 5)
+    qtbot.waitUntil(lambda: dlg._slab_infos[0] is not None)
+    assert len(view.rendered) == 1  # old index's first preview
+
+    # change the index mid-load — the new computation starts at once
+    dlg._l_spin.setValue(2)
+    dlg._ensure_slabs()
+    t0 = time.time()
+    qtbot.waitUntil(lambda: any(dlg._slab_infos)
+                    and dlg._termination_combo.count() == 5)
+    elapsed = time.time() - t0
+    # one item (~0.2 s) plus event overhead — far below the old list's
+    # remaining 4 × 0.2 s that the previous design would have waited
+    assert elapsed < 1.0
+    qtbot.waitUntil(lambda: not dlg._busy)
+    assert all(dlg._slab_infos)  # the NEW list completed
+
+
+def test_surface_dialog_destroyed_mid_compute_no_crash(qtbot, srtio3,
+                                                       monkeypatch):
+    """Closing the dialog while a task is still running must not blow up
+    in the worker (the holder is gone — the task stops notifying)."""
+    seq = _SequencedSlabs(srtio3.copy(), n=4, delay=0.1)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq.count)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq.gen)
+    model = StructureModel(srtio3)
+    dlg = SurfaceDialog(model, _FakeViewport())
+    qtbot.addWidget(dlg)
+    qtbot.waitUntil(lambda: dlg._termination_combo.count() == 4)
+    dlg.close()          # destroy while items are still being computed
+    dlg.deleteLater()
+    qtbot.wait(600)      # let the worker run past the destruction
+    # a fresh dialog still computes fine afterwards
+    seq2 = _SequencedSlabs(srtio3.copy(), n=2, delay=0.05)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq2.count)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq2.gen)
+    view2 = _FakeViewport()
+    dlg2 = SurfaceDialog(StructureModel(srtio3), view2)
+    qtbot.addWidget(dlg2)
+    _wait_slabs(qtbot, dlg2, view2, 1)
+    assert all(dlg2._slab_infos)
