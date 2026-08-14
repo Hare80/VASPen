@@ -668,6 +668,7 @@ class Viewport3D(QOpenGLWidget):
     delete_requested = Signal(str, int)     # "atom"|"bond" + index
     measurement_added = Signal(str, list)   # kind + atom indices
     mode_changed = Signal(object)           # new ToolMode
+    frozen_drag_blocked = Signal()          # a drag tool grabbed a frozen atom
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -686,6 +687,11 @@ class Viewport3D(QOpenGLWidget):
         self._selected_indices: set[int] = set()
         self._selected_bonds: set[int] = set()  # bond list indices
         self._preview_indices: set[int] = set()
+        # Per-atom fixed flags (VASP selective dynamics) — mirror of the
+        # model's, fed via set_structure(fixed=...). Used by the drag
+        # tools to reject frozen targets at press time (phase-2 display
+        # markers will read the same array).
+        self._fixed_flags = np.zeros((0, 3), dtype=bool)
         self._bonds: list = []          # Bond objects, same order as render
         self._bond_ranges: list[tuple[int, int]] = []  # (first, count) vertex slices
         self._rubber_rect = None        # QRectF | None (box selection)
@@ -770,6 +776,7 @@ class Viewport3D(QOpenGLWidget):
         atoms: Atoms | None,
         reset_view: bool = True,
         bonds: list | None = None,
+        fixed: np.ndarray | None = None,
     ) -> None:
         """Replace the displayed structure and re-render.
 
@@ -781,11 +788,24 @@ class Viewport3D(QOpenGLWidget):
                 cleaving and supercells).
             bonds: Persistent bond list from the model (Bond objects);
                 auto-computed from connectivity when None (standalone use).
+            fixed: Per-atom per-direction fixed flags (N×3 bool, True =
+                fixed). None keeps the current flags when the atom count
+                matches, otherwise zeroes them (defensive fallback —
+                stale flags of a different shape must never leak).
         """
         self._atoms = atoms
         self._selected_indices = set()
         self._selected_bonds = set()
         self._preview_indices = set()
+
+        n = 0 if atoms is None else len(atoms)
+        if fixed is not None:
+            flags = np.asarray(fixed, dtype=bool)
+            self._fixed_flags = (flags.copy()
+                                 if flags.shape == (n, 3)
+                                 else np.zeros((n, 3), dtype=bool))
+        elif len(self._fixed_flags) != n:
+            self._fixed_flags = np.zeros((n, 3), dtype=bool)
 
         if atoms is None or len(atoms) == 0:
             self._atom_pos = np.zeros((0, 3), dtype=np.float32)
@@ -836,6 +856,11 @@ class Viewport3D(QOpenGLWidget):
         self._preview_dirty = False
         self._data_dirty = True
         self.update()
+
+    @property
+    def fixed_flags(self) -> np.ndarray:
+        """Per-atom per-direction fixed flags (N×3 bool) of the scene."""
+        return self._fixed_flags
 
     def _bake_bond_verts(self) -> None:
         """(Re)bake bond triangles from the CURRENT atom positions.

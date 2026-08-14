@@ -219,15 +219,15 @@ class MainWindow(QMainWindow):
         self.act_supercell.setStatusTip(self.tr("Create a supercell"))
         self.act_supercell.triggered.connect(self._on_supercell)
 
+        self.act_wrap_periodic = QAction(self.tr("Wrap in &Periodic Cell..."), self)
+        self.act_wrap_periodic.setStatusTip(
+            self.tr("Convert a molecule into a periodic structure (vacuum box)"))
+        self.act_wrap_periodic.triggered.connect(self._on_wrap_periodic)
+
         self.act_edit_lattice = QAction(self.tr("Edit &Lattice..."), self)
         self.act_edit_lattice.setStatusTip(
             self.tr("Edit the unit cell parameters with live preview"))
         self.act_edit_lattice.triggered.connect(self._on_edit_lattice)
-
-        self.act_transform = QAction(self.tr("&Transform..."), self)
-        self.act_transform.setStatusTip(
-            self.tr("Translate, rotate or align atoms numerically"))
-        self.act_transform.triggered.connect(self._on_transform)
 
         self.act_symmetry = QAction(self.tr("Find &Symmetry..."), self)
         self.act_symmetry.setStatusTip(
@@ -297,6 +297,18 @@ class MainWindow(QMainWindow):
         self.act_select_connected.triggered.connect(
             lambda: self._structure.select_connected())
 
+        self.act_freeze = QAction(self.tr("&Freeze"), self)
+        self.act_freeze.setStatusTip(
+            self.tr("Freeze the selected atoms (VASP selective dynamics)"))
+        self.act_freeze.setEnabled(False)
+        self.act_freeze.triggered.connect(self._on_freeze_selection)
+
+        self.act_unfreeze = QAction(self.tr("&Unfreeze"), self)
+        self.act_unfreeze.setStatusTip(
+            self.tr("Unfreeze the selected atoms (clear all fixed directions)"))
+        self.act_unfreeze.setEnabled(False)
+        self.act_unfreeze.triggered.connect(self._on_unfreeze_selection)
+
         # ── Bond order (applies to the selected bond) ──
         self._bond_order_actions: dict[int, QAction] = {}
         for order, text in [(1, self.tr("Single")), (2, self.tr("Double")),
@@ -346,6 +358,9 @@ class MainWindow(QMainWindow):
         self._menu_edit.addAction(self.act_select_neighbors)
         self._menu_edit.addAction(self.act_select_connected)
         self._menu_edit.addSeparator()
+        self._menu_edit.addAction(self.act_freeze)
+        self._menu_edit.addAction(self.act_unfreeze)
+        self._menu_edit.addSeparator()
         self._bond_order_menu = self._menu_edit.addMenu(self.tr("Bond &Order"))
         for act in self._bond_order_actions.values():
             self._bond_order_menu.addAction(act)
@@ -382,9 +397,9 @@ class MainWindow(QMainWindow):
         self._menu_tools = mb.addMenu(self.tr("&Tools"))
         self._menu_tools.addAction(self.act_surface)
         self._menu_tools.addAction(self.act_supercell)
+        self._menu_tools.addAction(self.act_wrap_periodic)
         self._menu_tools.addSeparator()
         self._menu_tools.addAction(self.act_edit_lattice)
-        self._menu_tools.addAction(self.act_transform)
         self._menu_tools.addAction(self.act_symmetry)
 
         # Help
@@ -467,6 +482,9 @@ class MainWindow(QMainWindow):
                 flow.addWidget(self._element_more_btn)
                 self._current_element = "C"
                 self._set_current_element("C")
+        add_action(self.act_freeze)
+        add_action(self.act_unfreeze)
+
         # One-shot bond detection — useful while Auto Detect Bonds is off
         add_action(self.act_detect_bonds)
 
@@ -665,6 +683,9 @@ class MainWindow(QMainWindow):
         self._viewport.delete_requested.connect(self._on_delete_requested)
         self._viewport.measurement_added.connect(self._on_measurement_added)
         self._viewport.mode_changed.connect(self._on_mode_changed)
+        self._viewport.frozen_drag_blocked.connect(
+            lambda: self._set_status(
+                self.tr("Cannot move frozen atoms — unfreeze them first.")))
         # Any manager change (add/remove/clear/sync) pushes to the viewport
         self._measurement_manager.changed.connect(self._push_measurements)
 
@@ -752,12 +773,26 @@ class MainWindow(QMainWindow):
             return True
         if self._structure.is_periodic or self._structure.n_atoms == 0:
             return True  # empty structures fall through to FileIO's error
+        return self._wrap_molecule_to_periodic()
+
+    def _wrap_molecule_to_periodic(self) -> bool:
+        """Show the wrap dialog and convert the molecule in place (undoable).
+
+        Shared by the save-to-periodic-format flow (_ensure_periodic_for)
+        and the Tools → Wrap in Periodic Cell action. The caller ensures
+        the model is molecule-like (non-periodic, non-empty).
+
+        Returns:
+            True when the conversion happened, False on cancel.
+        """
         from vaspen.ui.periodic_wrap_dialog import PeriodicWrapDialog
 
         dlg = PeriodicWrapDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return False
         self._structure.make_periodic(dlg.padding)
+        self._set_status(
+            self.tr("Wrapped in periodic cell ({} Å vacuum).").format(dlg.padding))
         return True
 
     def _confirm_disorder_poscar_save(self) -> bool:
@@ -1027,9 +1062,9 @@ class MainWindow(QMainWindow):
         """
         for act in (self.act_new, self.act_open, self.act_surface,
                     self.act_supercell, self.act_edit_lattice,
-                    self.act_transform, self.act_symmetry,
+                    self.act_symmetry,
                     self.act_delete_selection, self.act_undo, self.act_redo,
-                    self.act_detect_bonds):
+                    self.act_detect_bonds, self.act_freeze, self.act_unfreeze):
             act.setEnabled(enabled)
         for mode, act in self._mode_actions.items():
             if mode is not ToolMode.SELECT:
@@ -1054,6 +1089,28 @@ class MainWindow(QMainWindow):
             self._structure.reset_filepath()  # derived structure → Save As
             self._set_status(self.tr("Supercell {}×{}×{} created.").format(*dlg.factors))
 
+    def _on_wrap_periodic(self) -> None:
+        """Tools → Wrap in Periodic Cell: convert a molecule in place.
+
+        Shares the wrap dialog + make_periodic kernel with the
+        save-to-periodic-format flow (_wrap_molecule_to_periodic).
+        """
+        if self._structure.n_atoms == 0:
+            QMessageBox.information(
+                self,
+                self.tr("Wrap in Periodic Cell"),
+                self.tr("Load a structure first."),
+            )
+            return
+        if self._structure.is_periodic:
+            QMessageBox.information(
+                self,
+                self.tr("Wrap in Periodic Cell"),
+                self.tr("The structure is already periodic."),
+            )
+            return
+        self._wrap_molecule_to_periodic()
+
     def _on_edit_lattice(self) -> None:
         from vaspen.ui.lattice_dialog import LatticeDialog
 
@@ -1068,24 +1125,16 @@ class MainWindow(QMainWindow):
         dlg = LatticeDialog(self._structure, self._viewport, self)
         dlg.exec()  # applies to the model on Accept (one undo step)
 
-    def _on_transform(self) -> None:
-        from vaspen.ui.transform_dialog import TransformDialog
-
-        dlg = TransformDialog(self._structure, self)
-        if (dlg.exec() == TransformDialog.Accepted
-                and dlg.result_atoms is not None):
-            # One undo step; bonds survive (manual mode) or re-detect
-            # (auto). Periodic whole-structure transforms also carry the
-            # rotated unit cell.
-            cell = None
-            if self._structure.is_periodic:
-                cell = dlg.result_atoms.get_cell().array
-            self._structure.set_geometry(dlg.result_atoms.get_positions(), cell)
-            self._set_status(self.tr("Transform applied."))
-
     def _on_symmetry(self) -> None:
         from vaspen.ui.symmetry_dialog import SymmetryDialog
 
+        if self._structure.any_fixed:
+            QMessageBox.warning(
+                self,
+                self.tr("Symmetry"),
+                self.tr("Some atoms are frozen. Unfreeze them before symmetrizing."),
+            )
+            return
         dlg = SymmetryDialog(self._structure, self)
         if (dlg.exec() == SymmetryDialog.Accepted
                 and dlg.result_atoms is not None):
@@ -1143,6 +1192,12 @@ class MainWindow(QMainWindow):
         self.act_select_invert.setText(self.tr("&Invert Selection"))
         self.act_select_neighbors.setText(self.tr("Select &Neighbors"))
         self.act_select_connected.setText(self.tr("Select &Connected"))
+        self.act_freeze.setText(self.tr("&Freeze"))
+        self.act_freeze.setStatusTip(
+            self.tr("Freeze the selected atoms (VASP selective dynamics)"))
+        self.act_unfreeze.setText(self.tr("&Unfreeze"))
+        self.act_unfreeze.setStatusTip(
+            self.tr("Unfreeze the selected atoms (clear all fixed directions)"))
         self._bond_order_menu.setTitle(self.tr("Bond &Order"))
         for order, text in [(1, self.tr("Single")), (2, self.tr("Double")),
                             (3, self.tr("Triple")), (4, self.tr("Aromatic"))]:
@@ -1175,12 +1230,12 @@ class MainWindow(QMainWindow):
         self.act_surface.setStatusTip(self.tr("Cleave a surface/slab from the current structure"))
         self.act_supercell.setText(self.tr("&Supercell..."))
         self.act_supercell.setStatusTip(self.tr("Create a supercell"))
+        self.act_wrap_periodic.setText(self.tr("Wrap in &Periodic Cell..."))
+        self.act_wrap_periodic.setStatusTip(
+            self.tr("Convert a molecule into a periodic structure (vacuum box)"))
         self.act_edit_lattice.setText(self.tr("Edit &Lattice..."))
         self.act_edit_lattice.setStatusTip(
             self.tr("Edit the unit cell parameters with live preview"))
-        self.act_transform.setText(self.tr("&Transform..."))
-        self.act_transform.setStatusTip(
-            self.tr("Translate, rotate or align atoms numerically"))
         self.act_symmetry.setText(self.tr("Find &Symmetry..."))
         self.act_symmetry.setStatusTip(
             self.tr("Analyze the space group and symmetrize the structure"))
@@ -1333,10 +1388,15 @@ class MainWindow(QMainWindow):
         # would silently resolve to unrelated atoms of the new one.
         self._measurement_manager.clear()
         self._viewport.set_structure(self._structure.atoms,
-                                     bonds=self._structure.bonds)
+                                     bonds=self._structure.bonds,
+                                     fixed=self._structure.fixed_flags)
         self._sync_auto_bonds_action()
         self._update_status_bar()
         self._update_edit_actions()
+        # Loading clears the selection without emitting selection_changed —
+        # re-sync selection-dependent action states here.
+        self.act_freeze.setEnabled(False)
+        self.act_unfreeze.setEnabled(False)
 
     def _on_structure_modified(self) -> None:
         """Structure changed (add/remove atoms, supercell, surface cleave...)."""
@@ -1344,7 +1404,8 @@ class MainWindow(QMainWindow):
         self._viewport.cancel_active_tool()
         # Keep the user's camera — in-place edits must not snap the view back
         self._viewport.set_structure(
-            self._structure.atoms, reset_view=False, bonds=self._structure.bonds)
+            self._structure.atoms, reset_view=False, bonds=self._structure.bonds,
+            fixed=self._structure.fixed_flags)
         # set_structure resets the viewport highlight — re-apply the model
         # selection so it survives edits
         self._viewport.set_highlight(self._structure.selected_indices)
@@ -1362,6 +1423,9 @@ class MainWindow(QMainWindow):
         """Selection set changed (multi-select aware)."""
         self._viewport.set_highlight(self._structure.selected_indices)
         self._update_selection_status()
+        has_sel = bool(self._structure.selected_indices)
+        self.act_freeze.setEnabled(has_sel)
+        self.act_unfreeze.setEnabled(has_sel)
 
     def _update_selection_status(self) -> None:
         """Show the selection in the status bar (single atom or count)."""
@@ -1444,9 +1508,32 @@ class MainWindow(QMainWindow):
         ))
 
     def _on_atoms_moved(self, indices: list, positions) -> None:
-        """Move tool committed a drag — one undoable model call."""
-        self._structure.set_atom_positions(
-            indices, np.asarray(positions, dtype=float))
+        """Move tool committed a drag — one undoable model call.
+
+        Frozen atoms are rejected here with a status message and the
+        viewport is re-synced to the model: the rejected call does not
+        emit structure_modified, so the drag preview would otherwise
+        stay on screen.
+        """
+        if any(self._structure.is_fixed(i) for i in indices):
+            self._set_status(
+                self.tr("Cannot move frozen atoms — unfreeze them first."))
+            self._rebind_viewport_to_model()
+            return
+        try:
+            self._structure.set_atom_positions(
+                indices, np.asarray(positions, dtype=float))
+        except ValueError as e:
+            self._set_status(str(e))
+            self._rebind_viewport_to_model()
+
+    def _rebind_viewport_to_model(self) -> None:
+        """Reset the viewport scene to the model state (drag-preview rebound)."""
+        self._viewport.set_structure(
+            self._structure.atoms, reset_view=False,
+            bonds=self._structure.bonds, fixed=self._structure.fixed_flags)
+        self._viewport.set_highlight(self._structure.selected_indices)
+        self._viewport.set_bond_highlight(self._structure.selected_bonds)
 
     def _on_bond_created(self, i: int, j: int) -> None:
         try:
@@ -1520,6 +1607,30 @@ class MainWindow(QMainWindow):
         indices = sorted(self._structure.selected_indices, reverse=True)
         if indices:
             self._structure.delete_atoms(indices)
+
+    def _on_freeze_selection(self) -> None:
+        """Freeze the selected atoms (VASP selective dynamics).
+
+        Freezes all three directions (the settled default); partially
+        frozen atoms are overwritten to fully frozen. One undo step.
+        """
+        sel = sorted(self._structure.selected_indices)
+        if not sel:
+            return
+        self._structure.set_fixed(sel, True)
+        self._set_status(self.tr("Frozen {} atoms.").format(len(sel)))
+
+    def _on_unfreeze_selection(self) -> None:
+        """Unfreeze the selected atoms — clears ALL fixed directions.
+
+        Partial per-direction flags are cleared too (the atom is fully
+        free afterwards). One undo step.
+        """
+        sel = sorted(self._structure.selected_indices)
+        if not sel:
+            return
+        self._structure.set_fixed(sel, False)
+        self._set_status(self.tr("Unfroze {} atoms.").format(len(sel)))
 
     def _on_measurement_added(self, kind: str, indices: list) -> None:
         """Measure tool completed a pick sequence."""

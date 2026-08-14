@@ -7,7 +7,7 @@ import pytest
 from ase import Atoms
 from ase.io import read as ase_read
 from ase.io import write as ase_write
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from vaspen.core import file_io as fi
@@ -1114,3 +1114,211 @@ def test_save_as_non_vasp_ignores_coords_setting(window, monkeypatch, si_bulk, t
     window._config.poscar_coords_direct = True
     window._on_save_as()
     assert "_cell_length_a" in dest.read_text()
+
+
+# ----------------------------------------------------------------------
+# Freeze / fixed atoms (VASP selective dynamics)
+# ----------------------------------------------------------------------
+
+def _load_h3(window, monkeypatch):
+    atoms = Atoms("H3", positions=[[0, 0, 0], [0.8, 0, 0], [1.6, 0, 0]],
+                  cell=[10, 10, 10], pbc=True)
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: atoms)
+    )
+    window._open_file("fake.xyz")
+    return window._structure
+
+
+def test_freeze_actions_enabled_only_with_selection(window):
+    assert not window.act_freeze.isEnabled()
+    assert not window.act_unfreeze.isEnabled()
+    window._structure.load_atoms(Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]]))
+    assert not window.act_freeze.isEnabled()  # load clears selection
+    assert not window.act_unfreeze.isEnabled()
+    window._structure.select_atom(0)
+    assert window.act_freeze.isEnabled()
+    assert window.act_unfreeze.isEnabled()
+    window._structure.clear_selection()
+    assert not window.act_freeze.isEnabled()
+    assert not window.act_unfreeze.isEnabled()
+
+
+def test_freeze_and_unfreeze_actions(window, monkeypatch):
+    model = _load_h3(window, monkeypatch)
+    model.select_atom(0)
+
+    window.act_freeze.trigger()
+    assert model.is_fixed(0)
+    assert model.fixed_flags[0].tolist() == [True, True, True]
+    assert not model.is_fixed(1)
+    assert len(model._undo_stack) == 1
+
+    window.act_unfreeze.trigger()
+    assert not model.any_fixed
+    assert len(model._undo_stack) == 2
+
+    # undo/redo steps restore the freeze state
+    model.undo()
+    assert model.is_fixed(0)
+    model.redo()
+    assert not model.is_fixed(0)
+
+
+def test_unfreeze_clears_partial_flags(window, monkeypatch):
+    model = _load_h3(window, monkeypatch)
+    model.select_atom(0)
+    model.set_fixed(0, np.array([True, False, True]))  # partial freeze
+    undo_len = len(model._undo_stack)
+
+    window.act_unfreeze.trigger()
+
+    assert model.fixed_flags[0].tolist() == [False, False, False]
+    assert not model.is_fixed(0)
+    assert len(model._undo_stack) == undo_len + 1
+
+
+def test_freeze_mixed_selection_freezes_all(window, monkeypatch):
+    model = _load_h3(window, monkeypatch)
+    model.set_fixed(0, True)
+    model.set_selection({0, 1})
+    undo_len = len(model._undo_stack)
+
+    window.act_freeze.trigger()  # not ALL frozen → freeze the rest
+
+    assert model.is_fixed(0) and model.is_fixed(1)
+    assert not model.is_fixed(2)
+    assert len(model._undo_stack) == undo_len + 1
+
+
+def test_properties_panel_fixed_group_reflects_and_edits(window, monkeypatch):
+    model = _load_h3(window, monkeypatch)
+    panel = window._atom_props
+    model.select_atom(0)
+
+    # initially free
+    assert not panel._fixed_check.isChecked()
+    assert all(chk.isEnabled() for chk in
+               (panel._fx_fixed, panel._fy_fixed, panel._fz_fixed))
+
+    # freeze via the panel → model updates in one undo step
+    panel._fixed_check.setChecked(True)
+    assert model.fixed_flags[0].tolist() == [True, True, True]
+    assert len(model._undo_stack) == 1
+    # frozen atom: coordinate fields read-only, element field editable
+    assert not panel._x_edit.isEnabled()
+    assert panel._element_edit.isEnabled()
+
+    # per-direction edit
+    panel._fy_fixed.setChecked(False)
+    assert model.fixed_flags[0].tolist() == [True, False, True]
+    assert model.is_fixed(0)  # any direction fixed counts
+
+    # unfreeze via master checkbox
+    panel._fixed_check.setChecked(False)
+    assert not model.any_fixed
+    assert panel._x_edit.isEnabled()
+
+
+def test_properties_panel_direction_boxes_need_cell(window, monkeypatch):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])  # molecule
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: atoms)
+    )
+    window._open_file("fake.xyz")
+    window._structure.select_atom(0)
+    panel = window._atom_props
+
+    assert panel._fixed_check.isEnabled()
+    assert not panel._fx_fixed.isEnabled()
+    assert not panel._fy_fixed.isEnabled()
+    assert not panel._fz_fixed.isEnabled()
+
+
+def test_open_poscar_with_selective_dynamics_restores_flags(window, monkeypatch):
+    """A POSCAR with "Selective dynamics" loads with the flags adopted."""
+    from ase.constraints import FixAtoms
+    atoms = Atoms("H3", positions=[[0, 0, 0], [0.8, 0, 0], [1.6, 0, 0]],
+                  cell=[10, 10, 10], pbc=True)
+    atoms.set_constraint([FixAtoms(indices=[0])])
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: atoms)
+    )
+    window._open_file("fake.vasp")
+    assert window._structure.is_fixed(0)
+    assert not window._structure.is_fixed(1)
+    assert window._structure.atoms.constraints == []
+
+
+def test_structure_tree_frozen_rows_read_only_coords(window, monkeypatch):
+    model = _load_h3(window, monkeypatch)
+    model.set_fixed(0, True)
+    tree = window._structure_tree
+    # x/y/z columns (2..4) not editable for the frozen row
+    assert not (tree._table.item(0, 2).flags() & Qt.ItemIsEditable)
+    # element column stays editable
+    assert tree._table.item(0, 1).flags() & Qt.ItemIsEditable
+    # free atom rows keep editable coordinates
+    assert tree._table.item(1, 2).flags() & Qt.ItemIsEditable
+
+
+# ----------------------------------------------------------------------
+# Tools → Wrap in Periodic Cell (molecule → periodic, menu action)
+# ----------------------------------------------------------------------
+
+def test_wrap_periodic_action_converts_molecule(window, monkeypatch, water_molecule):
+    window._structure.load_atoms(water_molecule, "mol.xyz")
+    monkeypatch.setattr(
+        "vaspen.ui.periodic_wrap_dialog.PeriodicWrapDialog",
+        lambda parent=None: _FakeWrapDialog(accept=True, padding=8.0),
+    )
+    undo_before = len(window._structure._undo_stack)
+
+    window.act_wrap_periodic.trigger()
+
+    extent = (water_molecule.get_positions().max(axis=0)
+              - water_molecule.get_positions().min(axis=0))
+    assert window._structure.is_periodic is True
+    assert np.allclose(np.diag(window._structure.cell), extent + 16.0)
+    assert len(window._structure._undo_stack) == undo_before + 1  # one undo step
+    assert window._structure.filepath == "mol.xyz"  # conversion keeps the path
+    assert "Wrapped in periodic cell" in window._status_label.text()
+
+
+def test_wrap_periodic_action_refuses_periodic(window, monkeypatch, si_bulk):
+    window._structure.load_atoms(si_bulk)
+    opened = []
+    monkeypatch.setattr(
+        "vaspen.ui.periodic_wrap_dialog.PeriodicWrapDialog",
+        lambda parent=None: opened.append(1),
+    )
+    infos = []
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.information",
+        staticmethod(lambda *args, **kwargs: infos.append(args)),
+    )
+    before = window._structure.positions.copy()
+
+    window.act_wrap_periodic.trigger()
+
+    assert opened == []  # dialog never shown
+    assert infos  # informational message shown
+    assert np.allclose(window._structure.positions, before)
+
+
+def test_wrap_periodic_action_refuses_empty(window, monkeypatch):
+    opened = []
+    monkeypatch.setattr(
+        "vaspen.ui.periodic_wrap_dialog.PeriodicWrapDialog",
+        lambda parent=None: opened.append(1),
+    )
+    infos = []
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.information",
+        staticmethod(lambda *args, **kwargs: infos.append(args)),
+    )
+
+    window.act_wrap_periodic.trigger()
+
+    assert opened == []
+    assert infos

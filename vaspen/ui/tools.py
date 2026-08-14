@@ -69,6 +69,20 @@ class Tool:
         """Cursor shown while this tool is active."""
         return Qt.CursorShape.ArrowCursor
 
+    def _target_blocked(self) -> bool:
+        """True when the resolved drag target contains a frozen atom.
+
+        Fixed flags live on the viewport (fed by set_structure(fixed=...)
+        from the model). Any fixed direction counts (settled policy) —
+        a mixed fixed/free group is blocked as a whole, matching the
+        model-side commit guard. A shape mismatch (stale flags) reads
+        as not blocked — the model guard remains the backstop.
+        """
+        flags = self._vp.fixed_flags
+        if len(flags) != len(self._vp._atom_pos) or not self._indices:
+            return False
+        return bool(flags[list(self._indices)].any())
+
 
 def _orbit_to(vp, pos) -> None:
     """Plain left-drag rotates the camera (viewport-wide policy)."""
@@ -300,6 +314,12 @@ class MoveAtomTool(Tool):
             self._indices = sorted(sel)
         else:
             self._indices = self._connected(index, vp._bonds)
+        if self._target_blocked():
+            # Frozen atoms must not move, not even in the drag preview —
+            # swallow the press entirely (no preview state, no commit).
+            vp.frozen_drag_blocked.emit()
+            self._indices = []
+            return True
         self._start_cart = np.asarray(vp._atom_pos[self._indices], dtype=float)
         atoms = vp._atoms
         if (atoms is not None and atoms.get_cell().rank == 3
@@ -435,6 +455,11 @@ class RotateAtomTool(Tool):
             self._indices = sorted(sel)   # priority 1: any selection
         else:
             self._indices = self._connected(index, vp._bonds)
+        if self._target_blocked():
+            # Frozen atoms must not rotate, not even in the drag preview.
+            vp.frozen_drag_blocked.emit()
+            self._indices = []
+            return True
         self._start_cart = np.asarray(vp._atom_pos[self._indices], dtype=float)
         self._center = self._start_cart.mean(axis=0)
         atoms = vp._atoms

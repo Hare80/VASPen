@@ -583,11 +583,17 @@ def generate_all_inputs(
     from ase.io import write as ase_write
     import io
 
-    from vaspen.core.file_io import vasp_write_atoms
+    from vaspen.core.file_io import (
+        atoms_with_fixed_constraints,
+        vasp_write_atoms,
+    )
 
+    poscar_atoms = atoms_with_fixed_constraints(
+        vasp_write_atoms(structure_model.atoms, poscar_direct),
+        structure_model.fixed_flags,
+    )
     buf = io.StringIO()
-    ase_write(buf, vasp_write_atoms(structure_model.atoms, poscar_direct),
-              format="vasp", vasp5=True, direct=poscar_direct)
+    ase_write(buf, poscar_atoms, format="vasp", vasp5=True, direct=poscar_direct)
     poscar_content = buf.getvalue()
 
     # POTCAR

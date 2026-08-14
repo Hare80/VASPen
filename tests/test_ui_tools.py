@@ -1404,3 +1404,112 @@ def test_measurement_panel_row_shows_atoms(window, monkeypatch):
     assert len(rows) == 1
     assert rows[0].startswith("Distance: Fe1–Ni2: ")
     assert rows[0].endswith("Å")
+
+
+# ----------------------------------------------------------------------
+# Frozen atoms: drag rejection, transform/symmetry blocks
+# ----------------------------------------------------------------------
+
+def test_drag_frozen_atom_does_not_move(window, monkeypatch):
+    """Move-tool drag on a frozen atom is rejected AT PRESS TIME: the
+    preview never moves on screen, the model never changes, and the
+    status bar explains why."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    window._structure.set_fixed(0, True)
+    window._structure.select_atom(0)
+    view._pick = lambda pos: ("atom", 0)
+
+    before = window._structure.positions.copy()
+    undo_len = len(window._structure._undo_stack)  # the set_fixed entry
+    _drag(view, (400.0, 300.0), (450.0, 300.0))
+
+    assert np.allclose(window._structure.positions, before)
+    assert "frozen" in window._status_label.text().lower()
+    # the drag preview NEVER moved the atoms (no rebound happened — the
+    # press was swallowed before any preview state was stored)
+    assert np.allclose(view._atom_pos[:, :3], before)
+    assert len(window._structure._undo_stack) == undo_len  # no drag commit
+
+
+def test_drag_frozen_connected_component_blocked(window, monkeypatch):
+    """No selection: the bond-connected component of the grabbed atom
+    contains a frozen atom → the whole drag is blocked on screen."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))  # all 3 atoms bonded
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    window._structure.set_fixed(0, True)  # freeze the O
+    view._pick = lambda pos: ("atom", 1)  # grab a free H
+
+    before = window._structure.positions.copy()
+    _drag(view, (400.0, 300.0), (450.0, 300.0))
+
+    assert np.allclose(window._structure.positions, before)
+    assert np.allclose(view._atom_pos[:, :3], before)
+    assert "frozen" in window._status_label.text().lower()
+
+
+def test_rotate_frozen_group_blocked(window, monkeypatch):
+    """Rotate-tool drag on a group containing a frozen atom is blocked
+    at press time — nothing rotates on screen, nothing commits."""
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.ROTATE)
+    window._structure.set_fixed(0, True)
+    window._structure.set_selection({0, 1})
+    view._pick = lambda pos: ("atom", 0)
+
+    before = window._structure.positions.copy()
+    _drag(view, (400.0, 300.0), (500.0, 340.0))
+
+    assert np.allclose(window._structure.positions, before)
+    assert np.allclose(view._atom_pos[:, :3], before)
+    assert "frozen" in window._status_label.text().lower()
+
+
+def test_move_free_atom_still_works_with_frozen_present(window, monkeypatch):
+    from ase.build import molecule
+
+    _load(window, monkeypatch, molecule("H2O"))
+    view = window._viewport
+    view.set_mode(ToolMode.MOVE_ATOM)
+    window._structure.set_fixed(0, True)   # O frozen
+    window._structure.select_atom(1)       # H free
+    view._pick = lambda pos: ("atom", 1)
+
+    before = window._structure.positions.copy()
+    _drag(view, (400.0, 300.0), (450.0, 300.0))
+
+    assert np.allclose(window._structure.positions[0], before[0])  # O stayed
+    assert not np.allclose(window._structure.positions[1], before[1])
+
+
+def test_symmetry_blocked_when_fixed(window, monkeypatch):
+    _load(window, monkeypatch, Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]],
+                                      cell=[10, 10, 10], pbc=True))
+    window._structure.set_fixed(0, True)
+
+    opened = []
+    class _FakeSymmetryDialog:
+        Accepted = 0
+        def __init__(self, *args, **kwargs):
+            opened.append(1)
+            self.result_atoms = None
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(
+        "vaspen.ui.symmetry_dialog.SymmetryDialog", _FakeSymmetryDialog)
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.warning",
+        staticmethod(lambda *args, **kwargs: None),
+    )
+    window._on_symmetry()
+    assert opened == []

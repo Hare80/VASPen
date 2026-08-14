@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QLabel,
+    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
@@ -71,6 +72,11 @@ class LatticeDialog(QDialog):
             self.tr("Scale atom positions (keep fractional coordinates)"))
         self._scale_check.setChecked(True)
         self._scale_check.toggled.connect(self._on_value_changed)
+        if self._model.any_fixed:
+            # Scaling atoms moves frozen atoms (fractional coords kept) —
+            # force the Cartesian-preserving mode and lock the option.
+            self._scale_check.setChecked(False)
+            self._scale_check.setEnabled(False)
         layout.addWidget(self._scale_check)
 
         self._hint = QLabel("")
@@ -121,7 +127,8 @@ class LatticeDialog(QDialog):
         working = self._model.atoms.copy()
         working.set_cell(cell, scale_atoms=self._scale_check.isChecked())
         self._viewport.set_structure(working, reset_view=False,
-                                     bonds=self._model.bonds)
+                                     bonds=self._model.bonds,
+                                     fixed=self._model.fixed_flags)
         self._viewport.set_highlight(self._model.selected_indices)
 
     # ------------------------------------------------------------------
@@ -132,13 +139,24 @@ class LatticeDialog(QDialog):
         if not self._ok_button.isEnabled():
             return
         lengths, angles = self._parameters()
-        self._model.set_cell_parameters(lengths, angles,
-                                        scale_atoms=self._scale_check.isChecked())
+        try:
+            self._model.set_cell_parameters(
+                lengths, angles, scale_atoms=self._scale_check.isChecked())
+        except ValueError:
+            # Movement guard (frozen atoms) — the scale option is already
+            # locked for such models; this is the backstop.
+            QMessageBox.warning(
+                self,
+                self.tr("Edit Lattice"),
+                self.tr("Cannot scale atoms: some atoms are frozen."),
+            )
+            return
         self.accept()
 
     def reject(self) -> None:
         """Restore the viewport to the real model state before closing."""
         self._viewport.set_structure(self._model.atoms, reset_view=False,
-                                     bonds=self._model.bonds)
+                                     bonds=self._model.bonds,
+                                     fixed=self._model.fixed_flags)
         self._viewport.set_highlight(self._model.selected_indices)
         super().reject()

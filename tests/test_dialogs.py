@@ -36,7 +36,7 @@ class _FakeViewport:
         self._rs = RenderSettings.default()
         self.render_settings_calls: list = []
 
-    def set_structure(self, atoms, reset_view=False, bonds=None):
+    def set_structure(self, atoms, reset_view=False, bonds=None, fixed=None):
         self.rendered.append((atoms, reset_view, bonds))
 
     def set_highlight(self, indices):

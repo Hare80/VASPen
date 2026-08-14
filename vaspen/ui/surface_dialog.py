@@ -342,7 +342,8 @@ class SurfaceDialog(QDialog):
     def reject(self) -> None:
         """Restore the viewport to the real model state before closing."""
         self._viewport.set_structure(self._model.atoms, reset_view=False,
-                                     bonds=self._model.bonds)
+                                     bonds=self._model.bonds,
+                                     fixed=self._model.fixed_flags)
         self._viewport.set_highlight(self._model.selected_indices)
         self._viewport.set_bond_highlight(self._model.selected_bonds)
         super().reject()

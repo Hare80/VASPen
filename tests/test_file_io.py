@@ -3,9 +3,16 @@
 import numpy as np
 import pytest
 from ase import Atoms
+from ase.constraints import FixAtoms, FixScaled
 from ase.io import read as ase_read
 
-from vaspen.core.file_io import EXTENSION_DISPLAY_NAMES, FileIO, resolve_format
+from vaspen.core.file_io import (
+    EXTENSION_DISPLAY_NAMES,
+    FileIO,
+    atoms_with_fixed_constraints,
+    extract_fixed_flags,
+    resolve_format,
+)
 
 
 def test_write_read_roundtrip_xyz(tmp_path):
@@ -350,3 +357,142 @@ def test_vasp_cartesian_keeps_atoms_outside_cell(si_bulk, tmp_path):
     assert _poscar_keyword(path) == "Cartesian"
     loaded = ase_read(str(path), format="vasp")
     assert np.allclose(loaded.positions[0], outside.positions[0], atol=1e-4)
+
+
+# ----------------------------------------------------------------------
+# Fixed atoms → "Selective dynamics" (VASP selective dynamics)
+# ----------------------------------------------------------------------
+
+def _poscar_flags(path) -> list[str]:
+    """Per-atom F/T flag triplets of a POSCAR with Selective dynamics."""
+    lines = path.read_text().splitlines()
+    kw = lines.index("Selective dynamics")
+    flags = []
+    for line in lines[kw + 2:]:  # skip keyword + coordinate-mode line
+        toks = line.split()
+        if len(toks) >= 6:
+            flags.append("".join(toks[3:6]))
+    return flags
+
+
+def test_vasp_write_emits_selective_dynamics_with_flags(si_bulk, tmp_path):
+    flags = np.zeros((len(si_bulk), 3), dtype=bool)
+    flags[0] = True
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), si_bulk, fixed_flags=flags)
+    text = path.read_text()
+    assert "Selective dynamics" in text
+    assert _poscar_flags(path)[0] == "FFF"
+    assert all(f == "TTT" for f in _poscar_flags(path)[1:])
+    # round-trips through ASE as FixAtoms
+    loaded = ase_read(str(path), format="vasp")
+    assert any(isinstance(c, FixAtoms) and 0 in c.index
+               for c in loaded.constraints)
+
+
+def test_vasp_write_partial_flags_roundtrip(si_bulk, tmp_path):
+    flags = np.zeros((len(si_bulk), 3), dtype=bool)
+    flags[1] = [True, False, False]
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), si_bulk, fixed_flags=flags)
+    assert _poscar_flags(path)[1] == "FTT"
+    loaded = ase_read(str(path), format="vasp")
+    extracted = extract_fixed_flags(loaded)
+    assert extracted is not None
+    assert extracted[1].tolist() == [True, False, False]
+
+
+def test_vasp_write_direct_wraps_and_keeps_flags(si_bulk, tmp_path):
+    """Direct mode + fixed flags: coords wrapped into [0,1) and flags
+    carried on the same rows; the caller's atoms stay untouched."""
+    outside = si_bulk.copy()
+    outside.positions[0] += outside.get_cell()[0]
+    flags = np.zeros((len(outside), 3), dtype=bool)
+    flags[0] = True
+    original = outside.positions.copy()
+
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), outside, direct=True, fixed_flags=flags)
+
+    assert np.allclose(outside.positions, original)
+    assert outside.constraints == []  # input atoms never gain constraints
+    assert _poscar_keyword(path) == "Direct"
+    assert _poscar_flags(path)[0] == "FFF"
+    loaded = ase_read(str(path), format="vasp")
+    frac = loaded.get_scaled_positions()
+    assert ((frac >= 0.0) & (frac < 1.0)).all()
+    assert any(isinstance(c, FixAtoms) for c in loaded.constraints)
+
+
+def test_vasp_write_no_flags_keeps_plain_poscar(si_bulk, tmp_path):
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), si_bulk)
+    assert "Selective dynamics" not in path.read_text()
+
+
+def test_non_vasp_formats_ignore_fixed_flags(si_bulk, tmp_path):
+    flags = np.zeros((len(si_bulk), 3), dtype=bool)
+    flags[0] = True
+    path = tmp_path / "out.xyz"
+    FileIO.write(str(path), si_bulk, fixed_flags=flags)  # must not crash
+    assert path.exists()
+
+
+@pytest.mark.parametrize("name", ["POSCAR", "poscar.vasp", "x.poscar",
+                                  "x.contcar"])
+def test_read_vasp_returns_constraints_for_model_to_extract(name, si_bulk, tmp_path):
+    """FileIO.read hands the ASE-parsed constraints to load_atoms."""
+    path = tmp_path / name
+    flags = np.zeros((len(si_bulk), 3), dtype=bool)
+    flags[0] = True
+    FileIO.write(str(path), si_bulk, fixed_flags=flags)
+    loaded = FileIO.read(str(path))
+    assert loaded.constraints != []  # adopted by StructureModel.load_atoms
+
+
+def test_atoms_with_fixed_constraints_unit(si_bulk):
+    # None / all-free → same object back
+    assert atoms_with_fixed_constraints(si_bulk, None) is si_bulk
+    zeros = np.zeros((len(si_bulk), 3), dtype=bool)
+    assert atoms_with_fixed_constraints(si_bulk, zeros) is si_bulk
+
+    # fully-fixed row → FixAtoms; partial row → FixScaled
+    flags = np.zeros((len(si_bulk), 3), dtype=bool)
+    flags[0] = True
+    flags[1] = [True, False, True]
+    out = atoms_with_fixed_constraints(si_bulk, flags)
+    assert out is not si_bulk
+    assert out.constraints
+    assert any(isinstance(c, FixAtoms) and c.index == 0
+               for c in out.constraints)
+    assert any(isinstance(c, FixScaled)
+               and c.index == 1
+               and np.all(c.mask == [True, False, True])
+               for c in out.constraints)
+    assert si_bulk.constraints == []  # input untouched
+
+    # shape mismatch → ValueError
+    with pytest.raises(ValueError):
+        atoms_with_fixed_constraints(si_bulk, np.zeros((1, 3), dtype=bool))
+
+
+def test_atoms_with_fixed_constraints_cellless_partial_degrades():
+    """A partial row on a cell-less molecule degrades to FixAtoms
+    (FixScaled needs a cell)."""
+    mol = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    flags = np.array([[True, False, False], [False, False, False]])
+    out = atoms_with_fixed_constraints(mol, flags)
+    assert any(isinstance(c, FixAtoms) and c.index == 0
+               for c in out.constraints)
+
+
+def test_extract_fixed_flags_unit(si_bulk):
+    assert extract_fixed_flags(si_bulk) is None  # no constraints
+    atoms = si_bulk.copy()
+    atoms.set_constraint([FixAtoms(indices=[0]),
+                          FixScaled(1, mask=[True, False, True],
+                                    cell=atoms.get_cell())])
+    flags = extract_fixed_flags(atoms)
+    assert flags[0].tolist() == [True, True, True]
+    assert flags[1].tolist() == [True, False, True]
+    assert not flags[2:].any()

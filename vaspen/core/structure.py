@@ -10,7 +10,10 @@ Beyond the ASE Atoms payload the model owns:
   the Auto Detect Bonds toggle re-enables per-edit recomputation),
 - stable atom IDs (survive deletion/undo — measurements reference
   them instead of indices),
-- multi-atom selection.
+- multi-atom selection,
+- per-atom per-direction fixed flags (VASP selective dynamics; the
+  atoms themselves stay constraint-free — constraints are attached
+  only to write-time copies).
 """
 
 from __future__ import annotations
@@ -23,10 +26,15 @@ import numpy as np
 from ase import Atoms
 from ase.geometry import cellpar_to_cell
 from ase.io import read as ase_read
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QCoreApplication, QObject, Signal
 
 from vaspen.core.bonds import Bond, find_bonds
-from vaspen.core.file_io import FileIO, extract_occupancy
+from vaspen.core.file_io import FileIO, extract_fixed_flags, extract_occupancy
+
+
+def _tr(text: str) -> str:
+    """Translate a user-visible string (translation context: StructureModel)."""
+    return QCoreApplication.translate("StructureModel", text)
 
 
 def wrap_in_padded_cell(atoms: Atoms, padding: float) -> Atoms:
@@ -96,6 +104,7 @@ class _Snapshot:
     bond_mode: str
     atom_ids: list[int]
     next_id: int
+    fixed: np.ndarray
     selected_indices: frozenset[int]
     selected_bonds: frozenset[int]
 
@@ -149,6 +158,12 @@ class StructureModel(QObject):
         # structures; None when the structure has no occupancy data.
         # Derived from atoms.info['occupancy'] at load time.
         self._occupancy: list[dict[str, float]] | None = None
+        # Per-atom per-direction fixed flags (N,3) bool — True = fixed
+        # (VASP "F"). Single source of truth; the model's atoms must
+        # stay constraint-free (constraints break `del atoms[i]`,
+        # supercell building and CIF writing).
+        self._fixed: np.ndarray = np.zeros((len(self._atoms), 3), dtype=bool)
+        self._adopt_fixed_flags()
 
     # ------------------------------------------------------------------
     # Properties
@@ -201,6 +216,7 @@ class StructureModel(QObject):
         path = Path(filepath)
         atoms = ase_read(str(path))
         self._atoms = atoms
+        self._adopt_fixed_flags()
         self._occupancy = extract_occupancy(atoms)
         self._filepath = str(path)
         self._dirty = False
@@ -217,6 +233,7 @@ class StructureModel(QObject):
         through FileIO.
         """
         self._atoms = atoms
+        self._adopt_fixed_flags()
         self._occupancy = extract_occupancy(atoms)
         if filepath is not None:
             self._filepath = str(Path(filepath))
@@ -225,6 +242,21 @@ class StructureModel(QObject):
         self._reset_derived_state()
         self._clear_history()
         self.structure_loaded.emit()
+
+    def _adopt_fixed_flags(self) -> None:
+        """Adopt fixed flags from the atoms' constraints and clear them.
+
+        ASE's vasp reader expresses a POSCAR "Selective dynamics" block
+        as FixAtoms/FixScaled constraints. The model keeps the flags in
+        its own (N,3) array and strips the constraints so downstream
+        operations (delete, supercell, CIF write) stay safe.
+        """
+        flags = extract_fixed_flags(self._atoms)
+        self._fixed = (np.asarray(flags, dtype=bool).copy()
+                       if flags is not None
+                       else np.zeros((len(self._atoms), 3), dtype=bool))
+        if self._atoms.constraints:
+            self._atoms.set_constraint([])
 
     def save(
         self,
@@ -250,7 +282,8 @@ class StructureModel(QObject):
         if path is None:
             raise ValueError("No filepath specified and no file loaded.")
 
-        FileIO.write(str(path), self._atoms, fmt=fmt, direct=direct)
+        FileIO.write(str(path), self._atoms, fmt=fmt, direct=direct,
+                     fixed_flags=self._fixed)
         self._filepath = str(path)
         self._dirty = False
 
@@ -384,6 +417,97 @@ class StructureModel(QObject):
             return None
 
     # ------------------------------------------------------------------
+    # Fixed atoms (VASP selective dynamics)
+    # ------------------------------------------------------------------
+
+    @property
+    def fixed_flags(self) -> np.ndarray:
+        """Per-atom per-direction fixed flags (N×3 bool, copy).
+
+        True = fixed in that direction (VASP "F"). The three directions
+        are the cell-vector (fractional) axes for periodic structures.
+        """
+        return self._fixed.copy()
+
+    @property
+    def any_fixed(self) -> bool:
+        """True when any atom has any direction fixed."""
+        return bool(self._fixed.any())
+
+    def is_fixed(self, index: int) -> bool:
+        """True when the atom has any direction fixed.
+
+        Any-direction-fixed counts as fixed (settled policy); an
+        out-of-range index is not fixed (UI-defensive).
+        """
+        return bool(0 <= index < len(self._fixed) and self._fixed[index].any())
+
+    def set_fixed(
+        self,
+        indices: int | Iterable[int],
+        mask: bool | np.ndarray,
+    ) -> None:
+        """Set fixed flags for atoms — one undo step.
+
+        No-op when the flags do not actually change (no undo entry, no
+        signal). Batch toggling overwrites partial per-direction flags
+        on the affected atoms — fine-grained adjustment goes through
+        per-atom masks.
+
+        Args:
+            indices: Atom index or iterable of atom indices.
+            mask: bool (applied to all three directions), a (3,) bool
+                vector (broadcast over the atoms), or a (K,3) bool array
+                (one row per atom).
+
+        Raises:
+            ValueError: For out-of-range indices or a mask shape that is
+                neither (3,) nor (K,3).
+        """
+        idx = [indices] if isinstance(indices, int) else list(indices)
+        if not idx:
+            return
+        if not all(0 <= i < len(self._atoms) for i in idx):
+            raise ValueError("Atom index out of bounds.")
+        if isinstance(mask, bool):
+            rows = np.full((len(idx), 3), mask, dtype=bool)
+        else:
+            arr = np.asarray(mask, dtype=bool)
+            if arr.shape == (3,):
+                rows = np.tile(arr, (len(idx), 1))
+            elif arr.shape == (len(idx), 3):
+                rows = arr
+            else:
+                raise ValueError(
+                    f"Fixed mask must be a bool, a (3,) vector or a "
+                    f"({len(idx)},3) array, got {arr.shape}."
+                )
+        if np.array_equal(self._fixed[idx], rows):
+            return  # no actual change: no undo entry, no signal
+        self._push_undo()
+        self._fixed[idx] = rows
+        self._dirty = True
+        self.structure_modified.emit()
+
+    def _ensure_movable(self, indices: Iterable[int] | None = None) -> None:
+        """Raise if any target atom is fixed (movement guard).
+
+        Frozen atoms must not move during editing (any fixed direction
+        counts). Called by every position-mutating method BEFORE the
+        undo push, so a rejected edit leaves the model and the undo
+        stack untouched (atomicity).
+        """
+        targets = (list(range(len(self._atoms))) if indices is None
+                   else list(indices))
+        frozen = [i for i in targets if self.is_fixed(i)]
+        if frozen:
+            raise ValueError(
+                _tr("Cannot move frozen atoms: {}").format(frozen)
+                if len(frozen) < len(self._atoms)
+                else _tr("Cannot move frozen atoms: unfreeze them first.")
+            )
+
+    # ------------------------------------------------------------------
     # Selection
     # ------------------------------------------------------------------
 
@@ -495,14 +619,38 @@ class StructureModel(QObject):
     # Structure mutation
     # ------------------------------------------------------------------
 
-    def replace_atoms(self, new_atoms: Atoms) -> None:
+    def replace_atoms(
+        self,
+        new_atoms: Atoms,
+        fixed_flags: np.ndarray | None = None,
+    ) -> None:
         """Replace the entire structure with a new Atoms object.
 
         Bonds reset to auto-connectivity (indices of the derived
-        structure are unrelated to the previous ones).
+        structure are unrelated to the previous ones). Fixed flags are
+        cleared by default (derived structures get fresh, free atoms —
+        surface, symmetrize); pass ``fixed_flags`` with shape (N,3) to
+        carry them over (element replacement, supercell tiling). Any
+        constraints on the incoming atoms are stripped.
+
+        Raises:
+            ValueError: If ``fixed_flags`` does not have shape (N, 3).
         """
+        flags: np.ndarray | None = None
+        if fixed_flags is not None:
+            flags = np.asarray(fixed_flags, dtype=bool)
+            if flags.shape != (len(new_atoms), 3):
+                raise ValueError(
+                    f"fixed_flags must have shape ({len(new_atoms)}, 3), "
+                    f"got {flags.shape}."
+                )
         self._push_undo()
         self._atoms = new_atoms
+        if self._atoms.constraints:
+            self._atoms.set_constraint([])
+        self._fixed = (flags.copy()
+                       if flags is not None
+                       else np.zeros((len(new_atoms), 3), dtype=bool))
         self._clear_occupancy()
         self._dirty = True
         self._selected_indices = set()
@@ -564,6 +712,7 @@ class StructureModel(QObject):
             self._bond_mode,
             list(self._atom_ids),
             self._next_id,
+            self._fixed.copy(),
             frozenset(self._selected_indices),
             frozenset(self._selected_bonds),
         )
@@ -616,6 +765,8 @@ class StructureModel(QObject):
         self._bond_mode = snapshot.bond_mode
         self._atom_ids = list(snapshot.atom_ids)
         self._next_id = snapshot.next_id
+        # Copy so snapshots never share the mutable array with the model.
+        self._fixed = snapshot.fixed.copy()
         self._dirty = True
         self._selected_indices = {
             i for i in snapshot.selected_indices if 0 <= i < len(self._atoms)
@@ -665,6 +816,10 @@ class StructureModel(QObject):
         # the axis-aligned box (also catches floating-point near-zero)
         if float(np.linalg.det(cell)) <= 1e-6 * float(np.prod(lengths)):
             raise ValueError("Degenerate cell parameters (zero or negative volume).")
+        if scale_atoms:
+            # Keeping fractional coordinates means moving the atoms along
+            # with the deforming cell — blocked for frozen atoms.
+            self._ensure_movable()
         self._push_undo()
         self._atoms.set_cell(cell, scale_atoms=scale_atoms)
         self._dirty = True
@@ -679,6 +834,11 @@ class StructureModel(QObject):
         preserved; the filepath is NOT changed. Intended for molecule-like
         structures; do not call on slabs (pbc partially True) — it rebuilds
         the cell from the atom bounding box.
+
+        Allowed with frozen atoms (movement-guard exemption): the shift
+        is a uniform whole-structure translation (relative geometry and
+        fixed flags unchanged), and it is the required path to export a
+        molecule with frozen atoms to POSCAR.
 
         Args:
             padding: Vacuum padding on each side of the bounding box, in Angstrom.
@@ -698,6 +858,7 @@ class StructureModel(QObject):
 
     def set_positions(self, positions: np.ndarray) -> None:
         """Set Cartesian positions (N×3)."""
+        self._ensure_movable()
         self._push_undo()
         self._atoms.set_positions(positions)
         self._dirty = True
@@ -717,6 +878,7 @@ class StructureModel(QObject):
         both must land in a single undo entry. Bonds survive (manual
         mode) or re-detect (auto mode).
         """
+        self._ensure_movable()
         self._push_undo()
         self._atoms.set_positions(positions)
         if cell is not None:
@@ -727,6 +889,7 @@ class StructureModel(QObject):
 
     def set_scaled_positions(self, scaled: np.ndarray) -> None:
         """Set fractional coordinates (N×3)."""
+        self._ensure_movable()
         self._push_undo()
         self._atoms.set_scaled_positions(scaled)
         self._dirty = True
@@ -740,6 +903,7 @@ class StructureModel(QObject):
         """
         if not 0 <= index < len(self._atoms):
             return
+        self._ensure_movable([index])
         self._push_undo()
         scaled_positions = self._atoms.get_scaled_positions()
         scaled_positions[index] = np.asarray(scaled, dtype=float)
@@ -749,11 +913,16 @@ class StructureModel(QObject):
         self.structure_modified.emit()
 
     def extend_atoms(self, other: Atoms | StructureModel) -> None:
-        """Append atoms from another Atoms or StructureModel."""
+        """Append atoms from another Atoms or StructureModel.
+
+        New atoms are appended free (all fixed flags False).
+        """
         if isinstance(other, StructureModel):
             other = other._atoms
         self._push_undo()
         self._atoms.extend(other)
+        self._fixed = np.vstack(
+            [self._fixed, np.zeros((len(other), 3), dtype=bool)])
         self._clear_occupancy()
         self._atom_ids.extend(range(self._next_id, self._next_id + len(other)))
         self._next_id += len(other)
@@ -764,6 +933,7 @@ class StructureModel(QObject):
     def set_atom_position(self, index: int, position: np.ndarray) -> None:
         """Set one atom's Cartesian position (absolute)."""
         if 0 <= index < len(self._atoms):
+            self._ensure_movable([index])
             self._push_undo()
             self._atoms.positions[index] = np.asarray(position, dtype=float)
             self._dirty = True
@@ -791,6 +961,7 @@ class StructureModel(QObject):
             return
         if not all(0 <= i < len(self._atoms) for i in idx):
             raise ValueError("Atom index out of bounds.")
+        self._ensure_movable(idx)
         self._push_undo()
         for i, p in zip(idx, pos):
             self._atoms.positions[i] = p
@@ -848,6 +1019,7 @@ class StructureModel(QObject):
         for d in deleted:
             del self._atoms[d]
             del self._atom_ids[d]
+        self._fixed = np.delete(self._fixed, deleted, axis=0)
         self._clear_occupancy()
 
         self._dirty = True
@@ -858,6 +1030,7 @@ class StructureModel(QObject):
     def translate_atom(self, index: int, vector: np.ndarray) -> None:
         """Translate a single atom by a Cartesian vector."""
         if 0 <= index < len(self._atoms):
+            self._ensure_movable([index])
             self._push_undo()
             self._atoms[index].position += np.asarray(vector)
             self._dirty = True

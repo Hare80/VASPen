@@ -11,7 +11,9 @@ import re
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
 from ase import Atoms
+from ase.constraints import FixAtoms, FixScaled
 from PySide6.QtCore import QCoreApplication
 
 # Type aliases
@@ -103,6 +105,74 @@ def vasp_write_atoms(atoms: Atoms, direct: bool) -> Atoms:
     wrapped = atoms.copy()
     wrapped.wrap()
     return wrapped
+
+
+def extract_fixed_flags(atoms: Atoms) -> np.ndarray | None:
+    """Extract per-atom per-direction fixed flags from ASE constraints.
+
+    ASE's vasp reader converts a POSCAR "Selective dynamics" block into
+    constraints: fully-fixed rows ("F F F") become ``FixAtoms`` and
+    partially-fixed rows become ``FixScaled``. Returns an (N,3) bool
+    array (True = fixed = VASP "F") in atom order, or None when the
+    atoms carry no such constraints. Unsupported constraint types are
+    ignored (all-free rows produce no constraint in the first place).
+    """
+    flags = np.zeros((len(atoms), 3), dtype=bool)
+    found = False
+    for con in atoms.constraints:
+        if isinstance(con, FixAtoms):
+            for idx in np.atleast_1d(con.index):
+                flags[int(idx)] = True
+            found = True
+        elif isinstance(con, FixScaled):
+            mask = np.asarray(con.mask, dtype=bool)
+            if mask.ndim == 1:
+                mask = mask[np.newaxis]  # (3,) broadcast over indices
+            for k, idx in enumerate(np.atleast_1d(con.index)):
+                flags[int(idx)] = mask[k]
+            found = True
+    return flags if found else None
+
+
+def atoms_with_fixed_constraints(
+    atoms: Atoms,
+    flags: np.ndarray | None,
+) -> Atoms:
+    """Return atoms carrying the given fixed flags as ASE constraints.
+
+    Constraints are attached to a copy — the input object is never
+    modified and carries no constraints itself (constraints on the
+    model's atoms would break ``del atoms[i]``, supercell building and
+    CIF writing; see StructureModel). ASE's vasp writer emits the
+    "Selective dynamics" block for these constraints: fully-fixed rows
+    become ``FixAtoms``, partially-fixed rows become ``FixScaled``
+    (which needs a cell — without one, partial rows degrade to
+    fully-fixed). Returns the input unchanged when flags is None or
+    all-free.
+
+    Raises:
+        ValueError: If ``flags`` does not have shape (N, 3).
+    """
+    if flags is None:
+        return atoms
+    arr = np.asarray(flags, dtype=bool)
+    if arr.shape != (len(atoms), 3):
+        raise ValueError(
+            f"fixed_flags must have shape ({len(atoms)}, 3), got {arr.shape}"
+        )
+    if not arr.any():
+        return atoms
+    out = atoms.copy()
+    constraints = []
+    for i, row in enumerate(arr):
+        if not row.any():
+            continue
+        if row.all() or out.get_cell().rank < 3:
+            constraints.append(FixAtoms(i))
+        else:
+            constraints.append(FixScaled(i, mask=row))
+    out.set_constraint(constraints)
+    return out
 
 
 # Numeric prefix of an occupancy token: accepts "0.5", "1.0", "0.5(2)"
@@ -324,6 +394,7 @@ class FileIO:
         atoms: Atoms,
         fmt: str | None = None,
         direct: bool = False,
+        fixed_flags: np.ndarray | None = None,
     ) -> None:
         """Write a structure file.
 
@@ -335,6 +406,12 @@ class FileIO:
                 coordinates instead of Cartesian. Atoms are wrapped into
                 [0,1) first on a copy — the input object is never
                 modified. Ignored for other formats.
+            fixed_flags: For VASP output only: per-atom per-direction
+                fixed flags, shape (N,3) bool (True = fixed = "F").
+                Emits the "Selective dynamics" block via ASE constraints
+                attached to a copy — the input atoms are never modified.
+                Silently ignored for other formats (they cannot
+                represent it).
 
         Raises:
             ValueError: If the file extension is not registered.
@@ -361,8 +438,9 @@ class FileIO:
             ).format(target))
         if target == "vasp":
             from ase.io import write as ase_write
-            ase_write(str(path), vasp_write_atoms(atoms, direct),
-                      format="vasp", direct=direct)
+            out = atoms_with_fixed_constraints(
+                vasp_write_atoms(atoms, direct), fixed_flags)
+            ase_write(str(path), out, format="vasp", direct=direct)
         elif fmt is not None:
             # Explicit format request bypasses the extension registry
             from ase.io import write as ase_write

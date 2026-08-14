@@ -7,6 +7,11 @@ the file carries them (read-only). Coordinate and element fields are
 plain text inputs — no spin-box arrows; invalid input reverts to the
 model value.
 
+Also shows the fixed (frozen) state — VASP selective dynamics: a master
+"Fixed" checkbox (all three directions) plus per-axis X/Y/Z boxes
+(periodic structures only). A frozen atom's coordinate fields are
+read-only; the element field stays editable.
+
 Non-modal/persistent → implements changeEvent + refresh so it
 re-translates live (CLAUDE.md §11.2 pattern).
 """
@@ -18,6 +23,7 @@ from ase.data import chemical_symbols
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QCompleter,
     QFormLayout,
     QHBoxLayout,
@@ -90,6 +96,29 @@ class AtomPropertiesPanel(QWidget):
         layout.addRow(QLabel("fx:"), self._fx_edit)
         layout.addRow(QLabel("fy:"), self._fy_edit)
         layout.addRow(QLabel("fz:"), self._fz_edit)
+
+        # Fixed (frozen) state — VASP selective dynamics. The master
+        # checkbox freezes/unfreezes all three directions; the per-axis
+        # boxes adjust individual directions (periodic structures only —
+        # the axes are the cell-vector directions).
+        self._fixed_check = QCheckBox(self.tr("Fixed"))
+        self._fixed_check.toggled.connect(self._on_fixed_toggled)
+        self._fixed_caption = QLabel(self.tr("Fixed (selective dynamics)"))
+        layout.addRow(self._fixed_caption, self._fixed_check)
+        self._fx_fixed = QCheckBox("X")
+        self._fy_fixed = QCheckBox("Y")
+        self._fz_fixed = QCheckBox("Z")
+        for axis, chk in enumerate((self._fx_fixed, self._fy_fixed, self._fz_fixed)):
+            chk.toggled.connect(
+                lambda checked, ax=axis: self._on_direction_toggled(ax, checked))
+        dir_row = QWidget(self)
+        dir_layout = QHBoxLayout(dir_row)
+        dir_layout.setContentsMargins(0, 0, 0, 0)
+        dir_layout.setSpacing(4)
+        for chk in (self._fx_fixed, self._fy_fixed, self._fz_fixed):
+            dir_layout.addWidget(chk)
+        dir_layout.addStretch()
+        layout.addRow("", dir_row)
 
         # Site composition (partially-occupied structures only; hidden
         # otherwise — see refresh()).
@@ -177,6 +206,8 @@ class AtomPropertiesPanel(QWidget):
         self._element_pick_btn.setToolTip(self.tr("Open periodic table…"))
         self._id_caption.setText(self.tr("ID:"))
         self._frac_caption.setText(self.tr("Fractional (periodic only)"))
+        self._fixed_check.setText(self.tr("Fixed"))
+        self._fixed_caption.setText(self.tr("Fixed (selective dynamics)"))
         self._composition_caption.setText(self.tr("Composition"))
         self._charge_caption.setText(self.tr("Charge:"))
         self._force_caption.setText(self.tr("Force:"))
@@ -204,6 +235,8 @@ class AtomPropertiesPanel(QWidget):
             for w in (self._element_edit, self._element_pick_btn, self._id_label,
                       self._x_edit, self._y_edit, self._z_edit,
                       self._fx_edit, self._fy_edit, self._fz_edit,
+                      self._fixed_check, self._fx_fixed, self._fy_fixed,
+                      self._fz_fixed,
                       self._charge_label, self._force_label, self._velocity_label):
                 w.setEnabled(single)
 
@@ -237,9 +270,26 @@ class AtomPropertiesPanel(QWidget):
                 self._x_edit.setText(f"{pos[0]:.6f}")
                 self._y_edit.setText(f"{pos[1]:.6f}")
                 self._z_edit.setText(f"{pos[2]:.6f}")
+
+                # Fixed state: master checkbox + per-axis direction boxes.
+                # Direction boxes are periodic-only (they are cell-vector
+                # directions); a frozen atom's coordinate fields are
+                # read-only (element replacement stays available).
+                flags = model.fixed_flags[index]
+                self._fixed_check.setChecked(bool(flags.any()))
+                for chk, v in zip((self._fx_fixed, self._fy_fixed, self._fz_fixed),
+                                  flags):
+                    chk.setChecked(bool(v))
+                rank3 = bool(model.atoms.get_cell().rank == 3)
+                for chk in (self._fx_fixed, self._fy_fixed, self._fz_fixed):
+                    chk.setEnabled(single and rank3)
+                frozen = model.is_fixed(index)
+                for edit in (self._x_edit, self._y_edit, self._z_edit):
+                    edit.setEnabled(single and not frozen)
+
                 periodic = model.is_periodic
                 for edit in (self._fx_edit, self._fy_edit, self._fz_edit):
-                    edit.setEnabled(single and periodic)
+                    edit.setEnabled(single and periodic and not frozen)
                 if periodic:
                     frac = model.scaled_positions[index]
                     self._fx_edit.setText(f"{frac[0]:.6f}")
@@ -294,6 +344,30 @@ class AtomPropertiesPanel(QWidget):
         if symbol != self._model.symbols[index]:
             StructureBuilder.replace_element(self._model, index, symbol)
 
+    def _on_fixed_toggled(self, checked: bool) -> None:
+        if self._refreshing or self._model is None:
+            return
+        index = self._single_index()
+        if index is None:
+            return
+        try:
+            self._model.set_fixed(index, bool(checked))
+        except ValueError:
+            self._revert_edits()
+
+    def _on_direction_toggled(self, axis: int, checked: bool) -> None:
+        if self._refreshing or self._model is None:
+            return
+        index = self._single_index()
+        if index is None:
+            return
+        mask = self._model.fixed_flags[index]
+        mask[axis] = bool(checked)
+        try:
+            self._model.set_fixed(index, mask)
+        except ValueError:
+            self._revert_edits()
+
     def _on_cartesian_edited(self) -> None:
         if self._refreshing or self._model is None:
             return
@@ -306,7 +380,10 @@ class AtomPropertiesPanel(QWidget):
         except ValueError:
             self._revert_edits()
             return
-        self._model.set_atom_position(index, np.asarray(pos, dtype=float))
+        try:
+            self._model.set_atom_position(index, np.asarray(pos, dtype=float))
+        except ValueError:  # movement guard (frozen atom) — backstop
+            self._revert_edits()
 
     def _on_fractional_edited(self) -> None:
         if self._refreshing or self._model is None:
@@ -320,4 +397,7 @@ class AtomPropertiesPanel(QWidget):
         except ValueError:
             self._revert_edits()
             return
-        self._model.set_atom_scaled_position(index, np.asarray(frac, dtype=float))
+        try:
+            self._model.set_atom_scaled_position(index, np.asarray(frac, dtype=float))
+        except ValueError:  # movement guard (frozen atom) — backstop
+            self._revert_edits()

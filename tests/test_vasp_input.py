@@ -282,3 +282,37 @@ def test_generate_all_after_make_periodic(water_molecule):
     assert mesh_line, files["KPOINTS"]
     n1, n2, n3 = (int(x) for x in mesh_line[0].split())
     assert n1 >= 1 and n2 >= 1 and n3 >= 1
+
+
+# ----------------------------------------------------------------------
+# generate_all_inputs — fixed atoms (Selective dynamics)
+# ----------------------------------------------------------------------
+
+def test_generate_all_poscar_has_selective_dynamics_when_fixed():
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "OFe2", positions=np.eye(3) * 1.5, cell=[3, 3, 3], pbc=True,
+    ))
+    model.set_fixed(0, True)
+
+    files = generate_all_inputs(model)
+
+    lines = files["POSCAR"].splitlines()
+    assert "Selective dynamics" in lines
+    coord_line = lines.index("Selective dynamics") + 1
+    first_coords = lines[coord_line + 1].split()
+    assert first_coords[3:6] == ["F", "F", "F"]
+    second_coords = lines[coord_line + 2].split()
+    assert second_coords[3:6] == ["T", "T", "T"]
+    # other files unaffected
+    assert "ENCUT = 400" in files["INCAR"]
+    assert "Gamma" in files["KPOINTS"]
+
+
+def test_generate_all_poscar_plain_when_all_free():
+    model = StructureModel()
+    model.load_atoms(Atoms(
+        "OFe2", positions=np.eye(3) * 1.5, cell=[3, 3, 3], pbc=True,
+    ))
+    files = generate_all_inputs(model)
+    assert "Selective dynamics" not in files["POSCAR"]

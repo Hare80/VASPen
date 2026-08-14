@@ -216,6 +216,10 @@ class StructureTreePanel(QWidget):
 
                 for j in range(3):
                     val_item = QTableWidgetItem(f"{values[i, j]:.6f}")
+                    if model.is_fixed(i):
+                        # Frozen atoms: coordinate cells are read-only
+                        # (the element column stays editable).
+                        val_item.setFlags(val_item.flags() & ~Qt.ItemIsEditable)
                     self._table.setItem(i, 2 + j, val_item)
 
             # Restore selection highlight (multi-select aware)
@@ -323,12 +327,22 @@ class StructureTreePanel(QWidget):
         if self._frac_mode and self._model.is_periodic:
             frac = self._model.scaled_positions[row].copy()
             frac[col - 2] = new_value
-            self._model.set_atom_scaled_position(row, frac)
+            try:
+                self._model.set_atom_scaled_position(row, frac)
+            except ValueError as e:  # movement guard (frozen atom) — backstop
+                QMessageBox.warning(self, self.tr("Frozen Atom"), str(e))
+                self.refresh()
+                return
             logger.debug("Atom %d frac position set to %s", row, frac)
         else:
             pos = self._model.positions[row].copy()
             pos[col - 2] = new_value
-            self._model.set_atom_position(row, pos)
+            try:
+                self._model.set_atom_position(row, pos)
+            except ValueError as e:  # movement guard (frozen atom) — backstop
+                QMessageBox.warning(self, self.tr("Frozen Atom"), str(e))
+                self.refresh()
+                return
             logger.debug("Atom %d moved to %s", row, pos)
 
     def _change_element(self, row: int, item) -> None:

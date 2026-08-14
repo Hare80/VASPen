@@ -599,6 +599,62 @@ Files: {}</source>
         <source>Aromatic</source>
         <translation>芳香键</translation>
     </message>
+        <message>
+            <source>&amp;Freeze</source>
+            <translation>冻结(&amp;F)</translation>
+        </message>
+        <message>
+            <source>Freeze the selected atoms (VASP selective dynamics)</source>
+            <translation>冻结选中的原子（VASP 选择性动力学）</translation>
+        </message>
+        <message>
+            <source>Frozen {} atoms.</source>
+            <translation>已冻结 {} 个原子。</translation>
+        </message>
+        <message>
+            <source>Unfroze {} atoms.</source>
+            <translation>已解冻 {} 个原子。</translation>
+        </message>
+        <message>
+            <source>Cannot move frozen atoms — unfreeze them first.</source>
+            <translation>无法移动已冻结的原子——请先解冻。</translation>
+        </message>
+        <message>
+            <source>Some atoms are frozen. Unfreeze them before transforming.</source>
+            <translation>存在已冻结的原子，请先解冻再进行变换。</translation>
+        </message>
+        <message>
+            <source>Some atoms are frozen. Unfreeze them before symmetrizing.</source>
+            <translation>存在已冻结的原子，请先解冻再查找对称性。</translation>
+        </message>
+        <message>
+            <source>&amp;Unfreeze</source>
+            <translation>解冻(&amp;U)</translation>
+        </message>
+        <message>
+            <source>Unfreeze the selected atoms (clear all fixed directions)</source>
+            <translation>解冻选中的原子（清除全部固定方向）</translation>
+        </message>
+        <message>
+            <source>Wrap in &amp;Periodic Cell...</source>
+            <translation>包裹为周期结构(&amp;P)...</translation>
+        </message>
+        <message>
+            <source>Convert a molecule into a periodic structure (vacuum box)</source>
+            <translation>将分子结构转换为带真空层的周期结构</translation>
+        </message>
+        <message>
+            <source>Wrapped in periodic cell ({} Å vacuum).</source>
+            <translation>已包裹为周期结构（真空层 {} Å）。</translation>
+        </message>
+        <message>
+            <source>Load a structure first.</source>
+            <translation>请先加载结构。</translation>
+        </message>
+        <message>
+            <source>The structure is already periodic.</source>
+            <translation>结构已是周期结构。</translation>
+        </message>
 </context>
 <context>
     <name>Viewport3D</name>
@@ -824,6 +880,10 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <source>Cartesian</source>
         <translation>笛卡尔坐标</translation>
     </message>
+        <message>
+            <source>Frozen Atom</source>
+            <translation>原子已冻结</translation>
+        </message>
 </context>
 <context>
     <name>FileIO</name>
@@ -968,6 +1028,14 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <source>Open periodic table…</source>
         <translation>打开元素周期表…</translation>
     </message>
+        <message>
+            <source>Fixed</source>
+            <translation>固定</translation>
+        </message>
+        <message>
+            <source>Fixed (selective dynamics)</source>
+            <translation>固定（选择性动力学）</translation>
+        </message>
 </context>
 <context>
     <name>PeriodicTableDialog</name>
@@ -990,6 +1058,10 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <source>These parameters do not form a valid unit cell.</source>
         <translation>这些参数无法构成有效的晶胞。</translation>
     </message>
+        <message>
+            <source>Cannot scale atoms: some atoms are frozen.</source>
+            <translation>无法缩放原子：存在已冻结的原子。</translation>
+        </message>
 </context>
 <context>
     <name>SupercellDialog</name>
@@ -1522,6 +1594,17 @@ This is the standard VASP pseudopotential directory layout.</source>
         <translation>赝势库应包含如下子目录结构：
   PBE.54/Fe/POTCAR、PBE.54/O/POTCAR、……
 这是 VASP 赝势目录的标准布局。</translation>
+    </message>
+</context>
+<context>
+    <name>StructureModel</name>
+    <message>
+        <source>Cannot move frozen atoms: unfreeze them first.</source>
+        <translation>无法移动已冻结的原子：请先解冻。</translation>
+    </message>
+    <message>
+        <source>Cannot move frozen atoms: {}</source>
+        <translation>无法移动已冻结的原子：{}</translation>
     </message>
 </context>
 </TS>

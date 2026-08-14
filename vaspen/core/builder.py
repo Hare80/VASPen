@@ -59,7 +59,8 @@ class StructureBuilder:
         if 0 <= index < len(atoms):
             atoms[index].symbol = new_symbol
             selection = model.selected_indices
-            model.replace_atoms(atoms)  # triggers signal (and clears selection)
+            # Element replacement keeps the fixed flags (the atom stays).
+            model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
             if selection:
                 model.set_selection(selection)
 
@@ -76,7 +77,10 @@ class StructureBuilder:
         """
         P = np.diag(scaling)
         new_atoms = make_supercell(model.atoms, P)
-        model.replace_atoms(new_atoms)
+        # Diagonal-P supercells are block-ordered (new index = block*N + i),
+        # so tiling the per-atom flags replicates them per image.
+        flags = np.tile(model.fixed_flags, (int(np.prod(scaling)), 1))
+        model.replace_atoms(new_atoms, fixed_flags=flags)
 
     @staticmethod
     def translate_atoms(
@@ -85,6 +89,10 @@ class StructureBuilder:
         indices: list[int] | None = None,
     ) -> None:
         """Translate atoms by a Cartesian vector.
+
+        NOTE: not wired into the UI — goes through replace_atoms, which
+        clears fixed flags; callers must pass the model's flags (or
+        reject frozen atoms) themselves.
 
         Args:
             model: Target structure model.
@@ -99,27 +107,41 @@ class StructureBuilder:
             for i in indices:
                 if 0 <= i < len(atoms):
                     atoms[i].position += vec
-        model.replace_atoms(atoms)
+        model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
 
     @staticmethod
     def sort_atoms(model: StructureModel) -> None:
-        """Sort atoms by atomic number (default ASE sort)."""
+        """Sort atoms by atomic number (default ASE sort).
+
+        A pure re-ordering: the fixed flags follow the atoms through the
+        same stable-sort permutation ASE uses, but the mapping between
+        old and new indices is lost for bonds/IDs (replace_atoms rebuilds
+        them) — not wired into the UI.
+        """
         new_atoms = ase_sort(model.atoms)
-        model.replace_atoms(new_atoms)
+        order = np.argsort(model.atoms.numbers, kind="stable")
+        model.replace_atoms(new_atoms, fixed_flags=model.fixed_flags[order])
 
     @staticmethod
     def wrap_atoms(model: StructureModel) -> None:
-        """Wrap atoms back into the unit cell."""
+        """Wrap atoms back into the unit cell.
+
+        NOTE: not wired into the UI — see translate_atoms. A wrap is a
+        periodic identity, so flags carry over unchanged.
+        """
         atoms = model.atoms.copy()
         atoms.wrap()
-        model.replace_atoms(atoms)
+        model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
 
     @staticmethod
     def center_atoms(model: StructureModel, axis: tuple[bool, bool, bool] = (True, True, True)) -> None:
-        """Center atoms in the unit cell along the given axes."""
+        """Center atoms in the unit cell along the given axes.
+
+        NOTE: not wired into the UI — see translate_atoms.
+        """
         atoms = model.atoms.copy()
         atoms.center()
-        model.replace_atoms(atoms)
+        model.replace_atoms(atoms, fixed_flags=model.fixed_flags)
 
     @staticmethod
     def build_molecule(symbol: str) -> StructureModel:

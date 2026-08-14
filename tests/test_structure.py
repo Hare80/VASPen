@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 from ase import Atoms
+from ase.constraints import FixAtoms, FixScaled
 
 from vaspen.core.structure import StructureModel, wrap_in_padded_cell
 
@@ -627,3 +628,264 @@ def test_edit_clears_disorder_undo_restores(disordered_atoms):
     assert not model.has_disorder
     model.undo()
     assert model.has_disorder
+
+
+# ----------------------------------------------------------------------
+# Fixed / frozen atoms (VASP selective dynamics)
+# ----------------------------------------------------------------------
+
+def _periodic_h3() -> Atoms:
+    return Atoms(
+        "H3", positions=[[0, 0, 0], [0.8, 0, 0], [1.6, 0, 0]],
+        cell=[10, 10, 10], pbc=True)
+
+
+def test_fixed_flags_default_all_free():
+    model = StructureModel()
+    model.load_atoms(_periodic_h3())
+    assert model.fixed_flags.shape == (3, 3)
+    assert not model.fixed_flags.any()
+    assert not model.any_fixed
+    assert not model.is_fixed(0)
+    assert model.atoms.constraints == []
+
+
+def test_load_atoms_extracts_fixatoms_and_fixscaled():
+    """ASE's vasp reader represents "Selective dynamics" as constraints;
+    loading must adopt them into the flag array and strip the
+    constraints (they break delete/supercell/CIF write)."""
+    atoms = _periodic_h3()
+    atoms.set_constraint([
+        FixAtoms(indices=[0]),
+        FixScaled(1, mask=[True, False, True], cell=atoms.get_cell()),
+    ])
+    model = StructureModel()
+    model.load_atoms(atoms)
+    assert model.fixed_flags[0].tolist() == [True, True, True]
+    assert model.fixed_flags[1].tolist() == [True, False, True]
+    assert model.fixed_flags[2].tolist() == [False, False, False]
+    assert model.any_fixed
+    assert model.is_fixed(1)  # any direction fixed counts
+    assert model.atoms.constraints == []
+
+
+def test_constructor_extracts_and_clears_constraints():
+    """StructureModel(Atoms with constraints) is used by SurfaceCutter."""
+    atoms = _periodic_h3()
+    atoms.set_constraint([FixAtoms(indices=[2])])
+    model = StructureModel(atoms)
+    assert model.is_fixed(2)
+    assert model.atoms.constraints == []
+
+
+def test_load_atoms_without_constraints_stays_all_free():
+    model = StructureModel()
+    model.load_atoms(_periodic_h3())
+    assert not model.any_fixed
+
+
+def test_set_fixed_scalar_bool_freezes_all_directions(model):
+    model.load_atoms(_periodic_h3())
+    modified = _counter(model, "structure_modified")
+
+    model.set_fixed(0, True)
+
+    assert model.fixed_flags[0].tolist() == [True, True, True]
+    assert model.is_fixed(0)
+    assert modified.count == 1
+    assert model.can_undo
+
+
+def test_set_fixed_vector_broadcast_and_per_index_masks(model):
+    model.load_atoms(_periodic_h3())
+
+    model.set_fixed([0, 1], np.array([True, False, True]))
+    assert model.fixed_flags[0].tolist() == [True, False, True]
+    assert model.fixed_flags[1].tolist() == [True, False, True]
+
+    model.set_fixed([0, 1], np.array(
+        [[True, True, True], [False, True, False]]))
+    assert model.fixed_flags[0].tolist() == [True, True, True]
+    assert model.fixed_flags[1].tolist() == [False, True, False]
+
+
+def test_set_fixed_invalid_mask_raises(model):
+    model.load_atoms(_periodic_h3())
+    with pytest.raises(ValueError):
+        model.set_fixed([0, 1], np.zeros((2, 2), dtype=bool))  # bad shape
+    with pytest.raises(ValueError):
+        model.set_fixed(99, True)  # out of range
+
+
+def test_set_fixed_no_change_no_emit_no_undo(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    modified = _counter(model, "structure_modified")
+    undo_len = len(model._undo_stack)
+
+    model.set_fixed(0, True)  # same value again
+
+    assert modified.count == 0
+    assert len(model._undo_stack) == undo_len
+
+
+def test_set_fixed_undo_redo_restores_flags(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    assert model.is_fixed(0)
+
+    model.undo()
+    assert not model.is_fixed(0)
+    assert model.fixed_flags.shape == (3, 3)
+
+    model.redo()
+    assert model.is_fixed(0)
+
+
+def test_fixed_atom_blocks_movement_methods(model):
+    """Every position-mutating method refuses a frozen atom, leaves the
+    model untouched and pushes no undo entry."""
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    before = model.positions.copy()
+    undo_len = len(model._undo_stack)
+
+    with pytest.raises(ValueError):
+        model.set_atom_position(0, [5.0, 5.0, 5.0])
+    with pytest.raises(ValueError):
+        model.set_atom_scaled_position(0, [0.5, 0.5, 0.5])
+    with pytest.raises(ValueError):
+        model.translate_atom(0, [1.0, 0.0, 0.0])
+    with pytest.raises(ValueError):
+        model.set_positions(np.full((3, 3), 2.0))
+    with pytest.raises(ValueError):
+        model.set_scaled_positions(np.full((3, 3), 0.25))
+    with pytest.raises(ValueError):
+        model.set_geometry(np.full((3, 3), 2.0))
+
+    assert np.allclose(model.positions, before)
+    assert len(model._undo_stack) == undo_len
+
+
+def test_free_atom_still_movable_when_another_is_fixed(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    model.set_atom_position(1, [4.0, 0.0, 0.0])
+    assert np.allclose(model.positions[1], [4.0, 0.0, 0.0])
+
+
+def test_set_atom_positions_mixed_fixed_free_is_atomic(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    before = model.positions.copy()
+    with pytest.raises(ValueError):
+        model.set_atom_positions([0, 1], [[1, 0, 0], [2, 0, 0]])
+    assert np.allclose(model.positions, before)  # free atom untouched too
+
+
+def test_set_cell_parameters_scale_blocked_when_fixed(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    with pytest.raises(ValueError):
+        model.set_cell_parameters((11, 11, 11), (90, 90, 90),
+                                 scale_atoms=True)
+
+
+def test_set_cell_parameters_noscale_allowed_when_fixed(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    pos_before = model.positions.copy()
+    model.set_cell_parameters((11, 11, 11), (90, 90, 90),
+                             scale_atoms=False)
+    assert np.allclose(model.positions, pos_before)  # Cartesian kept
+    assert np.allclose(model.cell_lengths, [11, 11, 11])
+
+
+def test_make_periodic_allowed_with_fixed_atoms():
+    """Movement-guard exemption: the uniform wrap is the required path to
+    export a molecule with frozen atoms to POSCAR."""
+    mol = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]])
+    model = StructureModel()
+    model.load_atoms(mol)
+    model.set_fixed(0, True)
+
+    model.make_periodic(5.0)
+
+    assert model.is_periodic
+    assert model.is_fixed(0)
+    assert not model.is_fixed(1)
+    assert model.fixed_flags.shape == (2, 3)
+
+
+def test_extend_atoms_appends_free_rows(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    model.extend_atoms(Atoms("O", positions=[[5, 5, 5]]))
+    assert model.fixed_flags.shape == (4, 3)
+    assert model.is_fixed(0)
+    assert not model.is_fixed(3)  # new atom free
+
+
+def test_delete_atom_drops_fixed_row_and_undo_restores(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(1, True)
+    model.delete_atom(0)  # deleting BEFORE the fixed atom shifts it down
+    assert model.fixed_flags.shape == (2, 3)
+    assert model.is_fixed(0)  # the fixed atom moved to index 0
+    model.undo()
+    assert model.fixed_flags.shape == (3, 3)
+    assert model.is_fixed(1)
+
+
+def test_replace_atoms_clears_fixed_by_default(model):
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(0, True)
+    model.replace_atoms(_periodic_h3())
+    assert not model.any_fixed
+    assert model.fixed_flags.shape == (3, 3)
+
+
+def test_replace_atoms_accepts_fixed_flags(model):
+    model.load_atoms(_periodic_h3())
+    flags = np.zeros((3, 3), dtype=bool)
+    flags[1] = True
+    model.replace_atoms(_periodic_h3(), fixed_flags=flags)
+    assert model.fixed_flags[1].tolist() == [True, True, True]
+    with pytest.raises(ValueError):
+        model.replace_atoms(_periodic_h3(), fixed_flags=np.zeros((2, 3)))
+
+
+# ----------------------------------------------------------------------
+# Builder flag carry-over (element replacement, supercell)
+# ----------------------------------------------------------------------
+
+def test_replace_element_preserves_fixed_flags():
+    from vaspen.core.builder import StructureBuilder
+
+    model = StructureModel()
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(1, True)
+
+    StructureBuilder.replace_element(model, 1, "Li")
+
+    assert model.symbols[1] == "Li"
+    assert model.is_fixed(1)
+    assert not model.is_fixed(0)
+
+
+def test_make_supercell_tiles_fixed_flags_block_order():
+    """Diagonal-P supercells are block-ordered: new index = block*N + i,
+    so a frozen atom i is frozen at every image i + k*N."""
+    from vaspen.core.builder import StructureBuilder
+
+    model = StructureModel()
+    model.load_atoms(_periodic_h3())
+    model.set_fixed(1, True)
+
+    StructureBuilder.make_supercell(model, (2, 1, 1))
+
+    assert model.n_atoms == 6
+    for i in (1, 4):  # atom 1 in both images
+        assert model.is_fixed(i)
+    for i in (0, 2, 3, 5):
+        assert not model.is_fixed(i)
