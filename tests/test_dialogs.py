@@ -1214,3 +1214,27 @@ def test_surface_dialog_rapid_param_changes_serialize(qtbot, srtio3, monkeypatch
     assert dlg._slab_infos[0].top_composition == "L5"
     assert dlg._pending_key is None
     assert dlg._termination_combo.itemText(0).startswith("1/1")
+
+
+# ----------------------------------------------------------------------
+# Symmetry dialog — Conventional/Primitive cell toggle (2026-08-15)
+# ----------------------------------------------------------------------
+
+def test_symmetry_dialog_primitive_cell_selection(qtbot, si_bulk):
+    """Selecting "Primitive cell" converts to the primitive instead of
+    the conventional cell."""
+    m = StructureModel()
+    m.load_atoms(si_bulk)
+    dlg = SymmetryDialog(m)
+    qtbot.addWidget(dlg)
+
+    assert dlg._cell_type_combo.currentIndex() == 0  # conventional default
+    dlg._cell_type_combo.setCurrentIndex(1)  # primitive
+    dlg._on_symmetrize()
+    assert dlg.result_atoms is not None
+    assert len(dlg.result_atoms) == len(si_bulk)  # already primitive
+
+    # conventional path still works from the selector
+    dlg._cell_type_combo.setCurrentIndex(0)
+    dlg._on_symmetrize()
+    assert len(dlg.result_atoms) == 8  # conventional diamond cell

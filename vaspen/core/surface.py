@@ -55,6 +55,102 @@ def _d_hkl(atoms: Atoms, miller: tuple[int, int, int]) -> float:
     return 1.0 / np.linalg.norm(np.linalg.solve(atoms.get_cell().T, normal))
 
 
+def _reduce_in_plane(a: np.ndarray, b: np.ndarray,
+                     n: np.ndarray, area: float) -> tuple[np.ndarray, np.ndarray]:
+    """Shortest pair of in-plane lattice vectors spanning the same 2D lattice.
+
+    Enumerates small integer combinations of (a, b) and keeps the pair
+    with the smallest total length (ties: the one closest to
+    orthogonal). pymatgen's (100) in-plane basis (1,0)/(−1,1)·s reduces
+    to the (1,0)/(0,1)·s square cell this way; the (111) hex basis is
+    already minimal and is kept. Pure lattice re-basis — the atom set
+    is unchanged.
+    """
+    cands = [m * a + n * b for m in range(-2, 3) for n in range(-2, 3)]
+    cands = [v for v in cands if np.linalg.norm(v) > 1e-9]
+    best = None
+    for i, w1 in enumerate(cands):
+        for w2 in cands[i + 1:]:
+            cr = np.cross(w1, w2)
+            if abs(abs(float(np.dot(cr, n))) - area) > 1e-6 * area:
+                continue  # must span the same 2D lattice
+            score = (np.linalg.norm(w1) + np.linalg.norm(w2),
+                     abs(float(np.dot(w1, w2))))
+            if best is None or score < best[0]:
+                best = (score, w1.copy(), w2.copy())
+    _, v1, v2 = best
+    return v1, v2
+
+
+def _standard_slab_cell(atoms: Atoms, vacuum: float) -> Atoms:
+    """Re-express a pymatgen slab in the conventional slab presentation.
+
+    The raw pymatgen box is sheared for e.g. cubic (111) (the c axis is
+    NOT perpendicular to a and b — the vacuum direction tilts relative
+    to the surface normal). This rebuilds the cell so that:
+
+    - the in-plane vectors are the shortest spanning pair (square cell
+      for (100), hex cell for (111));
+    - c lies exactly along the surface normal (vacuum ⊥ ab);
+    - c length = slab thickness + ``vacuum`` (the requested vacuum is
+      exact);
+    - the slab is centered along c (half the vacuum on each side).
+
+    All steps are lattice re-bases (unimodular integer transforms), a
+    pure rotation and a translation — interatomic distances are
+    preserved exactly.
+    """
+    cell = np.asarray(atoms.get_cell().array, dtype=float)
+    frac = np.asarray(atoms.get_scaled_positions(), dtype=float)
+    a, b, c = cell
+    n = np.cross(a, b)
+    area = float(np.linalg.norm(n))
+    n = n / area
+
+    # 1. Reduce the in-plane basis; re-express the fractional x/y.
+    v1, v2 = _reduce_in_plane(a, b, n, area)
+    x_ref = v1 / np.linalg.norm(v1)
+    y_ref = np.cross(n, x_ref)
+    # canonical presentation: det along +n (kept), a into +x_ref, b
+    # into +y_ref — all four variants are rotations of the same basis
+    variants = [(v1, v2), (v2, -v1), (-v1, -v2), (-v2, v1)]
+    v1, v2 = max(variants,
+                 key=lambda p: (float(np.dot(p[0], x_ref))
+                                + float(np.dot(p[1], y_ref))))
+    basis = np.column_stack([a, b])
+    c1, *_ = np.linalg.lstsq(basis, v1, rcond=None)
+    c2, *_ = np.linalg.lstsq(basis, v2, rcond=None)
+    m = np.column_stack([np.round(c1), np.round(c2)]).astype(int)
+    if abs(float(np.linalg.det(m))) != 1:
+        # Fallback: keep pymatgen's in-plane basis (never corrupt data).
+        v1, v2 = a, b
+        m = np.eye(2, dtype=int)
+    frac[:, :2] = np.linalg.solve(m.T, frac[:, :2].T).T
+    cell[0], cell[1] = v1, v2
+
+    # 2. Pure rotation: n → z, a → +x (a, b land in the xy-plane).
+    x_w = v1 / np.linalg.norm(v1)
+    z_w = n
+    y_w = np.cross(z_w, x_w)
+    y_w /= np.linalg.norm(y_w)
+    rot = np.vstack([x_w, y_w, z_w])  # rows = new-frame axes (det +1)
+    cart = (frac @ cell) @ rot.T
+    rcell = cell @ rot.T
+
+    # 3. Exact vacuum + centering along the (now z) normal.
+    zmin, zmax = cart[:, 2].min(), cart[:, 2].max()
+    c_z = (zmax - zmin) + float(vacuum)
+    cart[:, 2] += c_z / 2.0 - (zmin + zmax) / 2.0
+    out_cell = np.array([rcell[0], rcell[1], [0.0, 0.0, c_z]])
+    new_frac = np.linalg.solve(out_cell.T, cart.T).T
+    new_frac -= np.floor(new_frac)
+
+    out = atoms.copy()
+    out.set_cell(out_cell)
+    out.set_scaled_positions(new_frac)
+    return out
+
+
 def _surface_compositions(atoms: Atoms) -> tuple[str, str]:
     """(top, bottom) composition formulas of the surface layers.
 
@@ -197,7 +293,12 @@ class SurfaceCutter:
         # collapse translation-equivalent mirrors to a single entry,
         # hiding the top/bottom face choice from the user.
         for slab in gen.get_slabs(filter_out_sym_slabs=False):
-            atoms = AseAtomsAdaptor.get_atoms(slab)
+            # get_orthogonal_c_slab makes c ⊥ a,b (pymatgen's raw box is
+            # sheared — the vacuum tilted relative to the normal); then
+            # re-express in the conventional presentation (standard
+            # orientation, exact vacuum, centered).
+            atoms = AseAtomsAdaptor.get_atoms(slab.get_orthogonal_c_slab())
+            atoms = _standard_slab_cell(atoms, float(vacuum))
             top, bottom = _surface_compositions(atoms)
             infos.append(SlabInfo(
                 atoms=atoms,

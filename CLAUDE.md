@@ -543,6 +543,25 @@ Behaviors pinned by the fixes:
   minutes / hit MemoryError at ~4.8 GB). Larger structures render
   without auto bonds; manual bonds still work per pair.
 
+**Slab presentation (settled 2026-08-15, user request):** pymatgen's raw
+slab box is sheared (for cubic (111) the c axis is NOT perpendicular to
+a and b — the vacuum tilts relative to the surface normal). `slabs()`
+re-expresses every slab via `get_orthogonal_c_slab()` +
+`_standard_slab_cell()`: shortest in-plane basis (square for (100), hex
+for (111)), c exactly along the surface normal (vacuum ⊥ ab), c length
+= slab thickness + the REQUESTED vacuum (exact), slab centered along c.
+All steps are unimodular re-bases + a pure rotation — distances
+preserved. The layer-projection compositions were re-verified after the
+fix (e.g. rocksalt (100) now correctly alternates pure O/Mg planes).
+
+**Symmetry cell conversion (settled 2026-08-15, user request):** the
+Symmetry dialog offers Conventional cell (spglib standardize,
+`to_primitive=False` — the default) and Primitive cell (spglib
+`to_primitive=True` + ASE `cellpar_to_cell` standard orientation:
+a ∥ x, b in the xy-plane — the VESTA-style presentation; spglib's own
+basis reads as a skewed box). Pure rotation — atom distances unchanged.
+See examples/Cu_bulk_primitive.vasp (fcc primitive, a=3.61/√2, 60°).
+
 ---
 
 ## 8. Default-Value Reference (community standards)

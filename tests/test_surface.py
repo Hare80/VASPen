@@ -95,12 +95,14 @@ def test_slabs_srtio3_100_two_mirror_terminations(srtio3):
 
 
 def test_slabs_mgo_100_two_terminations():
-    """Rocksalt (100) primitive cell: mixed MgO/MgO and O/Mg cleavages."""
+    """Rocksalt (100): alternating pure-species planes (the physical
+    (100) layers are O and Mg planes, not mixed ones) — two mirror
+    cleavages with pure O / pure Mg faces."""
     slabs = SurfaceCutter(StructureModel(_mgo())).slabs((1, 0, 0), 4, 15.0)
     assert len(slabs) == 2
     assert {(s.top_composition, s.bottom_composition) for s in slabs} == {
-        ("MgO", "MgO"),
         ("O", "Mg"),
+        ("Mg", "O"),
     }
 
 
@@ -203,3 +205,38 @@ def test_zero_miller_raises_value_error(si_bulk):
         cutter.slabs((0, 0, 0), 4, 15.0)
     with pytest.raises(ValueError):
         cutter.cut_with_thickness((0, 0, 0), 10.0, 15.0)
+
+
+# ----------------------------------------------------------------------
+# Conventional slab presentation (2026-08-15, user request)
+# ----------------------------------------------------------------------
+
+def test_slab_vacuum_perpendicular_to_ab():
+    """The vacuum direction (c) must be exactly perpendicular to the
+    in-plane vectors — pymatgen's raw box was sheared for cubic (111)."""
+    cu = Atoms("Cu4", cell=[3.61, 3.61, 3.61], pbc=True,
+               positions=[[0, 0, 0], [0, 1.805, 1.805],
+                          [1.805, 0, 1.805], [1.805, 1.805, 0]])
+    for miller, gamma in (((1, 1, 1), 60.0), ((1, 0, 0), 90.0)):
+        slab = SurfaceCutter(StructureModel(cu)).slabs(miller, 4, 15.0)[0]
+        cell = np.asarray(slab.atoms.get_cell().array)
+        a, b, c = cell
+        assert abs(float(c @ a)) < 1e-6
+        assert abs(float(c @ b)) < 1e-6
+        assert abs(a[2]) < 1e-6 and abs(b[2]) < 1e-6  # a,b in the xy-plane
+        got_gamma = np.degrees(np.arccos(float(a @ b)
+                                         / (np.linalg.norm(a) * np.linalg.norm(b))))
+        assert got_gamma == pytest.approx(gamma, abs=0.5)
+        assert a[1] == pytest.approx(0.0, abs=1e-6)  # a ∥ x (standard orientation)
+
+
+def test_slab_vacuum_exact_and_centered():
+    """c_z = slab thickness + requested vacuum; slab centered along z."""
+    cu = Atoms("Cu4", cell=[3.61, 3.61, 3.61], pbc=True,
+               positions=[[0, 0, 0], [0, 1.805, 1.805],
+                          [1.805, 0, 1.805], [1.805, 1.805, 0]])
+    slab = SurfaceCutter(StructureModel(cu)).slabs((1, 1, 1), 4, 15.0)[0]
+    z = slab.atoms.positions[:, 2]
+    cell = np.asarray(slab.atoms.get_cell().array)
+    assert (z.max() - z.min()) + 15.0 == pytest.approx(cell[2, 2], abs=1e-6)
+    assert (z.min() + z.max()) / 2 == pytest.approx(cell[2, 2] / 2, abs=1e-6)

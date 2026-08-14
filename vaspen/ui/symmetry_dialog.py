@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.symmetry import analyze, symmetrize
+from vaspen.ui.menu_button import MenuButton
 
 
 class SymmetryDialog(QDialog):
@@ -66,9 +68,23 @@ class SymmetryDialog(QDialog):
             layout.addLayout(form)
 
         if info is not None:
+            cell_row = QHBoxLayout()
+            self._cell_type_label = QLabel(self.tr("Cell type:"))
+            cell_row.addWidget(self._cell_type_label)
+            self._cell_type_combo = MenuButton()
+            self._cell_type_combo.addItems([
+                self.tr("Conventional cell"),
+                self.tr("Primitive cell"),
+            ])
+            cell_row.addWidget(self._cell_type_combo)
+            cell_row.addStretch()
+            layout.addLayout(cell_row)
+
             self._symmetrize_btn = QPushButton(self.tr("&Symmetrize"))
             self._symmetrize_btn.setToolTip(self.tr(
-                "Standardize the cell and positions to the conventional cell"))
+                "Standardize the cell and positions to the conventional "
+                "cell, or convert to the primitive cell (standard "
+                "orientation)"))
             self._symmetrize_btn.clicked.connect(self._on_symmetrize)
             layout.addWidget(self._symmetrize_btn)
 
@@ -92,7 +108,9 @@ class SymmetryDialog(QDialog):
             )
             if reply != QMessageBox.Yes:
                 return
-        result = symmetrize(self._model.atoms)
+        cell_type = ("conventional", "primitive")[
+            self._cell_type_combo.currentIndex()]
+        result = symmetrize(self._model.atoms, cell_type=cell_type)
         if result is None:
             QMessageBox.warning(
                 self, self.tr("Symmetry"),

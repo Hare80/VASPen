@@ -109,3 +109,84 @@ def test_analyze_cubic_rocksalt():
     assert info is not None
     assert info.number == 225
     assert info.international == "Fm-3m"
+
+
+# ----------------------------------------------------------------------
+# Conventional / primitive cell conversion (2026-08-15, user request)
+# ----------------------------------------------------------------------
+
+def _cu_conventional() -> Atoms:
+    """Cu fcc conventional cell (4 atoms, a=3.61 Å) — examples/Cu_bulk.vasp."""
+    a = 3.61
+    return Atoms(
+        "Cu4",
+        cell=[a, a, a],
+        pbc=True,
+        positions=[[0, 0, 0], [0, a / 2, a / 2],
+                   [a / 2, 0, a / 2], [a / 2, a / 2, 0]],
+    )
+
+
+def test_symmetrize_primitive_cu_standard_orientation():
+    """The primitive of fcc Cu: 1 atom, a=b=c=3.61/√2, 60° angles, in
+    the standard orientation (a ∥ x, b in the xy-plane, c along +z)."""
+    from ase.geometry import cell_to_cellpar
+
+    atoms = symmetrize(_cu_conventional(), cell_type="primitive")
+    assert atoms is not None
+    assert len(atoms) == 1
+    cell = np.asarray(atoms.get_cell().array)
+    params = cell_to_cellpar(cell)
+    assert np.allclose(params[:3], 3.61 / np.sqrt(2), atol=1e-3)
+    assert np.allclose(params[3:], 60.0, atol=1e-3)
+    # standard presentation: a ∥ x, b in the xy-plane, c completes
+    # the rhombohedral cell with a positive z-component (the same
+    # presentation as VESTA and examples/Cu_bulk_primitive.vasp —
+    # c itself is NOT along z for a 60° rhombohedron)
+    assert np.allclose(cell[0, 1:], 0.0, atol=1e-6)
+    assert abs(cell[1, 2]) < 1e-6
+    assert cell[0, 0] > 0 and cell[1, 1] > 0 and cell[2, 2] > 0
+
+
+def test_symmetrize_primitive_matches_reference_file():
+    """Loose reference check against examples/Cu_bulk_primitive.vasp."""
+    from pathlib import Path
+
+    from ase.io import read
+
+    ref = read(Path(__file__).parent.parent / "examples"
+               / "Cu_bulk_primitive.vasp")
+    atoms = symmetrize(_cu_conventional(), cell_type="primitive")
+    assert len(ref) == 1
+    assert np.allclose(np.sort(np.asarray(ref.get_cell().array), axis=0),
+                       np.sort(np.asarray(atoms.get_cell().array), axis=0),
+                       atol=1e-3)
+    assert ref.get_chemical_symbols() == atoms.get_chemical_symbols()
+
+
+def test_symmetrize_conventional_unchanged_for_cu():
+    """The default path still returns the conventional cell."""
+    atoms = symmetrize(_cu_conventional(), cell_type="conventional")
+    assert atoms is not None
+    assert len(atoms) == 4
+    assert np.allclose(atoms.get_cell().array, np.eye(3) * 3.61, atol=1e-6)
+
+
+def test_symmetrize_bcc_supercell_primitive_vs_conventional(tmp_path):
+    """Fe bcc 2×2×2 (16 atoms): conventional → 2 atoms bcc,
+    primitive → 1 atom with a = a_conv·√3/2."""
+    from pathlib import Path
+
+    from ase.geometry import cell_to_cellpar
+    from ase.io import read
+
+    fe = read(Path(__file__).parent.parent / "examples"
+              / "Fe_bcc_2x2x2.vasp")
+    conv = symmetrize(fe, cell_type="conventional")
+    prim = symmetrize(fe, cell_type="primitive")
+    assert conv is not None and len(conv) == 2
+    assert prim is not None and len(prim) == 1
+    params = cell_to_cellpar(np.asarray(prim.get_cell().array))
+    # bcc primitive: a = a_conv·√3/2, angles ≈ 109.47°
+    assert np.allclose(params[:3], np.linalg.norm(fe.get_cell().array[0]) * 0.5
+                       * np.sqrt(3) / 2, atol=0.02)

@@ -1743,7 +1743,7 @@ Continue?</source>
 
 是否继续？</translation>
         </message>
-    </context>
+    <message><source>Cell type:</source><translation>晶胞类型:</translation></message><message><source>Conventional cell</source><translation>惯用晶胞</translation></message><message><source>Primitive cell</source><translation>原胞</translation></message><message><source>Standardize the cell and positions to the conventional cell, or convert to the primitive cell (standard orientation)</source><translation>将晶胞与坐标标准化为惯用晶胞,或转换为原胞(标准取向)</translation></message></context>
     <context>
         <name>DisplayOptionsDialog</name>
         <message>

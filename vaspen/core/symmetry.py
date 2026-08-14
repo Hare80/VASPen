@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 import spglib
 from ase import Atoms
+from ase.geometry import cell_to_cellpar, cellpar_to_cell
 
 # Point-group tolerance floor in Angstrom: ASE/pymatgen reference
 # geometries are essentially exact, but files from the wild are not —
@@ -106,10 +107,16 @@ def analyze(atoms: Atoms, symprec: float = 1e-5) -> SymmetryInfo | None:
         return None
 
 
-def symmetrize(atoms: Atoms, symprec: float = 1e-5) -> Atoms | None:
+def symmetrize(atoms: Atoms, symprec: float = 1e-5,
+               cell_type: str = "conventional") -> Atoms | None:
     """Symmetrized copy, or None.
 
-    Periodic: spglib standardize_cell (conventional cell).
+    Periodic: spglib standardize_cell —
+    ``cell_type="conventional"`` returns the standardized conventional
+    cell; ``cell_type="primitive"`` returns the primitive cell in the
+    standard orientation (a ∥ x, b in the xy-plane, c along +z — the
+    VESTA-style presentation; a pure rotation of the spglib primitive,
+    atom distances unchanged).
     Isolated system: pymatgen symmetrize_molecule (idealized point-group
     symmetric coordinates; the cell/pbc of the input are preserved, the
     atom ORDER may follow pymatgen's species sorting).
@@ -120,6 +127,7 @@ def symmetrize(atoms: Atoms, symprec: float = 1e-5) -> Atoms | None:
     Args:
         atoms: Structure to symmetrize (not modified).
         symprec: Position tolerance in Angstrom (same semantics as analyze).
+        cell_type: "conventional" or "primitive" (periodic structures).
 
     Returns:
         Symmetrized Atoms, or None if the symmetrizer fails.
@@ -127,13 +135,18 @@ def symmetrize(atoms: Atoms, symprec: float = 1e-5) -> Atoms | None:
     if atoms.get_cell().rank == 3 and atoms.get_pbc().any():
         result = spglib.standardize_cell(
             _as_spglib_cell(atoms),
-            to_primitive=False,
+            to_primitive=(cell_type == "primitive"),
             no_idealize=False,
             symprec=symprec,
         )
         if result is None:
             return None
         lattice, scaled, numbers = result
+        if cell_type == "primitive":
+            # Standard orientation from the cell parameters (pure
+            # rotation — spglib's own presentation is expressed in
+            # the input basis and reads as a skewed box).
+            lattice = cellpar_to_cell(cell_to_cellpar(lattice))
         return Atoms(numbers=numbers, scaled_positions=scaled,
                      cell=lattice, pbc=True)
     if len(atoms) == 0:
