@@ -363,15 +363,31 @@ class SurfaceDialog(QDialog):
 
     def _on_slab_item(self, generation: int, index: int,
                       info: SlabInfo) -> None:
-        """One termination computed — fill its slot, preview if selected."""
+        """One termination computed — store it and update its menu label
+        IN PLACE (the menu structure never changes after ``total``, so an
+        open menu does not flicker while items stream in)."""
         if generation != self._generation:
             return
         if index >= len(self._slab_infos):
             self._slab_infos.append(info)  # whole-list fallback (no total)
+            self._termination_combo.setEnabled(True)
+            self._termination_combo.addItem(
+                self.tr("{i}/{n} — top: {top}, bottom: {bottom}").format(
+                    i=len(self._slab_infos),
+                    n=len(self._slab_infos),
+                    top=_subscript_formula(info.top_composition),
+                    bottom=_subscript_formula(info.bottom_composition),
+                ))
         else:
             self._slab_infos[index] = info
-        self._termination_combo.setEnabled(True)
-        self._rebuild_termination_combo()
+            self._termination_combo.setItemText(
+                index,
+                self.tr("{i}/{n} — top: {top}, bottom: {bottom}").format(
+                    i=index + 1,
+                    n=len(self._slab_infos),
+                    top=_subscript_formula(info.top_composition),
+                    bottom=_subscript_formula(info.bottom_composition),
+                ))
         arrived = sum(1 for i in self._slab_infos if i is not None)
         if len(self._slab_infos) > 1:
             self._status_label.setText(

@@ -76,6 +76,14 @@ class MenuButton(QToolButton):
     def itemText(self, index: int) -> str:
         return self._actions[index].text()
 
+    def setItemText(self, index: int, text: str) -> None:
+        """Update an item's label in place — never emits, keeps the menu
+        structure, selection and popup state intact (no flicker)."""
+        if 0 <= index < len(self._actions):
+            self._actions[index].setText(text)
+            if index == self._index:
+                self.setText(text)
+
     # ------------------------------------------------------------------
     # Current selection
     # ------------------------------------------------------------------

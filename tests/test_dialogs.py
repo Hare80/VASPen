@@ -1388,6 +1388,7 @@ def test_surface_dialog_placeholders_and_click_jumps_queue(qtbot, srtio3,
     # placeholders appear as soon as the total is known
     qtbot.waitUntil(lambda: dlg._termination_combo.count() == 3)
     assert "computing" in dlg._termination_combo.itemText(1)
+    actions = list(dlg._termination_combo._actions)  # structure snapshot
 
     # click an unloaded item while item 0 is still computing (0.2 s
     # window) → the click must jump the queue
@@ -1399,6 +1400,12 @@ def test_surface_dialog_placeholders_and_click_jumps_queue(qtbot, srtio3,
     qtbot.waitUntil(lambda: not dlg._busy)
     assert seq.yielded == [0, 2, 1]
     assert all(dlg._slab_infos)  # all slots filled
+    # labels were updated IN PLACE — the menu was never rebuilt (the
+    # action objects are identical; no flicker by construction)
+    assert list(dlg._termination_combo._actions) == actions
+    assert "top: L₀" in dlg._termination_combo.itemText(0)
+    assert "computing" not in dlg._termination_combo.itemText(0)
+    assert dlg._termination_combo.currentIndex() == 2  # selection kept
 
 
 def test_surface_dialog_param_change_during_load_is_immediate(qtbot, srtio3,

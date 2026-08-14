@@ -582,7 +582,10 @@ re-introduced.
   items progressively and a click on an unloaded item jumps the
   compute queue (shared `_ComputeOrder.priority`, GIL-atomic, no
   locks). Whole-list `get_slabs` remains the fallback for unknown
-  pymatgen versions.
+  pymatgen versions. **The termination menu is built ONCE at `total`
+  and never rebuilt** — arriving items update their label IN PLACE
+  via `MenuButton.setItemText` (an open menu must not flicker);
+  `setItemText` never emits and keeps the selection/popup state.
 - **Tools → Re-box Slab** (`rebox_slab(atoms, vacuum)` +
   `vaspen/ui/rebox_dialog.py`, next to Wrap in Periodic Cell) for
   structures that already carry vacuum: unwraps layers split across

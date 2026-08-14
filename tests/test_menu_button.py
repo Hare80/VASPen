@@ -129,3 +129,23 @@ def test_is_not_a_qcombobox(qtbot):
     btn = MenuButton()
     qtbot.addWidget(btn)
     assert not isinstance(btn, QComboBox)
+
+
+def test_set_item_text_updates_in_place():
+    """setItemText never emits and keeps the menu structure intact."""
+    from PySide6.QtWidgets import QApplication
+
+    from vaspen.ui.menu_button import MenuButton
+
+    btn = MenuButton()
+    btn.addItems(["a", "b", "c"])
+    actions = list(btn._actions)
+    events = []
+    btn.currentIndexChanged.connect(lambda i: events.append(i))
+    btn.setCurrentIndex(1)
+    btn.setItemText(1, "b2")
+    assert btn.itemText(1) == "b2"
+    assert btn.currentText() == "b2"  # current item's text follows
+    assert list(btn._actions) == actions  # no structural change
+    assert events == [1]  # setItemText never emitted
+    assert btn.currentIndex() == 1  # selection untouched
