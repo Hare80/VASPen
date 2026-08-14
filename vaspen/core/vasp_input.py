@@ -7,6 +7,7 @@ calculation types.
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -439,6 +440,75 @@ def get_high_symmetry_points(cell) -> dict[str, np.ndarray]:
     return ase_get_special_points(cell)
 
 
+def suggest_band_path(
+    atoms,
+) -> tuple[list[tuple[str, str]], dict[str, np.ndarray]] | None:
+    """Suggest a high-symmetry k-path for a periodic structure.
+
+    Uses pymatgen's symmetry analysis to pick the lattice-appropriate
+    path (Setyawan-Curtarolo convention) and transforms the symmetry
+    points from the standardized primitive reciprocal basis into the
+    reciprocal basis of the input cell, so the result feeds
+    ``generate_kpoints_line_mode`` directly.
+
+    Args:
+        atoms: ASE Atoms with a full-rank periodic cell.
+
+    Returns:
+        (path_segments, special_points) where path_segments is a list
+        of (start_label, end_label) pairs and special_points maps every
+        label to fractional coordinates in the input cell's reciprocal
+        basis. None when the structure is not periodic or no path can
+        be determined (callers fall back to a default path).
+    """
+    try:
+        from pymatgen.core import Structure
+        from pymatgen.symmetry.bandstructure import HighSymmKpath
+    except Exception:
+        return None
+
+    try:
+        if atoms.get_cell().rank < 3 or len(atoms) == 0:
+            return None
+        structure = Structure.from_ase_atoms(atoms)
+        with warnings.catch_warnings():
+            # pymatgen warns when the input cell is not the standard
+            # primitive — we transform the k-points ourselves below.
+            warnings.simplefilter("ignore")
+            kpath = HighSymmKpath(structure)
+        raw_path = kpath.kpath["path"]
+        raw_points = kpath.kpath["kpoints"]
+        # kpoints are fractional in the standardized primitive cell's
+        # reciprocal basis; convert to the input cell's reciprocal basis:
+        # f_in = f_prim @ inv(A_prim.T) @ A_in.T
+        #   (cartesian k = f @ B with B = inv(A).T is basis-independent)
+        prim_cell = kpath.prim.lattice.matrix
+        in_cell = np.asarray(atoms.get_cell(), dtype=float)
+        transform = np.linalg.inv(prim_cell.T) @ in_cell.T
+    except Exception:
+        return None
+
+    try:
+        special_points = {
+            label: np.asarray(coord, dtype=float) @ transform
+            for label, coord in raw_points.items()
+        }
+        # raw_path is a list of polylines (label lists); flatten each
+        # polyline into consecutive (start, end) label pairs.
+        path: list[tuple[str, str]] = []
+        for polyline in raw_path:
+            for i in range(len(polyline) - 1):
+                start, end = polyline[i], polyline[i + 1]
+                if start not in special_points or end not in special_points:
+                    raise ValueError(start)
+                path.append((start, end))
+    except Exception:
+        return None
+    if not path:
+        return None
+    return path, special_points
+
+
 def generate_kpoints_line_mode(
     high_symmetry_path: list[tuple[str, str]],
     n_points_per_segment: int = 20,
@@ -726,6 +796,39 @@ def generate_potcar(
 # High-level: generate all VASP inputs at once
 # ======================================================================
 
+def generate_poscar(structure_model, poscar_direct: bool = False) -> str:
+    """Render the current structure as POSCAR text.
+
+    Includes the fixed-atom constraints (Selective dynamics block) when
+    any atom is frozen. Shared by generate_all_inputs and the unified
+    input-file dialog.
+
+    Args:
+        structure_model: StructureModel with the current structure.
+        poscar_direct: Write fractional (Direct) coordinates instead of
+            Cartesian.
+
+    Returns:
+        POSCAR file content as a string.
+    """
+    import io
+
+    from ase.io import write as ase_write
+
+    from vaspen.core.file_io import (
+        atoms_with_fixed_constraints,
+        vasp_write_atoms,
+    )
+
+    poscar_atoms = atoms_with_fixed_constraints(
+        vasp_write_atoms(structure_model.atoms, poscar_direct),
+        structure_model.fixed_flags,
+    )
+    buf = io.StringIO()
+    ase_write(buf, poscar_atoms, format="vasp", vasp5=True, direct=poscar_direct)
+    return buf.getvalue()
+
+
 def generate_all_inputs(
     structure_model,           # StructureModel
     incar_preset: str = "scf",
@@ -802,21 +905,7 @@ def generate_all_inputs(
         raise ValueError(f"Unknown kpoints mode: {kpoints_mode}")
 
     # POSCAR
-    from ase.io import write as ase_write
-    import io
-
-    from vaspen.core.file_io import (
-        atoms_with_fixed_constraints,
-        vasp_write_atoms,
-    )
-
-    poscar_atoms = atoms_with_fixed_constraints(
-        vasp_write_atoms(structure_model.atoms, poscar_direct),
-        structure_model.fixed_flags,
-    )
-    buf = io.StringIO()
-    ase_write(buf, poscar_atoms, format="vasp", vasp5=True, direct=poscar_direct)
-    poscar_content = buf.getvalue()
+    poscar_content = generate_poscar(structure_model, poscar_direct)
 
     # POTCAR
     potcar_content = ""

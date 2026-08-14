@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
+from vaspen.ui.generate_all_dialog import GenerateAllDialog
 from vaspen.ui.menu_button import MenuButton
 from vaspen.ui.structure_tree import StructureTreePanel
 from vaspen.ui.tools import ToolMode
@@ -62,8 +63,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._config = AppConfig()
         self._structure = StructureModel()
-        # Non-modal surface dialog (kept alive while open; one at a time)
+        # Non-modal preview dialogs (kept alive while open; one at a time)
         self._surface_dialog = None
+        self._generate_dialog = None
+        # True while the generate-all dialog previews NEB frames in the
+        # viewport (the model itself is untouched during the preview)
+        self._previewing_neb = False
 
         # Translator — owned by the window so the language can switch live
         self._translator = QTranslator(self)
@@ -943,8 +948,6 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _on_generate_all(self) -> None:
-        from vaspen.core.vasp_input import generate_all_inputs
-
         # VASP input files require a periodic structure (POSCAR lattice +
         # KPOINTS mesh); offer the wrap dialog for molecules first.
         if not self._ensure_periodic_for("vasp"):
@@ -953,54 +956,63 @@ class MainWindow(QMainWindow):
         if not self._confirm_disorder_poscar_save():
             return
 
-        potcar_path = self._config.potcar_library_path
-        if not potcar_path:
-            reply = QMessageBox.question(
-                self,
-                self.tr("POTCAR Library Not Configured"),
-                self.tr("POTCAR library path is not set. Generate without POTCAR?\n\n"
-                        "You can configure it in Edit → Preferences."),
-            )
-            if reply != QMessageBox.Yes:
-                return
-
-        output_dir = QFileDialog.getExistingDirectory(
-            self,
-            self.tr("Choose Output Directory"),
-            self._config.last_directory,
-        )
-        if not output_dir:
+        if self._generate_dialog is not None:
+            self._generate_dialog.raise_()
+            self._generate_dialog.activateWindow()
             return
 
+        # Non-modal (same pattern as the surface dialog): a modal dialog
+        # would cover the 3D viewport, hiding the NEB frame preview.
+        # Files are written only when the dialog's Generate is clicked.
         try:
-            files = generate_all_inputs(
+            dlg = GenerateAllDialog(
                 self._structure,
-                incar_preset=self._config.default_calc_type,
-                potcar_library=potcar_path,
-                poscar_direct=self._config.poscar_coords_direct,
-            )
-            out = Path(output_dir)
-            for name, content in files.items():
-                if content:
-                    # UTF-8 + LF: VASP input files must not carry the
-                    # locale encoding (GBK) or CRLF line endings
-                    (out / name).write_text(content, encoding="utf-8", newline="\n")
-
-            self._set_status(self.tr("VASP input files generated in: {}").format(output_dir))
-            QMessageBox.information(
                 self,
-                self.tr("Success"),
-                self.tr("Generated files in:\n{}\n\nFiles: {}").format(
-                    output_dir, ", ".join(f for f, c in files.items() if c)
-                ),
+                preview_callback=self._preview_image_atoms,
+                default_task=self._config.default_calc_type,
             )
         except Exception as e:
-            logger.exception("Failed to generate inputs")
+            # The dialog must never fail silently (e.g. a molecule that
+            # reached it without being wrapped) — surface the error.
+            logger.exception("Failed to open generate dialog")
             QMessageBox.critical(
-                self,
-                self.tr("Generation Failed"),
-                str(e),
-            )
+                self, self.tr("Generation Failed"), str(e))
+            return
+        dlg.finished.connect(lambda _result: self._on_generate_dialog_finished(dlg))
+        self._generate_dialog = dlg
+        self._set_preview_editing_enabled(False)
+        self._viewport.cancel_active_tool()
+        dlg.show()
+
+    def _preview_image_atoms(self, atoms) -> None:
+        """Temporarily show a NEB image frame in the 3D viewport.
+
+        The model is untouched; the viewport is rebound to the model
+        when the dialog closes. The camera refits on the first preview
+        and is preserved across subsequent frames so the images can be
+        compared directly.
+        """
+        self._viewport.set_structure(
+            atoms,
+            reset_view=not self._previewing_neb,
+            bonds=None,
+            fixed=None,
+        )
+        # set_structure() only schedules a repaint, and the GL viewport
+        # can defer it for seconds — force an immediate synchronous
+        # repaint so clicking a frame updates the view instantly.
+        self._viewport.repaint()
+        self._previewing_neb = True
+
+    def _on_generate_dialog_finished(self, dlg) -> None:
+        """Restore viewport + editing entry points after the dialog closes."""
+        if self._generate_dialog is dlg:
+            self._generate_dialog = None
+            self._set_preview_editing_enabled(True)
+            self._update_edit_actions()
+        self._previewing_neb = False
+        self._rebind_viewport_to_model()
+        dlg.deleteLater()
 
     # ------------------------------------------------------------------
     # Tools
@@ -1028,12 +1040,12 @@ class MainWindow(QMainWindow):
 
         # Non-modal: the viewport stays rotatable while the dialog is
         # open. Editing entry points are paused to prevent conflicts
-        # with the live preview (see _set_surface_editing_enabled).
+        # with the live preview (see _set_preview_editing_enabled).
         dlg = SurfaceDialog(self._structure, self._viewport, self)
         dlg.accepted.connect(lambda: self._apply_surface_result(dlg))
         dlg.finished.connect(lambda _result: self._on_surface_dialog_finished(dlg))
         self._surface_dialog = dlg
-        self._set_surface_editing_enabled(False)
+        self._set_preview_editing_enabled(False)
         self._viewport.cancel_active_tool()
         dlg.show()
 
@@ -1048,11 +1060,11 @@ class MainWindow(QMainWindow):
         """Re-enable editing entry points after the dialog closes."""
         if self._surface_dialog is dlg:
             self._surface_dialog = None
-            self._set_surface_editing_enabled(True)
+            self._set_preview_editing_enabled(True)
             self._update_edit_actions()  # undo/redo reflect the applied cut
             dlg.deleteLater()
 
-    def _set_surface_editing_enabled(self, enabled: bool) -> None:
+    def _set_preview_editing_enabled(self, enabled: bool) -> None:
         """Pause structure-editing entry points while the preview dialog is open.
 
         Rotate/zoom/pan stay active (mouse handlers, not actions) so the

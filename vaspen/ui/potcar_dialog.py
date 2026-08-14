@@ -1,7 +1,12 @@
-"""POTCAR generation dialog.
+"""POTCAR generation panel and dialog.
 
-Allows per-element selection of pseudopotential variants,
-then concatenates the selected POTCAR files.
+Split into ``PotcarPanel`` (embeddable widget, reused as the POTCAR tab
+of the unified input-file dialog) and ``PotcarDialog`` (a thin QDialog
+shell that adds OK/Cancel and the save-file step; unknown attribute
+lookups delegate to the panel).
+
+Allows per-element selection of pseudopotential variants, then
+concatenates the selected POTCAR files.
 """
 
 from __future__ import annotations
@@ -35,8 +40,8 @@ from vaspen.ui.menu_button import MenuButton
 from vaspen.utils.config import AppConfig
 
 
-class PotcarDialog(QDialog):
-    """Dialog for selecting POTCAR variants and generating POTCAR."""
+class PotcarPanel(QWidget):
+    """Embeddable POTCAR variant selector + concatenation preview."""
 
     def __init__(self, structure_model=None, parent=None) -> None:
         super().__init__(parent)
@@ -46,8 +51,6 @@ class PotcarDialog(QDialog):
         self._potcar_content: str = ""
         self._paths_used: list[str] = []
 
-        self.setWindowTitle(self.tr("Generate POTCAR"))
-        self.resize(600, 400)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -96,17 +99,82 @@ class PotcarDialog(QDialog):
 
         # ── Generate button ──
         gen_btn = QPushButton(self.tr("Generate POTCAR Preview"))
-        gen_btn.clicked.connect(self._generate)
+        gen_btn.clicked.connect(self._on_generate_clicked)
         layout.addWidget(gen_btn)
-
-        # ── Dialog buttons ──
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._on_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
 
         # Populate
         self._refresh_elements()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def generate_content(self) -> str:
+        """Concatenate POTCAR text from the current selections.
+
+        Returns "" when no library is configured or no elements are
+        known (POTCAR is simply skipped in the unified flow).
+
+        Raises:
+            FileNotFoundError: When a selected POTCAR file is missing.
+        """
+        library = self._path_edit.text()
+        if not library or not self._element_combos:
+            return ""
+
+        functional = self._functional_combo.currentText()
+        potcar_dir = resolve_potcar_dir(Path(library), functional)
+        contents: list[str] = []
+        self._paths_used = []
+
+        for el, combo in self._element_combos.items():
+            variant = combo.currentText()
+            potcar_path = potcar_dir / variant / "POTCAR"
+            if not potcar_path.exists():
+                # Fallback: try element name
+                potcar_path = potcar_dir / el / "POTCAR"
+            if not potcar_path.exists():
+                raise FileNotFoundError(
+                    f"POTCAR for {el} not found.\n"
+                    f"Tried: {potcar_dir / variant / 'POTCAR'}\n"
+                    f"       {potcar_dir / el / 'POTCAR'}"
+                )
+            with open(potcar_path, "r") as f:
+                contents.append(f.read())
+            self._paths_used.append(str(potcar_path))
+
+        return "".join(contents)
+
+    def _on_generate_clicked(self) -> None:
+        """Generate-preview button: concatenate or explain why not."""
+        library = self._path_edit.text()
+        if not library:
+            QMessageBox.warning(
+                self,
+                self.tr("Missing Library Path"),
+                self.tr("Please set the POTCAR library path first."),
+            )
+            return
+        if not self._element_combos:
+            QMessageBox.warning(
+                self,
+                self.tr("No Elements"),
+                self.tr("Load a structure to detect elements."),
+            )
+            return
+        try:
+            self._potcar_content = self.generate_content()
+        except FileNotFoundError as e:
+            QMessageBox.critical(self, self.tr("POTCAR Not Found"), str(e))
+            return
+        self._preview.setPlainText(
+            self.tr("POTCAR generated successfully! {} elements, {:,} bytes.\n\n"
+                    "Files used:\n{}").format(
+                len(self._element_combos),
+                len(self._potcar_content),
+                "\n".join(self._paths_used),
+            )
+        )
 
     # ------------------------------------------------------------------
 
@@ -185,70 +253,40 @@ class PotcarDialog(QDialog):
 
         self._preview.setPlainText("\n".join(lines))
 
-    def _generate(self) -> None:
-        library = self._path_edit.text()
-        functional = self._functional_combo.currentText()
 
-        if not library:
-            QMessageBox.warning(
-                self,
-                self.tr("Missing Library Path"),
-                self.tr("Please set the POTCAR library path first."),
-            )
-            return
+class PotcarDialog(QDialog):
+    """Dialog shell around PotcarPanel (OK saves to file, Cancel)."""
 
-        if not self._element_combos:
-            QMessageBox.warning(
-                self,
-                self.tr("No Elements"),
-                self.tr("Load a structure to detect elements."),
-            )
-            return
+    def __init__(self, structure_model=None, parent=None) -> None:
+        super().__init__(parent)
+        self._panel = PotcarPanel(structure_model, self)
 
-        # Map elements to selected variants (respecting user choice).
-        # Note: generate_potcar uses automatic recommendation; we use a
-        # manual file-by-file concatenation here.
-        contents: list[str] = []
-        self._paths_used = []
-        potcar_dir = resolve_potcar_dir(Path(library), functional)
+        self.setWindowTitle(self.tr("Generate POTCAR"))
+        self.resize(600, 400)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._panel)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
-        for el, combo in self._element_combos.items():
-            variant = combo.currentText()
-            potcar_path = potcar_dir / variant / "POTCAR"
-            if not potcar_path.exists():
-                # Fallback: try element name
-                potcar_path = potcar_dir / el / "POTCAR"
-            if not potcar_path.exists():
-                QMessageBox.critical(
-                    self,
-                    self.tr("POTCAR Not Found"),
-                    self.tr("POTCAR for {el} not found.\n"
-                            "Tried: {p1}\n{p2}").format(
-                        el=el,
-                        p1=potcar_dir / variant / "POTCAR",
-                        p2=potcar_dir / el / "POTCAR",
-                    ),
-                )
-                return
-            with open(potcar_path, "r") as f:
-                contents.append(f.read())
-            self._paths_used.append(str(potcar_path))
-
-        self._potcar_content = "".join(contents)
-        self._preview.setPlainText(
-            self.tr("POTCAR generated successfully! {} elements, {:,} bytes.\n\n"
-                    "Files used:\n{}").format(
-                len(self._element_combos),
-                len(self._potcar_content),
-                "\n".join(self._paths_used),
-            )
-        )
+    def __getattr__(self, name: str):
+        """Delegate unknown attributes to the embedded panel."""
+        panel = self.__dict__.get("_panel")
+        if panel is not None:
+            try:
+                return getattr(panel, name)
+            except AttributeError:
+                pass
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def _on_accept(self) -> None:
-        if not self._potcar_content:
-            self._generate()
+        panel = self._panel
+        if not panel._potcar_content:
+            panel._on_generate_clicked()
 
-        if self._potcar_content:
+        if panel._potcar_content:
             filepath, _ = QFileDialog.getSaveFileName(
                 self,
                 self.tr("Save POTCAR"),
@@ -256,5 +294,6 @@ class PotcarDialog(QDialog):
                 "POTCAR files (*);;All files (*)",
             )
             if filepath:
-                Path(filepath).write_text(self._potcar_content, encoding="utf-8", newline="\n")
+                Path(filepath).write_text(
+                    panel._potcar_content, encoding="utf-8", newline="\n")
                 self.accept()

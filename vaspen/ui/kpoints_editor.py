@@ -1,4 +1,9 @@
-"""KPOINTS editor dialog.
+"""KPOINTS editor panel and dialog.
+
+Split into ``KpointsEditorPanel`` (embeddable widget, reused as the
+KPOINTS tab of the unified input-file dialog) and ``KpointsEditorDialog``
+(a thin QDialog shell that adds OK/Cancel and the save-file step; unknown
+attribute lookups delegate to the panel).
 
 Supports three modes:
 - Automatic KSPACING (recommended)
@@ -17,7 +22,6 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -42,15 +46,16 @@ from vaspen.core.vasp_input import (
 )
 
 
-class KpointsEditorDialog(QDialog):
-    """Dialog for generating KPOINTS content."""
+class KpointsEditorPanel(QWidget):
+    """Embeddable KPOINTS editor (mode selector + parameters + preview)."""
 
     def __init__(self, structure_model=None, parent=None) -> None:
         super().__init__(parent)
         self._structure_model = structure_model
+        #: Optional label → fractional coords override (e.g. a suggested
+        #: pymatgen path); merged on top of the ASE special points.
+        self._special_points_override: dict[str, np.ndarray] | None = None
 
-        self.setWindowTitle(self.tr("Generate KPOINTS"))
-        self.resize(650, 500)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -88,13 +93,42 @@ class KpointsEditorDialog(QDialog):
         self._preview.setMaximumHeight(180)
         layout.addWidget(self._preview)
 
-        # ── Buttons ──
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._on_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
         self._on_mode_changed(0)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def mode(self) -> str:
+        """Current mode: "automatic" | "manual" | "line"."""
+        return ["automatic", "manual", "line"][self._mode_combo.currentIndex()]
+
+    def set_mode(self, mode: str) -> None:
+        """Select a mode programmatically ("automatic"/"manual"/"line")."""
+        index = {"automatic": 0, "manual": 1, "line": 2}[mode]
+        self._mode_combo.setCurrentIndex(index)  # triggers _on_mode_changed
+
+    def set_special_points_override(self, points: dict[str, np.ndarray] | None) -> None:
+        """Override/extend the high-symmetry point table (or None to clear)."""
+        self._special_points_override = points
+        self._update_preview()
+
+    def set_band_path_text(self, text: str) -> None:
+        """Set the line-mode k-path text (e.g. "G-X|X-M|M-G")."""
+        self._band_path_edit.setText(text)
+
+    def content(self) -> str:
+        """Validated KPOINTS text.
+
+        Raises:
+            ValueError: With a user-facing message when the preview is a
+                '#'-prefixed error note (invalid input).
+        """
+        self._update_preview()
+        text = self._preview.toPlainText()
+        if text.startswith("#"):
+            raise ValueError(text.lstrip("# ").strip())
+        return text
 
     # ------------------------------------------------------------------
     # Page 1: Automatic KSPACING
@@ -105,8 +139,8 @@ class KpointsEditorDialog(QDialog):
         form = QFormLayout(page)
 
         # KSPACING slider + numeric input (type any value with 0.001
-        # precision; slider spans 0.001-0.100 — vaspkit's useful range
-        # is 0.01-0.08, with headroom on both ends)
+        # precision; slider spans 0.001-0.100 — the useful range is
+        # 0.01-0.08, with headroom on both ends)
         slider_row = QHBoxLayout()
         self._kspacing_slider = QSlider(Qt.Horizontal)
         self._kspacing_slider.setRange(1, 100)  # 0.001 to 0.100 (×1000)
@@ -239,8 +273,23 @@ class KpointsEditorDialog(QDialog):
     # Estimate
     # ------------------------------------------------------------------
 
-    def _update_estimate(self) -> None:
+    def _periodic_cell(self) -> np.ndarray | None:
+        """The model's cell when the structure is periodic, else None.
+
+        A molecule (no cell, or a degenerate cell) has no meaningful
+        k-points — the preview shows an explanatory note instead of
+        fabricating a mesh for a fake unit cell.
+        """
         if self._structure_model is None or self._structure_model.n_atoms == 0:
+            return None
+        cell = np.asarray(self._structure_model.cell, dtype=float)
+        if cell.shape != (3, 3) or np.linalg.matrix_rank(cell) < 3:
+            return None
+        return cell
+
+    def _update_estimate(self) -> None:
+        cell = self._periodic_cell()
+        if cell is None:
             self._estimate_label.setText("")
             return
 
@@ -248,7 +297,7 @@ class KpointsEditorDialog(QDialog):
         if mode == 0:  # automatic
             spacing = self._kspacing_spin.value()
             try:
-                mesh = estimate_k_mesh(self._structure_model.cell, spacing)
+                mesh = estimate_k_mesh(cell, spacing)
                 self._estimate_label.setText(
                     self.tr("Estimated mesh: {} × {} × {}").format(*mesh)
                 )
@@ -267,11 +316,17 @@ class KpointsEditorDialog(QDialog):
         if mode == 0:  # automatic
             spacing = self._kspacing_spin.value()
             gamma = self._gamma_auto.currentIndex() == 0
-            content = generate_kpoints_automatic(
-                np.eye(3) if not self._structure_model else self._structure_model.cell,
-                k_spacing=spacing,
-                gamma_centered=gamma,
-            )
+            cell = self._periodic_cell()
+            if cell is None:
+                content = self.tr(
+                    "# The structure is not periodic — wrap it in a "
+                    "periodic cell first.")
+            else:
+                content = generate_kpoints_automatic(
+                    cell,
+                    k_spacing=spacing,
+                    gamma_centered=gamma,
+                )
         elif mode == 1:  # manual
             k1 = self._k1_spin.value()
             k2 = self._k2_spin.value()
@@ -296,14 +351,17 @@ class KpointsEditorDialog(QDialog):
         """Line-mode KPOINTS preview, or a '#'-prefixed error note.
 
         '#'-prefixed content is intentionally invalid VASP input and is
-        rejected by _on_accept.
+        rejected by content() / _on_accept.
         """
         if self._structure_model is None or self._structure_model.n_atoms == 0:
             return self.tr("# Open a structure to compute the k-path coordinates.")
+        special: dict[str, np.ndarray] = {}
         try:
-            special = get_high_symmetry_points(self._structure_model.cell)
+            special.update(get_high_symmetry_points(self._structure_model.cell))
         except Exception:
-            special = {}
+            pass
+        if self._special_points_override:
+            special.update(self._special_points_override)
         if not special:
             return self.tr("# Cannot determine high-symmetry points for this cell.")
         try:
@@ -311,13 +369,38 @@ class KpointsEditorDialog(QDialog):
         except ValueError as e:
             return self.tr("# {}").format(e)
 
-    # ------------------------------------------------------------------
-    # Accept
-    # ------------------------------------------------------------------
+
+class KpointsEditorDialog(QDialog):
+    """Dialog shell around KpointsEditorPanel (OK saves to file, Cancel)."""
+
+    def __init__(self, structure_model=None, parent=None) -> None:
+        super().__init__(parent)
+        self._panel = KpointsEditorPanel(structure_model, self)
+
+        self.setWindowTitle(self.tr("Generate KPOINTS"))
+        self.resize(650, 500)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._panel)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def __getattr__(self, name: str):
+        """Delegate unknown attributes to the embedded panel."""
+        panel = self.__dict__.get("_panel")
+        if panel is not None:
+            try:
+                return getattr(panel, name)
+            except AttributeError:
+                pass
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def _on_accept(self) -> None:
-        self._update_preview()
-        content = self._preview.toPlainText()
+        panel = self._panel
+        panel._update_preview()
+        content = panel._preview.toPlainText()
         if content.startswith("#"):
             QMessageBox.warning(
                 self,
@@ -336,5 +419,3 @@ class KpointsEditorDialog(QDialog):
             from pathlib import Path
             Path(filepath).write_text(content, encoding="utf-8", newline="\n")
             self.accept()
-
-

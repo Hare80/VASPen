@@ -1,7 +1,15 @@
-"""INCAR editor dialog.
+"""INCAR editor panel and dialog.
 
-Provides a table-based INCAR tag editor with presets for common
-calculation types (SCF, Optimization, Band, DOS, Optical, NEB).
+The editor is split into two layers:
+
+- ``IncarEditorPanel`` — a plain QWidget with all the editing UI
+  (preset selector, tag table, preview). Embeddable, so the unified
+  "Generate All Input Files" dialog reuses it as the INCAR tab.
+- ``IncarEditorDialog`` — a thin QDialog shell around the panel that
+  adds OK/Cancel and the save-file step. Attribute lookups not found
+  on the dialog are delegated to the panel, so external code (tests,
+  tooling) accessing ``dlg._table`` / ``dlg._preview`` keeps working.
+
 Defaults follow community-standard settings.
 """
 
@@ -9,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -38,16 +46,20 @@ from vaspen.ui.menu_button import MenuButton
 from vaspen.utils.config import AppConfig
 
 
-class IncarEditorDialog(QDialog):
-    """Dialog for editing and generating INCAR content.
+class IncarEditorPanel(QWidget):
+    """Embeddable INCAR editor.
 
     Features:
-    - Preset selector (SCF, Opt, Band, DOS, Optical, NEB)
+    - Preset selector (SCF, Opt, Band, DOS, Optical, NEB, Custom)
     - Tag table (Tag | Value | Description) with inline editing
     - Add / remove custom tags
-    - Live preview of generated INCAR text
-    - Save as defaults
+    - Live preview of generated INCAR text (editable; sync back via
+      the button)
     """
+
+    #: Emitted with the preset key whenever the user changes the
+    #: preset selector ("custom" included).
+    preset_changed = Signal(str)
 
     def __init__(self, structure_model=None, parent=None) -> None:
         super().__init__(parent)
@@ -57,8 +69,6 @@ class IncarEditorDialog(QDialog):
         self._preset_key: str = "scf"
         self._preview_dirty = False
 
-        self.setWindowTitle(self.tr("Generate INCAR"))
-        self.resize(800, 600)
         self._build_ui()
         self._load_preset("scf")
 
@@ -132,21 +142,44 @@ class IncarEditorDialog(QDialog):
         self._preview.textChanged.connect(self._on_preview_text_changed)
         layout.addWidget(self._preview)
 
-        # ── Dialog buttons ──
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._on_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
     # ------------------------------------------------------------------
     # Preset handling
     # ------------------------------------------------------------------
+
+    @property
+    def preset_key(self) -> str:
+        """The currently loaded preset key."""
+        return self._preset_key
+
+    def set_preset(self, key: str) -> None:
+        """Select a preset programmatically (combo follows, no signal)."""
+        preset_keys = ["scf", "opt", "band", "dos", "optical", "neb", "custom"]
+        if key not in preset_keys:
+            return
+        self._preset_combo.blockSignals(True)
+        self._preset_combo.setCurrentIndex(preset_keys.index(key))
+        self._preset_combo.blockSignals(False)
+        if key != "custom":
+            self._load_preset(key)
+
+    def apply_tag(self, tag: str, value: str) -> None:
+        """Set a tag value in the table (adds the row when absent).
+
+        Table edits are collected first so in-flight cell edits are not
+        lost. The preview is rebuilt from the table, which also resets
+        the preview dirty flag (a structural change takes precedence
+        over hand-edited preview text).
+        """
+        self._collect_tags()
+        self._tags[tag] = value
+        self._refresh_table()
 
     def _on_preset_changed(self, index: int) -> None:
         preset_keys = ["scf", "opt", "band", "dos", "optical", "neb", "custom"]
         key = preset_keys[index]
         if key != "custom":
             self._load_preset(key)
+        self.preset_changed.emit(key)
 
     def _load_preset(self, preset_name: str) -> None:
         """Load an INCAR preset into the table."""
@@ -202,6 +235,15 @@ class IncarEditorDialog(QDialog):
         self._table.blockSignals(False)
         self._update_preview()
 
+    def _collect_tags(self) -> None:
+        """Rebuild self._tags from the current table rows."""
+        self._tags.clear()
+        for row in range(self._table.rowCount()):
+            tag_item = self._table.item(row, 0)
+            val_item = self._table.item(row, 1)
+            if tag_item and val_item:
+                self._tags[tag_item.text()] = val_item.text()
+
     def _add_custom_tag(self) -> None:
         """Add a new custom tag row."""
         # Focus the pending row instead of stacking duplicate NEW_TAG rows
@@ -235,12 +277,7 @@ class IncarEditorDialog(QDialog):
 
     def _update_preview(self) -> None:
         """Rebuild preview from current table state."""
-        self._tags.clear()
-        for row in range(self._table.rowCount()):
-            tag_item = self._table.item(row, 0)
-            val_item = self._table.item(row, 1)
-            if tag_item and val_item:
-                self._tags[tag_item.text()] = val_item.text()
+        self._collect_tags()
 
         # Same renderer as file generation — preview == generated INCAR
         self._preview.blockSignals(True)
@@ -295,6 +332,43 @@ class IncarEditorDialog(QDialog):
             else:
                 seen[key] = name
         return duplicates
+
+    def content(self) -> str:
+        """Validated INCAR text.
+
+        The edited preview is the source of truth; a clean preview is
+        first refreshed from the table (pending cell edits committed).
+
+        Raises:
+            ValueError: With a user-facing message when the content has
+                duplicate tags, tags without a value, or malformed
+                lines.
+        """
+        if not self._preview_dirty:
+            duplicates = self._validate_tags()
+            if duplicates:
+                raise ValueError(
+                    self.tr("Duplicate INCAR tags: {}. Remove or rename "
+                            "the extra rows.").format(", ".join(duplicates)))
+            self._update_preview()
+
+        text = self._preview.toPlainText()
+        _tags, problems = parse_incar_content(text)
+        duplicates = [msg for _no, kind, msg in problems if kind == "duplicate"]
+        if duplicates:
+            raise ValueError(
+                self.tr("Duplicate INCAR tags: {}. Remove or rename the "
+                        "extra rows.").format(", ".join(duplicates)))
+        empty_tags = [tag for tag, val in _tags.items() if not val.strip()]
+        if empty_tags:
+            raise ValueError(
+                self.tr("Tags without a value: {}").format(", ".join(empty_tags)))
+        malformed = [msg for _no, kind, msg in problems if kind == "malformed"]
+        if malformed:
+            raise ValueError(
+                self.tr("These lines are not valid INCAR tag lines:\n{}")
+                .format("\n".join(malformed)))
+        return text
 
     # ------------------------------------------------------------------
     # ENCUT estimation
@@ -374,15 +448,44 @@ class IncarEditorDialog(QDialog):
                         "Set POTCAR library path in Edit → Preferences.").format(str(e)),
             )
 
-    # ------------------------------------------------------------------
-    # Accept
-    # ------------------------------------------------------------------
+
+class IncarEditorDialog(QDialog):
+    """Dialog shell around IncarEditorPanel (OK saves to file, Cancel)."""
+
+    def __init__(self, structure_model=None, parent=None) -> None:
+        super().__init__(parent)
+        self._panel = IncarEditorPanel(structure_model, self)
+
+        self.setWindowTitle(self.tr("Generate INCAR"))
+        self.resize(800, 600)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._panel)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def __getattr__(self, name: str):
+        """Delegate unknown attributes to the embedded panel.
+
+        Keeps external attribute access (tests, tooling) working after
+        the editor moved from the dialog into the panel.
+        """
+        panel = self.__dict__.get("_panel")
+        if panel is not None:
+            try:
+                return getattr(panel, name)
+            except AttributeError:
+                pass
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def _on_accept(self) -> None:
         # The edited preview is the source of truth; a clean preview is
         # first refreshed from the table (pending cell edits committed).
-        if not self._preview_dirty:
-            duplicates = self._validate_tags()
+        panel = self._panel
+        if not panel._preview_dirty:
+            duplicates = panel._validate_tags()
             if duplicates:
                 QMessageBox.warning(
                     self,
@@ -391,9 +494,9 @@ class IncarEditorDialog(QDialog):
                     .format(", ".join(duplicates)),
                 )
                 return
-            self._update_preview()
+            panel._update_preview()
 
-        content = self._preview.toPlainText()
+        content = panel._preview.toPlainText()
         _tags, problems = parse_incar_content(content)
         duplicates = [msg for _no, kind, msg in problems if kind == "duplicate"]
         if duplicates:

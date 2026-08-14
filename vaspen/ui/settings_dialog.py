@@ -53,6 +53,7 @@ class SettingsDialog(QDialog):
             self.tr("Band Structure"),
             self.tr("DOS"),
             self.tr("Optical"),
+            self.tr("NEB"),
         ])
         gen_form.addRow(self.tr("Default Calculation Type:"), self._calc_type_combo)
 
@@ -119,7 +120,7 @@ class SettingsDialog(QDialog):
         lang = self._config.language
         self._language_combo.setCurrentIndex(0 if lang == "en" else 1)
 
-        calc_map = {"scf": 0, "opt": 1, "band": 2, "dos": 3, "optical": 4}
+        calc_map = {"scf": 0, "opt": 1, "band": 2, "dos": 3, "optical": 4, "neb": 5}
         self._calc_type_combo.setCurrentIndex(
             calc_map.get(self._config.default_calc_type, 0)
         )
@@ -132,7 +133,7 @@ class SettingsDialog(QDialog):
 
     def _on_accept(self) -> None:
         self._config.language = "en" if self._language_combo.currentIndex() == 0 else "zh"
-        calc_keys = ["scf", "opt", "band", "dos", "optical"]
+        calc_keys = ["scf", "opt", "band", "dos", "optical", "neb"]
         self._config.default_calc_type = calc_keys[self._calc_type_combo.currentIndex()]
         self._config.poscar_coords_direct = (
             self._poscar_coords_combo.currentIndex() == 0

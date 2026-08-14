@@ -366,6 +366,75 @@ Materials Project (MP) integration lets users search and download structures by 
 
 Planned module: `vaspen/core/materials_project.py` (pure logic, no Qt); UI is a modal search/download dialog created fresh per invocation (existing i18n rules in §11.2 apply).
 
+### 7.7 Unified "Generate All Input Files" dialog (settled 2026-08-14)
+
+Calculate → Generate All Input Files opens one dialog
+(`vaspen/ui/generate_all_dialog.py`) with POSCAR/INCAR/KPOINTS/POTCAR
+tabs; files are written only when its Generate button is clicked
+(output directory chosen inside the dialog). The INCAR/KPOINTS/POTCAR
+tabs embed the **same panels** as the standalone dialogs — each editor
+is now a QWidget panel (`IncarEditorPanel`/`KpointsEditorPanel`/
+`PotcarPanel`) wrapped in a thin QDialog shell that delegates unknown
+attribute lookups to the panel (`__getattr__`), so there is exactly one
+implementation per file type.
+
+**Dialog modality (settled 2026-08-14):** the generate dialog is
+**non-modal** (same pattern as the surface dialog) — a modal dialog
+centered over the main window would cover the 3D viewport and hide the
+NEB frame preview. While it is open, structure-editing entry points are
+paused via `_set_preview_editing_enabled` and restored on `finished`;
+the viewport is rebound to the model when the dialog closes. Clicking a
+frame previews it via `_preview_image_atoms`, which forces a
+synchronous `repaint()` — the GL viewport can otherwise defer a
+scheduled repaint for seconds, which reads as "clicking does nothing".
+
+**Non-periodic structures (settled 2026-08-14):** KPOINTS panels never
+fabricate a mesh for a molecule — when the model has no full-rank cell,
+the automatic-mode preview shows a '#'-prefixed note ("the structure
+is not periodic — wrap it in a periodic cell first") and generation is
+blocked ('#'-content is rejected, matching the line-mode error
+pattern). The normal flow wraps molecules via the periodic gate
+(`_ensure_periodic_for`) before the dialog opens; the dialog itself
+also refuses Generate on a non-periodic model (the model can change
+underneath a non-modal dialog via drag-and-drop open) and its
+construction can never crash on a degenerate cell.
+
+**Task coupling** (task selector syncs the tabs; user may override
+afterwards):
+
+| Task | Rule |
+|------|------|
+| band | KPOINTS switches to line-mode, pre-filled with a lattice-aware path from pymatgen `HighSymmKpath` (Setyawan-Curtarolo convention; symmetry-point coordinates transformed from the standardized primitive reciprocal basis into the input cell's basis — `suggest_band_path()` in vasp_input.py). Fallback: the default `G-X|X-M|M-G` path. |
+| neb | POSCAR tab switches to initial/final selection + interpolation; KPOINTS switches to the automatic mesh; after interpolation `IMAGES` is filled into the INCAR tab (re-applied whenever the task re-selects NEB). |
+| custom | Nothing forced. |
+| other | POSCAR tab normal, KPOINTS automatic. |
+
+**NEB interpolation** (`vaspen/core/neb.py`, pure logic, no Qt):
+- Linear per-atom interpolation in fractional coordinates using the
+  per-component minimal-image displacement; the lattice of every frame
+  equals the initial cell; endpoints included (n_images + 2 frames,
+  1–98).
+- Distance metric = Euclidean norm of the full 3N-atom minimal-image
+  displacement vector (Å). Suggested images = `ceil(distance / 0.8)`.
+  The implementation was cross-checked against the classic reference
+  tooling during development (distance identical to ~1e-15, frame
+  coordinates to ~6e-15); the comparison values are pinned in
+  `tests/test_neb.py`. No third-party tool names appear in code/docs.
+- **Strict file order, never auto-reordered.** A diagnostic
+  (same-element optimal assignment via scipy, warning only) reports
+  when reordering would shorten the path by >25% AND >1 Å; the user
+  may then continue in file order or cancel. A non-blocking warning
+  also appears when >25 images are suggested.
+- Initial/final must have equal per-element counts and equal cells
+  (variable-cell NEB is blocked with a clear message). Non-periodic
+  endpoints run the standard wrap flow (`PeriodicWrapDialog`, on a
+  copy — the model is untouched).
+- Output layout: `00/POSCAR`…`0N/POSCAR` subdirectories + INCAR /
+  KPOINTS / POTCAR in the root (standard VASP NEB run layout).
+  Clicking a frame previews it in the 3D viewport (temporary; the
+  viewport is rebound to the model when the dialog closes). An
+  IMAGES/actual-count mismatch is confirmed before writing.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -430,6 +499,10 @@ reciprocal lattice vectors (`b_i·a_j = δ_ij`). Equivalent to VASP's
 `KSPACING_vasp = 2π × KSPACING_input`. Worked examples: Si cubic
 (0.04 → 5×5×5), GaAs FCC primitive (0.030 → 11×11×11, 0.020 →
 16×16×16), ZnO hexagonal (0.040 → 9 9 5).
+
+**Band tasks (settled 2026-08-14):** in the unified input-file dialog,
+the band task auto-switches KPOINTS to line-mode with a pymatgen
+`HighSymmKpath`-suggested path (§7.7).
 
 ### 8.3 POTCAR Recommendations
 

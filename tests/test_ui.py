@@ -32,6 +32,32 @@ class _FakeWrapDialog:
         return QDialog.DialogCode.Accepted if self.accept_flag else QDialog.DialogCode.Rejected
 
 
+class _FakeGenerateAllDialog(QObject):
+    """Stands in for GenerateAllDialog in main-window flow tests.
+
+    Records what the main window passed in; show() immediately emits
+    finished (the real dialog is non-modal and closes on Generate/
+    Cancel). The real dialog's behaviour is covered by
+    tests/test_generate_all.py — main-window tests only verify the
+    gates (periodic wrap, task default) that run before it opens.
+    """
+
+    finished = Signal(int)
+    constructed: list = []
+
+    def __init__(self, structure, parent=None, preview_callback=None,
+                 default_task="scf"):
+        super().__init__()
+        type(self).constructed.append({
+            "structure": structure,
+            "preview_callback": preview_callback,
+            "default_task": default_task,
+        })
+
+    def show(self):
+        self.finished.emit(0)  # triggers the main window's cleanup handler
+
+
 def test_main_window_launch(window):
     assert window.windowTitle() == "VASPen"
     assert window._viewport is not None
@@ -353,33 +379,42 @@ def test_export_poscar_wraps_molecule(window, monkeypatch, water_molecule, tmp_p
     assert window._structure.is_periodic is True
 
 
-def test_generate_all_wraps_molecule(window, monkeypatch, water_molecule, tmp_path):
+def test_generate_all_wraps_molecule_before_dialog(window, monkeypatch, water_molecule):
+    """The periodic-wrap gate runs before the unified dialog opens."""
     window._structure.load_atoms(water_molecule)
-    monkeypatch.setattr(
-        "vaspen.ui.main_window.QMessageBox.question",
-        staticmethod(lambda *a, **k: QMessageBox.Yes),
-    )
-    monkeypatch.setattr(
-        "vaspen.ui.main_window.QMessageBox.information",
-        staticmethod(lambda *a, **k: None),
-    )
-    monkeypatch.setattr(
-        "vaspen.ui.main_window.QFileDialog.getExistingDirectory",
-        staticmethod(lambda *a, **k: str(tmp_path)),
-    )
+    _FakeGenerateAllDialog.constructed.clear()
     monkeypatch.setattr(
         "vaspen.ui.periodic_wrap_dialog.PeriodicWrapDialog",
         lambda parent=None: _FakeWrapDialog(accept=True, padding=10.0),
     )
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.GenerateAllDialog", _FakeGenerateAllDialog)
 
     window._on_generate_all()
 
-    for name in ("INCAR", "KPOINTS", "POSCAR"):
-        content = (tmp_path / name).read_text()
-        assert content.strip(), name
-    poscar_lines = (tmp_path / "POSCAR").read_text().splitlines()
-    assert len(poscar_lines) >= 6  # comment + scaling + 3 lattice vectors
-    assert window._structure.is_periodic is True
+    assert window._structure.is_periodic is True  # wrapped in place
+    assert len(_FakeGenerateAllDialog.constructed) == 1
+    call = _FakeGenerateAllDialog.constructed[0]
+    assert call["structure"] is window._structure
+    # bound-method identity: same underlying function on the same window
+    assert call["preview_callback"] == window._preview_image_atoms
+    assert call["default_task"] == window._config.default_calc_type
+
+
+def test_generate_all_wrap_cancel_blocks_dialog(window, monkeypatch, water_molecule):
+    window._structure.load_atoms(water_molecule)
+    _FakeGenerateAllDialog.constructed.clear()
+    monkeypatch.setattr(
+        "vaspen.ui.periodic_wrap_dialog.PeriodicWrapDialog",
+        lambda parent=None: _FakeWrapDialog(accept=False),
+    )
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.GenerateAllDialog", _FakeGenerateAllDialog)
+
+    window._on_generate_all()
+
+    assert window._structure.is_periodic is False
+    assert _FakeGenerateAllDialog.constructed == []  # cancelled before the dialog
 
 
 def test_wrap_dialog_uses_remembered_padding(qtbot):
@@ -1078,28 +1113,18 @@ def test_export_poscar_follows_coords_setting(window, monkeypatch, si_bulk, tmp_
     assert _poscar_keyword(dest) == "Direct"
 
 
-def test_generate_all_follows_coords_setting(window, monkeypatch, si_bulk, tmp_path):
+def test_generate_all_passes_default_task(window, monkeypatch, si_bulk):
+    """The configured default calculation type reaches the dialog."""
     window._structure.load_atoms(si_bulk)
+    window._config.default_calc_type = "band"
+    _FakeGenerateAllDialog.constructed.clear()
     monkeypatch.setattr(
-        "vaspen.ui.main_window.QMessageBox.question",
-        staticmethod(lambda *a, **k: QMessageBox.Yes),
-    )
-    monkeypatch.setattr(
-        "vaspen.ui.main_window.QMessageBox.information",
-        staticmethod(lambda *a, **k: None),
-    )
-    monkeypatch.setattr(
-        "vaspen.ui.main_window.QFileDialog.getExistingDirectory",
-        staticmethod(lambda *a, **k: str(tmp_path)),
-    )
+        "vaspen.ui.main_window.GenerateAllDialog", _FakeGenerateAllDialog)
 
-    window._config.poscar_coords_direct = True
     window._on_generate_all()
-    assert "Direct" in (tmp_path / "POSCAR").read_text()
 
-    window._config.poscar_coords_direct = False
-    window._on_generate_all()
-    assert "Cartesian" in (tmp_path / "POSCAR").read_text()
+    assert len(_FakeGenerateAllDialog.constructed) == 1
+    assert _FakeGenerateAllDialog.constructed[0]["default_task"] == "band"
 
 
 def test_save_as_non_vasp_ignores_coords_setting(window, monkeypatch, si_bulk, tmp_path):

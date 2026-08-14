@@ -615,3 +615,74 @@ def test_generate_all_neb_without_images_raises():
     assert problems == []
     assert tags["IMAGES"] == "5"
     assert tags["IOPT"] == "1" and tags["ICHAIN"] == "0"
+
+
+# ----------------------------------------------------------------------
+# generate_poscar (extracted from generate_all_inputs)
+# ----------------------------------------------------------------------
+
+def test_generate_poscar_matches_generate_all_inputs():
+    from vaspen.core.vasp_input import generate_poscar
+
+    model = _fe2o3_model()
+    files = generate_all_inputs(model)
+    assert generate_poscar(model) == files["POSCAR"]
+
+
+def test_generate_poscar_direct_and_fixed():
+    from vaspen.core.vasp_input import generate_poscar
+
+    model = _fe2o3_model()
+    model.set_fixed([0], True)
+    direct = generate_poscar(model, poscar_direct=True)
+    cartesian = generate_poscar(model, poscar_direct=False)
+    assert "Direct" in direct
+    assert "Selective dynamics" in direct and "Selective dynamics" in cartesian
+    assert "Cartesian" in cartesian
+
+
+# ----------------------------------------------------------------------
+# suggest_band_path (pymatgen HighSymmKpath, transformed to input cell)
+# ----------------------------------------------------------------------
+
+def test_suggest_band_path_fcc():
+    from ase.build import bulk
+
+    from vaspen.core.vasp_input import suggest_band_path
+
+    cu = bulk("Cu", "fcc", a=3.615)  # primitive fcc cell (rhombohedral)
+    result = suggest_band_path(cu)
+    assert result is not None
+    path, points = result
+    # segments are consecutive label pairs, all labels known
+    assert all(len(seg) == 2 for seg in path)
+    for seg in path:
+        assert seg[0] in points and seg[1] in points
+    # Gamma is the origin; X lies on the standard fcc reciprocal axes
+    gamma = next(p for p in points if p.strip("\\") == "Gamma")
+    assert np.allclose(points[gamma], [0.0, 0.0, 0.0])
+    # the path feeds the line-mode generator
+    text = generate_kpoints_line_mode(path, n_points_per_segment=20,
+                                      special_points=points)
+    assert text.startswith("Band structure:")
+    assert not text.startswith("#")
+
+
+def test_suggest_band_path_fcc_known_labels():
+    from ase.build import bulk
+
+    from vaspen.core.vasp_input import suggest_band_path
+
+    cu = bulk("Cu", "fcc", a=3.615)
+    _path, points = suggest_band_path(cu)
+    labels = {p.strip("\\") for p in points}
+    # fcc path labels: Gamma, X, W, K, L, U
+    assert {"Gamma", "X", "W", "K", "L", "U"} <= labels
+
+
+def test_suggest_band_path_non_periodic_returns_none():
+    from ase.build import molecule
+
+    from vaspen.core.vasp_input import suggest_band_path
+
+    assert suggest_band_path(molecule("H2O")) is None
