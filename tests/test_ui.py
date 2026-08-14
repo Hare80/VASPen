@@ -988,15 +988,15 @@ def test_element_picker_shortlist_and_periodic_table(window, monkeypatch):
 
     assert window._element_btn.text() == "C"
     assert window._current_element == "C"
-    assert [a.text() for a in window._element_actions] == [
+    assert [a.text() for a in window._element_btn._actions] == [
         "C", "H", "O", "N", "S", "P", "F", "Cl", "Si"]
-    assert window._element_actions[0].isChecked()
+    assert window._element_btn._actions[0].isChecked()
 
-    window._element_actions[2].trigger()  # pick O from the menu
+    window._element_btn._actions[2].trigger()  # pick O from the menu
     assert window._current_element == "O"
     assert window._element_btn.text() == "O"
     assert window._viewport.current_element == "O"
-    assert window._element_actions[2].isChecked()
+    assert window._element_btn._actions[2].isChecked()
 
     class _FakePT(QDialog):
         def __init__(self, parent=None):
@@ -1014,7 +1014,7 @@ def test_element_picker_shortlist_and_periodic_table(window, monkeypatch):
     assert window._element_btn.text() == "Au"
     assert window._viewport.current_element == "Au"
     # "Au" is not in the shortlist — no menu item is checked
-    assert not any(a.isChecked() for a in window._element_actions)
+    assert not any(a.isChecked() for a in window._element_btn._actions)
 
 
 def test_surface_dialog_nonperiodic_guard(window, monkeypatch, water_molecule):
@@ -1033,3 +1033,84 @@ def test_surface_dialog_nonperiodic_guard(window, monkeypatch, water_molecule):
     window._on_surface()  # guard shows an info box, never constructs
     assert len(infos) == 1
     assert window._surface_dialog is None
+
+
+# ----------------------------------------------------------------------
+# VASP coordinate mode follows the Preferences setting (no dialogs)
+# ----------------------------------------------------------------------
+
+def _poscar_keyword(path):
+    """Coordinate keyword line ("Direct" or "Cartesian") of a POSCAR."""
+    for line in Path(path).read_text().splitlines():
+        if line.strip() in ("Direct", "Cartesian"):
+            return line.strip()
+    raise AssertionError(f"No coordinate keyword in {path}")
+
+
+def test_save_as_vasp_follows_coords_setting(window, monkeypatch, si_bulk, tmp_path):
+    """Save As writes the coordinate form selected in Preferences."""
+    window._structure.load_atoms(si_bulk)
+    dest = tmp_path / "bulk.POSCAR"
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(dest), "")),
+    )
+
+    window._config.poscar_coords_direct = True  # default: fractional
+    window._on_save_as()
+    assert _poscar_keyword(dest) == "Direct"
+
+    window._config.poscar_coords_direct = False  # Cartesian
+    window._on_save_as()
+    assert _poscar_keyword(dest) == "Cartesian"
+
+
+def test_export_poscar_follows_coords_setting(window, monkeypatch, si_bulk, tmp_path):
+    window._structure.load_atoms(si_bulk)
+    dest = tmp_path / "POSCAR"
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(dest), "")),
+    )
+
+    window._config.poscar_coords_direct = True
+    window._on_export_poscar()
+    assert _poscar_keyword(dest) == "Direct"
+
+
+def test_generate_all_follows_coords_setting(window, monkeypatch, si_bulk, tmp_path):
+    window._structure.load_atoms(si_bulk)
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.question",
+        staticmethod(lambda *a, **k: QMessageBox.Yes),
+    )
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.information",
+        staticmethod(lambda *a, **k: None),
+    )
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QFileDialog.getExistingDirectory",
+        staticmethod(lambda *a, **k: str(tmp_path)),
+    )
+
+    window._config.poscar_coords_direct = True
+    window._on_generate_all()
+    assert "Direct" in (tmp_path / "POSCAR").read_text()
+
+    window._config.poscar_coords_direct = False
+    window._on_generate_all()
+    assert "Cartesian" in (tmp_path / "POSCAR").read_text()
+
+
+def test_save_as_non_vasp_ignores_coords_setting(window, monkeypatch, si_bulk, tmp_path):
+    """CIF output is untouched by the POSCAR coordinate preference."""
+    window._structure.load_atoms(si_bulk)
+    dest = tmp_path / "bulk.cif"
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QFileDialog.getSaveFileName",
+        staticmethod(lambda *a, **k: (str(dest), "")),
+    )
+
+    window._config.poscar_coords_direct = True
+    window._on_save_as()
+    assert "_cell_length_a" in dest.read_text()

@@ -14,7 +14,6 @@ from PySide6.QtCore import Qt, QSettings, QEvent, QTranslator
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QDockWidget,
     QFileDialog,
@@ -33,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
+from vaspen.ui.menu_button import MenuButton
 from vaspen.ui.structure_tree import StructureTreePanel
 from vaspen.ui.tools import ToolMode
 from vaspen.ui.viewport3d import Viewport3D
@@ -446,28 +446,16 @@ class MainWindow(QMainWindow):
             if mode is ToolMode.ADD_ATOM:
                 # Element picker right of Add Atom — the add-atom
                 # workflow reads left-to-right: mode → element → click.
-                # QToolButton + InstantPopup (same pattern as the View
-                # button): a QComboBox popup glitched in the flow
+                # MenuButton (QToolButton + InstantPopup, same as the
+                # View button): a QComboBox popup glitched in the flow
                 # toolbar (appeared to expand multiple times).
                 self._element_label = QLabel(self.tr("Element:"))
                 flow.addWidget(self._element_label)
-                self._element_btn = QToolButton(self)
-                self._element_btn.setPopupMode(QToolButton.InstantPopup)
-                self._element_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-                self._element_menu = QMenu(self)
-                self._element_actions: list[QAction] = []
-                self._element_group = QActionGroup(self)
-                self._element_group.setExclusive(True)
-                for symbol in ("C", "H", "O", "N", "S", "P", "F", "Cl", "Si"):
-                    act = QAction(symbol, self)
-                    act.setCheckable(True)
-                    act.triggered.connect(
-                        lambda checked=False, s=symbol:
-                        self._set_current_element(s))
-                    self._element_group.addAction(act)
-                    self._element_menu.addAction(act)
-                    self._element_actions.append(act)
-                self._element_btn.setMenu(self._element_menu)
+                self._element_btn = MenuButton(self)
+                self._element_btn.addItems(
+                    ("C", "H", "O", "N", "S", "P", "F", "Cl", "Si"))
+                self._element_btn.currentIndexChanged.connect(
+                    self._on_element_shortlist_changed)
                 flow.addWidget(self._element_btn)
                 # Ellipsis button — opens the periodic table for any
                 # element outside the shortlist
@@ -547,12 +535,21 @@ class MainWindow(QMainWindow):
         """Point the camera along a world-axis direction (View menu)."""
         self._viewport.set_view_direction(azimuth, elevation, up)
 
+    def _on_element_shortlist_changed(self, index: int) -> None:
+        """Shortlist menu item picked (-1 = cleared, e.g. by a table pick)."""
+        if index >= 0:
+            self._set_current_element(self._element_btn.itemText(index))
+
     def _set_current_element(self, symbol: str) -> None:
         """Set the active add-atom element; sync button text and checks."""
         self._current_element = symbol
-        self._element_btn.setText(symbol)
-        for act in self._element_actions:
-            act.setChecked(act.text() == symbol)
+        if self._element_btn.findText(symbol) >= 0:
+            self._element_btn.setCurrentText(symbol)
+        else:
+            # Periodic-table picks are not in the shortlist — show the
+            # symbol with no menu item checked.
+            self._element_btn.setCurrentIndex(-1)
+            self._element_btn.setText(symbol)
         self._viewport.current_element = symbol
 
     def _on_pick_element(self) -> None:
@@ -821,7 +818,7 @@ class MainWindow(QMainWindow):
                 if (resolve_format(fp) == "vasp"
                         and not self._confirm_disorder_poscar_save()):
                     return
-                self._structure.save(fp)
+                self._structure.save(fp, direct=self._config.poscar_coords_direct)
                 self._set_status(self.tr("Saved: {}").format(fp))
             except Exception as e:
                 QMessageBox.critical(self, self.tr("Save Failed"), str(e))
@@ -863,7 +860,7 @@ class MainWindow(QMainWindow):
                 if (resolve_format(filepath) == "vasp"
                         and not self._confirm_disorder_poscar_save()):
                     return
-                self._structure.save(filepath)
+                self._structure.save(filepath, direct=self._config.poscar_coords_direct)
                 self._config.add_recent_file(filepath)
                 self._config.last_directory = str(Path(filepath).parent)
                 self._update_recent_menu()
@@ -885,7 +882,8 @@ class MainWindow(QMainWindow):
                     return
                 if not self._confirm_disorder_poscar_save():
                     return
-                self._structure.save(filepath, fmt="vasp")
+                self._structure.save(filepath, fmt="vasp",
+                                     direct=self._config.poscar_coords_direct)
                 self._set_status(self.tr("Exported POSCAR: {}").format(filepath))
             except Exception as e:
                 QMessageBox.critical(self, self.tr("Export Failed"), str(e))
@@ -944,6 +942,7 @@ class MainWindow(QMainWindow):
                 self._structure,
                 incar_preset=self._config.default_calc_type,
                 potcar_library=potcar_path,
+                poscar_direct=self._config.poscar_coords_direct,
             )
             out = Path(output_dir)
             for name, content in files.items():

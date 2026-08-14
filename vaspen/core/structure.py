@@ -226,13 +226,20 @@ class StructureModel(QObject):
         self._clear_history()
         self.structure_loaded.emit()
 
-    def save(self, filepath: str | Path | None = None, fmt: str | None = None) -> None:
+    def save(
+        self,
+        filepath: str | Path | None = None,
+        fmt: str | None = None,
+        direct: bool = False,
+    ) -> None:
         """Save the current structure to a file.
 
         Args:
             filepath: Destination path. Uses the loaded path if None.
             fmt: ASE format string (e.g. 'vasp', 'cif', 'xyz').
                  Auto-detected from extension if None.
+            direct: For VASP output only: write fractional (Direct)
+                coordinates instead of Cartesian.
 
         Raises:
             ValueError: If no filepath is available, the extension is not
@@ -243,7 +250,7 @@ class StructureModel(QObject):
         if path is None:
             raise ValueError("No filepath specified and no file loaded.")
 
-        FileIO.write(str(path), self._atoms, fmt=fmt)
+        FileIO.write(str(path), self._atoms, fmt=fmt, direct=direct)
         self._filepath = str(path)
         self._dirty = False
 

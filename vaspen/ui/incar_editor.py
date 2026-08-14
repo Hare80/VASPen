@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from vaspen.core.vasp_input import INCAR_PRESETS, INCAR_TAG_DESCRIPTIONS
+from vaspen.ui.menu_button import MenuButton
 
 
 class IncarEditorDialog(QDialog):
@@ -57,7 +57,7 @@ class IncarEditorDialog(QDialog):
         top_row = QHBoxLayout()
 
         top_row.addWidget(QLabel(self.tr("Calculation Type:")))
-        self._preset_combo = QComboBox()
+        self._preset_combo = MenuButton()
         self._preset_combo.addItems([
             self.tr("SCF (Static)"),
             self.tr("Optimization"),

@@ -1441,4 +1441,87 @@ Continue?</source>
         <translation>面内超胞尺寸（a × b）。真空层方向（c）不扩展。</translation>
     </message>
 </context>
+<context>
+    <name>SettingsDialog</name>
+    <message>
+        <source>Preferences</source>
+        <translation>偏好设置</translation>
+    </message>
+    <message>
+        <source>General</source>
+        <translation>常规</translation>
+    </message>
+    <message>
+        <source>Language:</source>
+        <translation>语言：</translation>
+    </message>
+    <message>
+        <source>Default Calculation Type:</source>
+        <translation>默认计算类型：</translation>
+    </message>
+    <message>
+        <source>SCF (Static)</source>
+        <translation>SCF（静态）</translation>
+    </message>
+    <message>
+        <source>Optimization</source>
+        <translation>结构优化</translation>
+    </message>
+    <message>
+        <source>Band Structure</source>
+        <translation>能带结构</translation>
+    </message>
+    <message>
+        <source>DOS</source>
+        <translation>态密度</translation>
+    </message>
+    <message>
+        <source>Optical</source>
+        <translation>光学性质</translation>
+    </message>
+    <message>
+        <source>POSCAR Coordinates:</source>
+        <translation>POSCAR 坐标：</translation>
+    </message>
+    <message>
+        <source>Fractional (Direct)</source>
+        <translation>分数坐标 (Direct)</translation>
+    </message>
+    <message>
+        <source>Cartesian</source>
+        <translation>笛卡尔坐标</translation>
+    </message>
+    <message>
+        <source>Fractional (Direct) is the VASP convention (official CONTCAR files use it); VASP accepts both forms.</source>
+        <translation>分数坐标 (Direct) 是 VASP 惯例（官方 CONTCAR 文件即用此格式）；VASP 两种形式均接受。</translation>
+    </message>
+    <message>
+        <source>Pseudopotential Library</source>
+        <translation>赝势库</translation>
+    </message>
+    <message>
+        <source>Library Root:</source>
+        <translation>库根目录：</translation>
+    </message>
+    <message>
+        <source>e.g. /home/user/vasp/potcar  or  C:\vasp\potcar</source>
+        <translation>e.g. /home/user/vasp/potcar  or  C:\vasp\potcar</translation>
+    </message>
+    <message>
+        <source>Browse...</source>
+        <translation>浏览...</translation>
+    </message>
+    <message>
+        <source>Select POTCAR Library Root</source>
+        <translation>选择赝势库根目录</translation>
+    </message>
+    <message>
+        <source>The library should have subdirectories like:
+  PBE.54/Fe/POTCAR, PBE.54/O/POTCAR, ...
+This is the standard VASP pseudopotential directory layout.</source>
+        <translation>赝势库应包含如下子目录结构：
+  PBE.54/Fe/POTCAR、PBE.54/O/POTCAR、……
+这是 VASP 赝势目录的标准布局。</translation>
+    </message>
+</context>
 </TS>

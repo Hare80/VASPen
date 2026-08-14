@@ -12,7 +12,6 @@ from __future__ import annotations
 from ase import Atoms
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -33,6 +33,7 @@ from vaspen.core.surface import (
     _subscript_formula,
     supercell_in_plane,
 )
+from vaspen.ui.menu_button import MenuButton
 
 
 class SurfaceDialog(QDialog):
@@ -148,7 +149,9 @@ class SurfaceDialog(QDialog):
         # ── Termination ──
         self._termination_group = QGroupBox(self.tr("Termination"))
         term_layout = QVBoxLayout()
-        self._termination_combo = QComboBox()
+        self._termination_combo = MenuButton()
+        self._termination_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._termination_combo.currentIndexChanged.connect(
             self._on_termination_changed)
         term_layout.addWidget(self._termination_combo)

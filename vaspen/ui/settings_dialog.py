@@ -6,7 +6,6 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from vaspen.ui.menu_button import MenuButton
 from vaspen.utils.config import AppConfig
 
 
@@ -42,11 +42,11 @@ class SettingsDialog(QDialog):
         gen_group = QGroupBox(self.tr("General"))
         gen_form = QFormLayout()
 
-        self._language_combo = QComboBox()
+        self._language_combo = MenuButton()
         self._language_combo.addItems(["English", "中文"])
         gen_form.addRow(self.tr("Language:"), self._language_combo)
 
-        self._calc_type_combo = QComboBox()
+        self._calc_type_combo = MenuButton()
         self._calc_type_combo.addItems([
             self.tr("SCF (Static)"),
             self.tr("Optimization"),
@@ -55,6 +55,20 @@ class SettingsDialog(QDialog):
             self.tr("Optical"),
         ])
         gen_form.addRow(self.tr("Default Calculation Type:"), self._calc_type_combo)
+
+        self._poscar_coords_combo = MenuButton()
+        self._poscar_coords_combo.addItems([
+            self.tr("Fractional (Direct)"),
+            self.tr("Cartesian"),
+        ])
+        gen_form.addRow(self.tr("POSCAR Coordinates:"), self._poscar_coords_combo)
+
+        coords_note = QLabel(self.tr(
+            "Fractional (Direct) is the VASP convention (official "
+            "CONTCAR files use it); VASP accepts both forms."
+        ))
+        coords_note.setWordWrap(True)
+        gen_form.addRow("", coords_note)
 
         gen_group.setLayout(gen_form)
         layout.addWidget(gen_group)
@@ -110,12 +124,19 @@ class SettingsDialog(QDialog):
             calc_map.get(self._config.default_calc_type, 0)
         )
 
+        self._poscar_coords_combo.setCurrentIndex(
+            0 if self._config.poscar_coords_direct else 1
+        )
+
         self._potcar_path_edit.setText(self._config.potcar_library_path)
 
     def _on_accept(self) -> None:
         self._config.language = "en" if self._language_combo.currentIndex() == 0 else "zh"
         calc_keys = ["scf", "opt", "band", "dos", "optical"]
         self._config.default_calc_type = calc_keys[self._calc_type_combo.currentIndex()]
+        self._config.poscar_coords_direct = (
+            self._poscar_coords_combo.currentIndex() == 0
+        )
         self._config.potcar_library_path = self._potcar_path_edit.text()
         self._config.sync()
         self.accept()

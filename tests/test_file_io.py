@@ -282,3 +282,71 @@ def test_write_filter_is_categorized():
     assert write_filter.endswith("All files (*)")
     assert "POSCAR / CONTCAR (VASP) (*.vasp" in write_filter
     assert "*.cif" in write_filter and "*.xyz" in write_filter
+
+
+# ----------------------------------------------------------------------
+# VASP coordinate mode (fractional Direct vs Cartesian)
+# ----------------------------------------------------------------------
+
+def _poscar_keyword(path) -> str:
+    """Coordinate keyword line ("Direct" or "Cartesian") of a POSCAR."""
+    for line in path.read_text().splitlines():
+        if line.strip() in ("Direct", "Cartesian"):
+            return line.strip()
+    raise AssertionError(f"No coordinate keyword found in {path}")
+
+
+def test_vasp_write_default_is_cartesian(si_bulk, tmp_path):
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), si_bulk)
+    assert _poscar_keyword(path) == "Cartesian"
+
+
+def test_vasp_write_direct_writes_fractional(si_bulk, tmp_path):
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), si_bulk, direct=True)
+    lines = path.read_text().splitlines()
+    kw = lines.index("Direct")
+    for line in lines[kw + 1:]:
+        frac = [float(t) for t in line.split()[:3]]
+        assert all(0.0 <= f < 1.0 for f in frac)
+    # fractional mode round-trips to the same structure
+    loaded = ase_read(str(path), format="vasp")
+    key = lambda r: tuple(np.round(r, 6))
+    assert np.allclose(sorted(loaded.get_scaled_positions() % 1.0, key=key),
+                       sorted(si_bulk.get_scaled_positions() % 1.0, key=key),
+                       atol=1e-4)
+
+
+def test_vasp_direct_wraps_atoms_outside_cell(si_bulk, tmp_path):
+    """Direct mode wraps atoms into [0,1); the caller's atoms are untouched."""
+    outside = si_bulk.copy()
+    outside.positions[0] += outside.get_cell()[0]
+    original = outside.positions.copy()
+
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), outside, direct=True)
+
+    assert np.allclose(outside.positions, original)
+    assert _poscar_keyword(path) == "Direct"
+    loaded = ase_read(str(path), format="vasp")
+    frac = loaded.get_scaled_positions()
+    assert ((frac >= 0.0) & (frac < 1.0)).all()
+    # wrapping is a periodic identity: fractions match modulo 1
+    key = lambda r: tuple(np.round(r, 6))
+    assert np.allclose(sorted(frac % 1.0, key=key),
+                       sorted(outside.get_scaled_positions() % 1.0, key=key),
+                       atol=1e-4)
+
+
+def test_vasp_cartesian_keeps_atoms_outside_cell(si_bulk, tmp_path):
+    """Cartesian mode writes actual positions — no wrapping applied."""
+    outside = si_bulk.copy()
+    outside.positions[0] += outside.get_cell()[0]
+
+    path = tmp_path / "POSCAR"
+    FileIO.write(str(path), outside, direct=False)
+
+    assert _poscar_keyword(path) == "Cartesian"
+    loaded = ase_read(str(path), format="vasp")
+    assert np.allclose(loaded.positions[0], outside.positions[0], atol=1e-4)

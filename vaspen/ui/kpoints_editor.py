@@ -12,7 +12,6 @@ import numpy as np
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -30,6 +29,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from vaspen.ui.menu_button import MenuButton
 
 from vaspen.core.vasp_input import (
     generate_kpoints_automatic,
@@ -58,7 +59,7 @@ class KpointsEditorDialog(QDialog):
         # ── Mode selector ──
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel(self.tr("KPOINTS Mode:")))
-        self._mode_combo = QComboBox()
+        self._mode_combo = MenuButton()
         self._mode_combo.addItems([
             self.tr("Automatic (KSPACING) — recommended"),
             self.tr("Manual Mesh (n1 × n2 × n3)"),
@@ -134,7 +135,7 @@ class KpointsEditorDialog(QDialog):
         form.addRow("", self._kspacing_note)
 
         # Gamma-centered checkbox
-        self._gamma_auto = QComboBox()
+        self._gamma_auto = MenuButton()
         self._gamma_auto.addItems([self.tr("Gamma-centered"), self.tr("Monkhorst-Pack")])
         form.addRow(self.tr("Scheme:"), self._gamma_auto)
 
@@ -185,7 +186,7 @@ class KpointsEditorDialog(QDialog):
         mesh_row.addStretch()
         form.addRow(self.tr("k-mesh:"), mesh_row)
 
-        self._gamma_manual = QComboBox()
+        self._gamma_manual = MenuButton()
         self._gamma_manual.addItems([self.tr("Gamma-centered"), self.tr("Monkhorst-Pack")])
         form.addRow(self.tr("Scheme:"), self._gamma_manual)
 

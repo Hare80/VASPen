@@ -88,6 +88,23 @@ def _normalize_pbc(atoms: Atoms, fmt: str | None) -> Atoms:
     return atoms
 
 
+def vasp_write_atoms(atoms: Atoms, direct: bool) -> Atoms:
+    """Return the atoms to hand to ASE's vasp writer.
+
+    Fractional (Direct) output is wrapped into [0,1) on a copy — ASE's
+    writer calls ``get_scaled_positions(wrap=False)``, so atoms outside
+    the cell would produce out-of-range fractional coordinates; the
+    wrapped form is the VESTA/VASP convention (a periodic identity).
+    Cartesian output passes through unchanged. The input object is
+    never modified.
+    """
+    if not direct:
+        return atoms
+    wrapped = atoms.copy()
+    wrapped.wrap()
+    return wrapped
+
+
 # Numeric prefix of an occupancy token: accepts "0.5", "1.0", "0.5(2)"
 # (error-bar notation) — the "(2)" suffix is dropped.
 _OCC_NUM_PREFIX = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)")
@@ -301,13 +318,23 @@ class FileIO:
         return _normalize_pbc(atoms, fmt)
 
     @classmethod
-    def write(cls, filepath: str | Path, atoms: Atoms, fmt: str | None = None) -> None:
+    def write(
+        cls,
+        filepath: str | Path,
+        atoms: Atoms,
+        fmt: str | None = None,
+        direct: bool = False,
+    ) -> None:
         """Write a structure file.
 
         Args:
             filepath: Destination path.
             atoms: ASE Atoms to write.
             fmt: ASE format string. Auto-detected from extension if None.
+            direct: For VASP output only: write fractional (Direct)
+                coordinates instead of Cartesian. Atoms are wrapped into
+                [0,1) first on a copy — the input object is never
+                modified. Ignored for other formats.
 
         Raises:
             ValueError: If the file extension is not registered.
@@ -334,7 +361,8 @@ class FileIO:
             ).format(target))
         if target == "vasp":
             from ase.io import write as ase_write
-            ase_write(str(path), atoms, format="vasp")
+            ase_write(str(path), vasp_write_atoms(atoms, direct),
+                      format="vasp", direct=direct)
         elif fmt is not None:
             # Explicit format request bypasses the extension registry
             from ase.io import write as ase_write

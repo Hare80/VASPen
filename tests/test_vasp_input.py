@@ -248,6 +248,21 @@ def test_generate_all_inputs_element_order_consistent(tmp_path):
 # Non-periodic structures: wrap first, then generate
 # ----------------------------------------------------------------------
 
+def test_generate_all_poscar_direct_mode(water_molecule):
+    """poscar_direct=True writes fractional (Direct) coordinates."""
+    model = StructureModel()
+    model.load_atoms(water_molecule)
+    model.make_periodic(10.0)
+
+    cartesian = generate_all_inputs(model)
+    direct = generate_all_inputs(model, poscar_direct=True)
+
+    assert "Cartesian\n" in cartesian["POSCAR"]
+    assert "Direct\n" in direct["POSCAR"]
+    frac = [float(t) for t in direct["POSCAR"].splitlines()[-3].split()[:3]]
+    assert all(0.0 <= f < 1.0 for f in frac)
+
+
 def test_generate_all_after_make_periodic(water_molecule):
     """After make_periodic, POSCAR/KPOINTS generation must not crash."""
     model = StructureModel()

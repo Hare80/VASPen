@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -32,6 +31,7 @@ from vaspen.core.vasp_input import (
     get_potcar_recommendation,
     resolve_potcar_dir,
 )
+from vaspen.ui.menu_button import MenuButton
 from vaspen.utils.config import AppConfig
 
 
@@ -42,7 +42,7 @@ class PotcarDialog(QDialog):
         super().__init__(parent)
         self._structure_model = structure_model
         self._config = AppConfig()
-        self._element_combos: dict[str, QComboBox] = {}
+        self._element_combos: dict[str, MenuButton] = {}
         self._potcar_content: str = ""
         self._paths_used: list[str] = []
 
@@ -56,7 +56,7 @@ class PotcarDialog(QDialog):
         # ── Functional ──
         func_row = QHBoxLayout()
         func_row.addWidget(QLabel(self.tr("Functional:")))
-        self._functional_combo = QComboBox()
+        self._functional_combo = MenuButton()
         self._functional_combo.addItems(list(POTCAR_FUNCTIONAL_VERSIONS.keys()))
         self._functional_combo.currentTextChanged.connect(self._refresh_elements)
         func_row.addWidget(self._functional_combo)
@@ -138,7 +138,7 @@ class PotcarDialog(QDialog):
         library = self._path_edit.text()
 
         for el in elements:
-            combo = QComboBox()
+            combo = MenuButton()
             # Discover what the library actually offers (all wiki
             # variants: _d/_sv/_pv/_s/_h/_GW/_AE/_2/_3/fractional...);
             # fall back to the recommendation + common suffixes when

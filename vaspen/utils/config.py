@@ -93,6 +93,21 @@ class AppConfig:
         self.set("remember_wrap_padding", bool(value))
 
     @property
+    def poscar_coords_direct(self) -> bool:
+        """Whether VASP structures are saved in fractional (Direct) coordinates.
+
+        Default True — fractional is the VASP convention (official
+        CONTCAR files are Direct). Cartesian is written when False.
+        """
+        # QSettings on Windows returns bools as the string "false" —
+        # bool("false") is True, so compare the string form.
+        return str(self.get("poscar_coords_direct", True)).lower() in ("true", "1")
+
+    @poscar_coords_direct.setter
+    def poscar_coords_direct(self, value: bool) -> None:
+        self.set("poscar_coords_direct", bool(value))
+
+    @property
     def recent_files(self) -> list[str]:
         return self.get("recent_files", []) or []
 

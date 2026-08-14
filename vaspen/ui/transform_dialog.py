@@ -6,7 +6,6 @@ import numpy as np
 from ase import Atoms
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -25,6 +24,7 @@ from vaspen.core.transform import (
     translate,
     wrap_periodic,
 )
+from vaspen.ui.menu_button import MenuButton
 
 _DIRECTIONS = {
     "X": (1.0, 0.0, 0.0),
@@ -87,7 +87,7 @@ class TransformDialog(QDialog):
         # ── Rotate ──
         rot_box = QGroupBox(self.tr("Rotate"))
         form = QFormLayout(rot_box)
-        self._axis_combo = QComboBox()
+        self._axis_combo = MenuButton()
         self._axis_combo.addItems(["X", "Y", "Z"])
         form.addRow(self.tr("Axis:"), self._axis_combo)
         self._angle = self._make_spin(-180.0, 180.0, "°")

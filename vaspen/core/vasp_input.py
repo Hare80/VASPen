@@ -527,6 +527,7 @@ def generate_all_inputs(
     kpoints_params: dict[str, Any] | None = None,
     potcar_library: str = "",
     functional: str = "PBE",
+    poscar_direct: bool = False,
 ) -> dict[str, str]:
     """Generate all four VASP input files at once.
 
@@ -538,6 +539,8 @@ def generate_all_inputs(
         kpoints_params: Dict with kpoints-specific parameters.
         potcar_library: Path to pseudopotential library root.
         functional: XC functional for POTCAR.
+        poscar_direct: Write POSCAR in fractional (Direct) coordinates
+            instead of Cartesian.
 
     Returns:
         Dict mapping filename → content:
@@ -579,8 +582,12 @@ def generate_all_inputs(
     # POSCAR
     from ase.io import write as ase_write
     import io
+
+    from vaspen.core.file_io import vasp_write_atoms
+
     buf = io.StringIO()
-    ase_write(buf, structure_model.atoms, format="vasp", vasp5=True)
+    ase_write(buf, vasp_write_atoms(structure_model.atoms, poscar_direct),
+              format="vasp", vasp5=True, direct=poscar_direct)
     poscar_content = buf.getvalue()
 
     # POTCAR

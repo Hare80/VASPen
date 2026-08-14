@@ -18,6 +18,7 @@ from vaspen.core.render_settings import (
 from vaspen.core.structure import StructureModel
 from vaspen.ui.display_options_dialog import DisplayOptionsDialog
 from vaspen.ui.lattice_dialog import LatticeDialog
+from vaspen.ui.settings_dialog import SettingsDialog
 from vaspen.ui.supercell_dialog import SupercellDialog
 from vaspen.ui.surface_dialog import SurfaceDialog
 from vaspen.ui.symmetry_dialog import SymmetryDialog
@@ -751,3 +752,85 @@ def test_surface_dialog_supercell_expands_preview(qtbot, gaas):
     assert dlg.result_structure is not None
     assert dlg.result_structure.n_atoms == 4 * base_n
     assert model.n_atoms == len(gaas)  # model untouched until applied
+
+
+# ----------------------------------------------------------------------
+# Settings dialog — POSCAR coordinate format
+# ----------------------------------------------------------------------
+
+def test_settings_dialog_poscar_coords_default_direct(qtbot):
+    """Unset config preselects fractional (Direct) coordinates."""
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._poscar_coords_combo.currentIndex() == 0
+
+
+def test_settings_dialog_poscar_coords_loads_config(qtbot):
+    config = AppConfig()
+    config.poscar_coords_direct = False
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._poscar_coords_combo.currentIndex() == 1  # Cartesian
+
+
+def test_settings_dialog_poscar_coords_accept_persists(qtbot):
+    config = AppConfig()
+    config.poscar_coords_direct = True
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    dlg._poscar_coords_combo.setCurrentIndex(1)  # Cartesian
+    dlg._on_accept()
+    assert config.poscar_coords_direct is False
+
+
+# ----------------------------------------------------------------------
+# Every dialog dropdown is a MenuButton (QComboBox popups ghost here)
+# ----------------------------------------------------------------------
+
+def test_dialog_dropdowns_are_menu_buttons(qtbot, periodic_model, srtio3):
+    from PySide6.QtWidgets import QComboBox
+
+    from vaspen.ui.incar_editor import IncarEditorDialog
+    from vaspen.ui.kpoints_editor import KpointsEditorDialog
+    from vaspen.ui.menu_button import MenuButton
+    from vaspen.ui.potcar_dialog import PotcarDialog
+    from vaspen.ui.transform_dialog import TransformDialog
+
+    checkables: list = []
+
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    checkables += [dlg._language_combo, dlg._calc_type_combo,
+                   dlg._poscar_coords_combo]
+    dlg.close()
+
+    dlg = IncarEditorDialog()
+    qtbot.addWidget(dlg)
+    checkables.append(dlg._preset_combo)
+    dlg.close()
+
+    dlg = KpointsEditorDialog(periodic_model)
+    qtbot.addWidget(dlg)
+    checkables += [dlg._mode_combo, dlg._gamma_auto, dlg._gamma_manual]
+    dlg.close()
+
+    model = StructureModel()
+    model.load_atoms(srtio3)
+    dlg = SurfaceDialog(model, _FakeViewport())
+    qtbot.addWidget(dlg)
+    checkables.append(dlg._termination_combo)
+    dlg.close()
+
+    dlg = TransformDialog(periodic_model)
+    qtbot.addWidget(dlg)
+    checkables.append(dlg._axis_combo)
+    dlg.close()
+
+    dlg = PotcarDialog()
+    qtbot.addWidget(dlg)
+    checkables.append(dlg._functional_combo)
+    dlg.close()
+
+    for widget in checkables:
+        assert isinstance(widget, MenuButton)
+        assert not isinstance(widget, QComboBox)
