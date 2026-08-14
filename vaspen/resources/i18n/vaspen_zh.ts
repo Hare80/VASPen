@@ -2081,7 +2081,7 @@ Cleaving will discard the fractional occupancy information.
 Continue?</source><translation>此结构含有部分占据(无序)。
 切面将丢弃分数占据信息。
 
-是否继续?</translation></message></context>
+是否继续?</translation></message><message><source>{i}/{n} — computing…</source><translation>{i}/{n} — 计算中…</translation></message><message><source>Computing terminations {k}/{n}…</source><translation>正在计算终止面 {k}/{n}…</translation></message><message><source>Termination {k} computing…</source><translation>终止面 {k} 计算中…</translation></message></context>
     <context>
         <name>SettingsDialog</name>
         <message>

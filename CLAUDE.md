@@ -571,6 +571,18 @@ re-introduced.
 - **Calculate → Cleave Surface** (bulk inputs only; the dialog says so
   and points to the re-box feature). `slabs()` is a pure pymatgen
   pipeline (orthogonal c + standard presentation + exact vacuum).
+  **Performance (settled 2026-08-15):** pymatgen's `center_slab` is a
+  per-atom neighbor search (~10× slower than everything else,
+  profiled) — the generator runs with `center_slab=False` and
+  `_standard_slab_cell` unwraps (`_unwrap_layers`) + centers exactly;
+  do NOT set center_slab back to True. Terminations are enumerated
+  incrementally: `_possible_terminations` (ported from pymatgen's
+  get_slabs internals, exact shift list) + `iter_slabs` generator;
+  the dialog announces the total first (placeholder slots), fills
+  items progressively and a click on an unloaded item jumps the
+  compute queue (shared `_ComputeOrder.priority`, GIL-atomic, no
+  locks). Whole-list `get_slabs` remains the fallback for unknown
+  pymatgen versions.
 - **Tools → Re-box Slab** (`rebox_slab(atoms, vacuum)` +
   `vaspen/ui/rebox_dialog.py`, next to Wrap in Periodic Cell) for
   structures that already carry vacuum: unwraps layers split across

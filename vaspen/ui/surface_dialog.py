@@ -37,17 +37,28 @@ from PySide6.QtWidgets import (
 from vaspen.core.structure import StructureModel
 from vaspen.core.surface import (
     SlabInfo,
-    SurfaceCutter,
+    _ComputeOrder,
     _subscript_formula,
+    iter_slabs,
+    slab_count,
     supercell_in_plane,
 )
 from vaspen.ui.menu_button import MenuButton
 
 
 class _SlabResultHolder(QObject):
-    """Main-thread relay for pool results (auto-connection → queued)."""
+    """Main-thread relay for pool results (auto-connection → queued).
 
-    done = Signal(object, object, int, object)  # infos, error, gen, key
+    Three explicit signals, all carrying the generation for staleness
+    checks — the dialog builds the termination list progressively:
+    ``total`` announces the list size (instant — no slab built yet),
+    ``item`` delivers one computed termination in its canonical slot,
+    ``done`` closes the computation (or reports the error).
+    """
+
+    total = Signal(int, int)        # generation, count (-1 = unknown)
+    item = Signal(int, int, object)  # generation, index, SlabInfo
+    done = Signal(int, object, object)  # generation, error|None, key
 
 
 class _SlabTask(QRunnable):
@@ -56,26 +67,32 @@ class _SlabTask(QRunnable):
     QThreadPool manages the threads — unlike a hand-rolled QThread with
     deleteLater/quit, there is no thread-lifecycle race (the pattern
     crashed intermittently when queued signals were delivered during
-    processEvents).
+    processEvents). The task is a dumb sequential loop: it reads the
+    shared compute-order hint once per item (cooperative, GIL-atomic)
+    and never touches UI state.
     """
 
     def __init__(self, holder: _SlabResultHolder, atoms: Atoms,
-                 key: tuple, generation: int) -> None:
+                 key: tuple, generation: int,
+                 order: _ComputeOrder) -> None:
         super().__init__()
         self._holder = holder
         self._atoms = atoms
         self._key = key
         self._generation = generation
+        self._order = order
 
     def run(self) -> None:
         try:
-            # StructureModel wraps the copy (derived-state init is cheap
-            # relative to pymatgen and keeps the core API surface).
-            model = StructureModel(self._atoms.copy())
-            infos = SurfaceCutter(model).slabs(*self._key)
-            self._holder.done.emit(infos, None, self._generation, self._key)
+            total = slab_count(self._atoms, *self._key)
+            self._holder.total.emit(
+                self._generation, total if total is not None else -1)
+            for index, info in iter_slabs(self._atoms, *self._key,
+                                          order=self._order):
+                self._holder.item.emit(self._generation, index, info)
+            self._holder.done.emit(self._generation, None, self._key)
         except Exception as e:  # noqa: BLE001 — surfaced in the dialog
-            self._holder.done.emit(None, e, self._generation, self._key)
+            self._holder.done.emit(self._generation, e, self._key)
 
 
 class SurfaceDialog(QDialog):
@@ -96,7 +113,10 @@ class SurfaceDialog(QDialog):
         self._model = structure_model
         self._viewport = viewport
         self.result_structure: StructureModel | None = None
-        self._slab_infos: list[SlabInfo] = []
+        # Single source of truth: one fixed-length slot per canonical
+        # termination (None = computing). The dropdown is always a
+        # rebuild of this array — idempotent, index-restoring.
+        self._slab_infos: list[SlabInfo | None] = []
         self._cache_key: tuple[tuple[int, int, int], int, float] | None = None
         self._debounce: QTimer | None = None
         self._hint_state: str | None = None
@@ -104,12 +124,17 @@ class SurfaceDialog(QDialog):
         # Async computation on the global thread pool, one task at a
         # time: a generation counter guards against out-of-order
         # results; parameter changes arriving while a task runs are
-        # queued as _pending_key and chained on completion.
+        # queued as _pending_key and chained on completion. The shared
+        # compute-order hint lets a click on an unloaded item jump the
+        # queue (main thread writes, worker reads — GIL-atomic).
         self._generation = 0
         self._busy = False
         self._pending_key: tuple | None = None
+        self._order = _ComputeOrder()
         self._result_holder = _SlabResultHolder()
-        self._result_holder.done.connect(self._on_slabs_ready)
+        self._result_holder.total.connect(self._on_slabs_total)
+        self._result_holder.item.connect(self._on_slab_item)
+        self._result_holder.done.connect(self._on_slabs_done)
 
         self.setWindowTitle(self.tr("Cleave Surface / Slab"))
         self.setWindowFlags(self.windowFlags() | Qt.Tool)  # floats above parent
@@ -294,15 +319,51 @@ class SurfaceDialog(QDialog):
         self._pending_key = None
         self._busy = True
         self._generation += 1
+        self._order = _ComputeOrder()  # fresh hint per computation
+        # Stale protection: drop the old list immediately so items of
+        # the PREVIOUS parameters can never be clicked mid-compute.
+        self._slab_infos = []
+        self._termination_combo.setEnabled(False)
+        self._rebuild_termination_combo()
         self._ok_button.setEnabled(False)
         self._status_label.setText(self.tr("Computing slab…"))
         task = _SlabTask(self._result_holder, self._model.atoms.copy(),
-                         key, self._generation)
+                         key, self._generation, self._order)
         QThreadPool.globalInstance().start(task)
 
-    def _on_slabs_ready(self, infos, error, generation: int,
-                        key: tuple) -> None:
-        """Apply a finished computation; chain a queued newer one."""
+    def _on_slabs_total(self, generation: int, total: int) -> None:
+        """List size announced — build the placeholder slots instantly."""
+        if generation != self._generation:
+            return
+        if total > 0:
+            self._slab_infos = [None] * total
+        self._termination_combo.setEnabled(True)
+        self._rebuild_termination_combo()
+
+    def _on_slab_item(self, generation: int, index: int,
+                      info: SlabInfo) -> None:
+        """One termination computed — fill its slot, preview if selected."""
+        if generation != self._generation:
+            return
+        if index >= len(self._slab_infos):
+            self._slab_infos.append(info)  # whole-list fallback (no total)
+        else:
+            self._slab_infos[index] = info
+        self._termination_combo.setEnabled(True)
+        self._rebuild_termination_combo()
+        arrived = sum(1 for i in self._slab_infos if i is not None)
+        if len(self._slab_infos) > 1:
+            self._status_label.setText(
+                self.tr("Computing terminations {k}/{n}…").format(
+                    k=arrived, n=len(self._slab_infos)))
+        # auto-preview: the first item, or the one the user queued by
+        # clicking it while it was still computing
+        if self._termination_combo.currentIndex() == index:
+            self._push_preview()
+
+    def _on_slabs_done(self, generation: int, error,
+                       key: tuple) -> None:
+        """Computation finished (or failed) — chain a queued newer key."""
         self._busy = False
         if generation == self._generation:
             if error is not None:
@@ -312,36 +373,48 @@ class SurfaceDialog(QDialog):
                 self._set_hint("error", str(error))
                 self._status_label.setText("")
             else:
-                self._slab_infos = infos
-                self._ok_button.setEnabled(bool(infos))
+                self._ok_button.setEnabled(bool(self._slab_infos))
                 self._set_hint(None)
-                self._rebuild_termination_combo()
-                self._push_preview()
         if self._pending_key is not None:
             next_key = self._pending_key
             self._pending_key = None
             self._start_compute(next_key)
 
     def _rebuild_termination_combo(self) -> None:
-        """Re-populate the termination combo, keeping the current index."""
+        """Re-populate the termination combo, keeping the current index.
+
+        Not-yet-computed slots show a placeholder — the user may click
+        them anyway; that click jumps the compute queue.
+        """
         index = self._termination_combo.currentIndex()
         self._termination_combo.blockSignals(True)
         self._termination_combo.clear()
+        n = len(self._slab_infos)
         for i, info in enumerate(self._slab_infos):
-            self._termination_combo.addItem(
-                self.tr("{i}/{n} — top: {top}, bottom: {bottom}").format(
-                    i=i + 1,
-                    n=len(self._slab_infos),
+            if info is None:
+                label = self.tr("{i}/{n} — computing…").format(i=i + 1, n=n)
+            else:
+                label = self.tr("{i}/{n} — top: {top}, bottom: {bottom}").format(
+                    i=i + 1, n=n,
                     top=_subscript_formula(info.top_composition),
                     bottom=_subscript_formula(info.bottom_composition),
-                ))
+                )
+            self._termination_combo.addItem(label)
         self._termination_combo.setCurrentIndex(
-            min(max(index, 0), len(self._slab_infos) - 1))
+            min(max(index, 0), n - 1))
         self._termination_combo.blockSignals(False)
 
-    def _on_termination_changed(self, _index: int) -> None:
-        if self._slab_infos:
-            self._push_preview()
+    def _on_termination_changed(self, index: int) -> None:
+        if not self._slab_infos or not (0 <= index < len(self._slab_infos)):
+            return
+        info = self._slab_infos[index]
+        if info is None:
+            # clicked an unloaded item → jump the compute queue
+            self._order.priority = index
+            self._status_label.setText(
+                self.tr("Termination {k} computing…").format(k=index + 1))
+            return
+        self._push_preview()
 
     def _on_supercell_changed(self, *_args) -> None:
         """Supercell expansion reuses the cached slabs (repeat is cheap)."""
@@ -350,9 +423,12 @@ class SurfaceDialog(QDialog):
 
     def _displayed_atoms(self) -> Atoms | None:
         """The selected slab expanded to the requested in-plane supercell."""
-        if not self._slab_infos:
+        index = self._termination_combo.currentIndex()
+        if not (self._slab_infos and 0 <= index < len(self._slab_infos)):
             return None
-        info = self._slab_infos[self._termination_combo.currentIndex()]
+        info = self._slab_infos[index]
+        if info is None:
+            return None  # still computing — no preview yet
         return supercell_in_plane(
             info.atoms, self._supercell_a_spin.value(),
             self._supercell_b_spin.value())

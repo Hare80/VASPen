@@ -618,7 +618,7 @@ def test_display_options_measurement_reset_defaults(qtbot):
 def _wait_slabs(qtbot, dlg, view, n_rendered: int = 1) -> None:
     """Slab generation runs on a pool thread — pump events until it lands."""
     qtbot.waitUntil(
-        lambda: len(view.rendered) >= n_rendered and bool(dlg._slab_infos))
+        lambda: len(view.rendered) >= n_rendered and any(dlg._slab_infos))
     qtbot.waitUntil(lambda: not dlg._busy)
 
 
@@ -1149,26 +1149,25 @@ def test_atom_properties_rejects_nan_coordinates(qtbot, periodic_model):
 # Code-review regression tests (2026-08-14, user-found surface hang)
 # ----------------------------------------------------------------------
 
-class _SlowSurfaceCutter:
-    """Stands in for SurfaceCutter with a controllable per-key delay."""
+def _fake_slab_count(atoms, miller, layers, vacuum):
+    return 1
 
-    def __init__(self, model):
-        self._model = model
 
-    def slabs(self, miller, layers, vacuum):
-        import time
+def _fake_iter_slabs(atoms, miller, layers, vacuum, order=None):
+    """Fake iter_slabs with a controllable per-key delay; the layer
+    count rides on the top composition as a marker."""
+    import time
 
-        time.sleep(0.4 if layers == 4 else 0.02)
-        from vaspen.core.surface import SlabInfo
+    time.sleep(0.4 if layers == 4 else 0.02)
+    from vaspen.core.surface import SlabInfo
 
-        # marker: the layer count rides on the top composition
-        return [SlabInfo(
-            atoms=self._model.atoms.copy(),
-            top_composition=f"L{layers}",
-            bottom_composition="X",
-            broken_bonds=0,
-            n_atoms=len(self._model.atoms),
-        )]
+    yield 0, SlabInfo(
+        atoms=atoms.copy(),
+        top_composition=f"L{layers}",
+        bottom_composition="X",
+        broken_bonds=0,
+        n_atoms=len(atoms),
+    )
 
 
 def test_surface_dialog_compute_runs_off_gui_thread(qtbot, srtio3, monkeypatch):
@@ -1177,7 +1176,9 @@ def test_surface_dialog_compute_runs_off_gui_thread(qtbot, srtio3, monkeypatch):
     import time
 
     monkeypatch.setattr(
-        "vaspen.ui.surface_dialog.SurfaceCutter", _SlowSurfaceCutter)
+        "vaspen.ui.surface_dialog.slab_count", _fake_slab_count)
+    monkeypatch.setattr(
+        "vaspen.ui.surface_dialog.iter_slabs", _fake_iter_slabs)
     model = StructureModel(srtio3)
     view = _FakeViewport()
     t0 = time.time()
@@ -1198,7 +1199,9 @@ def test_surface_dialog_rapid_param_changes_serialize(qtbot, srtio3, monkeypatch
     """A parameter change arriving mid-compute must not be lost or race
     the running task — it is queued and chained on completion."""
     monkeypatch.setattr(
-        "vaspen.ui.surface_dialog.SurfaceCutter", _SlowSurfaceCutter)
+        "vaspen.ui.surface_dialog.slab_count", _fake_slab_count)
+    monkeypatch.setattr(
+        "vaspen.ui.surface_dialog.iter_slabs", _fake_iter_slabs)
     model = StructureModel(srtio3)
     view = _FakeViewport()
     dlg = SurfaceDialog(model, view)   # gen 1: layers=4, slow (0.4 s)
@@ -1206,7 +1209,7 @@ def test_surface_dialog_rapid_param_changes_serialize(qtbot, srtio3, monkeypatch
 
     dlg._layers_spin.setValue(5)
     dlg._ensure_slabs()                # queued while gen 1 runs
-    qtbot.waitUntil(lambda: bool(dlg._slab_infos) and
+    qtbot.waitUntil(lambda: any(dlg._slab_infos) and
                     dlg._slab_infos[0].top_composition == "L5")
     qtbot.waitUntil(lambda: not dlg._busy)
 
@@ -1330,3 +1333,68 @@ def test_surface_dialog_bulk_hint(qtbot, srtio3):
     qtbot.addWidget(dlg)
     assert "BULK" in dlg._preview_hint.text()
     assert "Re-box Slab" in dlg._preview_hint.text()
+
+
+class _SequencedSlabs:
+    """Fake slab_count/iter_slabs: n items with a small delay between
+    them; records the yielded order and the shared order hint."""
+
+    def __init__(self, atoms, n=3, delay=0.2):
+        self.atoms = atoms
+        self.n = n
+        self.delay = delay
+        self.yielded: list[int] = []
+        self.order = None
+
+    def count(self, atoms, miller, layers, vacuum):
+        return self.n
+
+    def gen(self, atoms, miller, layers, vacuum, order=None):
+        import time
+
+        from vaspen.core.surface import SlabInfo
+
+        self.order = order
+        pending = set(range(self.n))
+        sequential = iter(range(self.n))
+        while pending:
+            if order is not None and order.priority in pending:
+                k = order.priority  # clicked item jumps the queue
+            else:
+                k = next(sequential)
+            time.sleep(self.delay)
+            self.yielded.append(k)
+            yield k, SlabInfo(atoms=self.atoms.copy(),
+                              top_composition=f"L{k}",
+                              bottom_composition="X",
+                              broken_bonds=0,
+                              n_atoms=len(self.atoms))
+            pending.discard(k)
+
+
+def test_surface_dialog_placeholders_and_click_jumps_queue(qtbot, srtio3,
+                                                           monkeypatch):
+    """The list shows placeholders immediately; clicking an unloaded
+    item jumps the compute queue and previews it when it lands."""
+    seq = _SequencedSlabs(srtio3.copy(), n=3)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq.count)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq.gen)
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)
+    qtbot.addWidget(dlg)
+
+    # placeholders appear as soon as the total is known
+    qtbot.waitUntil(lambda: dlg._termination_combo.count() == 3)
+    assert "computing" in dlg._termination_combo.itemText(1)
+
+    # click an unloaded item while item 0 is still computing (0.2 s
+    # window) → the click must jump the queue
+    dlg._termination_combo.setCurrentIndex(2)
+    qtbot.waitUntil(lambda: dlg._slab_infos[2] is not None)
+    assert seq.yielded[:2] == [0, 2]  # priority before natural order
+    # the clicked item's preview was pushed
+    assert np.allclose(view.rendered[-1][0].positions, seq.atoms.positions)
+    qtbot.waitUntil(lambda: not dlg._busy)
+    assert seq.yielded == [0, 2, 1]
+    assert all(dlg._slab_infos)  # all slots filled

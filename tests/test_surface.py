@@ -293,3 +293,65 @@ def test_rebox_slab_keeps_atom_order():
     inp = _cu111_slab()
     out = rebox_slab(inp, 15.0)
     assert out.get_chemical_symbols() == inp.get_chemical_symbols()
+
+
+# ----------------------------------------------------------------------
+# Incremental termination computation (2026-08-15, performance work)
+# ----------------------------------------------------------------------
+
+def test_iter_slabs_matches_slabs_and_order_hint():
+    """iter_slabs yields the same list as slabs(); the compute-order
+    hint jumps the queue while slot indices stay canonical."""
+    from vaspen.core.surface import (
+        _ComputeOrder,
+        iter_slabs,
+        slab_count,
+    )
+
+    cu = Atoms("Cu4", cell=[3.61, 3.61, 3.61], pbc=True,
+               positions=[[0, 0, 0], [0, 1.805, 1.805],
+                          [1.805, 0, 1.805], [1.805, 1.805, 0]])
+    full = [info for _i, info in iter_slabs(cu, (1, 1, 1), 4, 15.0)]
+    assert slab_count(cu, (1, 1, 1), 4, 15.0) == len(full)
+    ref = SurfaceCutter(StructureModel(cu)).slabs((1, 1, 1), 4, 15.0)
+    assert len(full) == len(ref)
+    for a, b in zip(full, ref):
+        assert np.allclose(a.atoms.positions, b.atoms.positions)
+        assert a.top_composition == b.top_composition
+
+    # priority: the clicked index is computed next; every slot arrives
+    # exactly once, in the canonical positions (rocksalt (100) has two
+    # mirror terminations)
+    full_mgo = [info for _i, info in iter_slabs(_mgo(), (1, 0, 0), 4, 15.0)]
+    assert len(full_mgo) == 2
+    order = _ComputeOrder()
+    gen = iter_slabs(_mgo(), (1, 0, 0), 4, 15.0, order=order)
+    first_idx, _first = next(gen)
+    assert first_idx == 0
+    order.priority = 1
+    second_idx, _second = next(gen)
+    assert second_idx == 1
+    rest = [idx for idx, _info in gen]
+    assert sorted(rest + [first_idx, second_idx]) == [0, 1]
+
+
+def test_unwrap_layers_folds_wrapped_slab():
+    """Atoms pushed across the periodic c boundary fold back into one
+    contiguous block; the structure is unchanged (mic distances)."""
+    from ase.geometry import get_distances
+
+    from vaspen.core.surface import _unwrap_layers
+
+    inp = _cu111_slab()
+    wrapped = inp.copy()
+    frac = wrapped.get_scaled_positions()
+    frac[0:5, 2] += 1.0  # push five atoms of the bottom layer across c
+    wrapped.set_scaled_positions(frac)
+    out = _unwrap_layers(wrapped)
+    cell = np.asarray(inp.get_cell().array)
+    pbc = inp.get_pbc()
+    _v, d1 = get_distances(inp.positions, inp.positions, cell=cell, pbc=pbc)
+    _v, d2 = get_distances(out.positions, out.positions, cell=cell, pbc=pbc)
+    assert np.allclose(np.sort(d1.ravel()), np.sort(d2.ravel()), atol=1e-4)
+    z = np.sort(out.positions[:, 2])
+    assert len(np.unique(np.round(z, 3))) == 4  # contiguous layers again
