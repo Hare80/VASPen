@@ -410,10 +410,20 @@ afterwards):
 | other | POSCAR tab normal, KPOINTS automatic. |
 
 **NEB interpolation** (`vaspen/core/neb.py`, pure logic, no Qt):
-- Linear per-atom interpolation in fractional coordinates using the
-  per-component minimal-image displacement; the lattice of every frame
-  equals the initial cell; endpoints included (n_images + 2 frames,
-  1–98).
+- **Algorithm selector** (settled 2026-08-14): the NEB page offers
+  Linear (default) and IDPP. Linear per-atom interpolation in
+  fractional coordinates using the per-component minimal-image
+  displacement; the lattice of every frame equals the initial cell;
+  endpoints included (n_images + 2 frames, 1–98).
+- **IDPP** (`interpolate_idpp`): starts from the linear path and
+  relaxes the intermediate images with the image-dependent pair
+  potential so the interatomic-distance change between adjacent
+  images is uniform — atoms never pass through each other (the linear
+  path of a methyl rotation collides hydrogens; IDPP does not). Uses
+  the built-in IDPP relaxation of ASE (ase.mep.idpp_interpolate,
+  mic=True, fmax=0.1, steps=100, no traj/log files); the endpoints
+  are restored to exact copies and frames are wrapped back into the
+  cell. `examples/neb_ethane_rotation/` demonstrates the contrast.
 - Distance metric = Euclidean norm of the full 3N-atom minimal-image
   displacement vector (Å). Suggested images = `ceil(distance / 0.8)`.
   The implementation was cross-checked against the classic reference

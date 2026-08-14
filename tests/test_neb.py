@@ -10,6 +10,7 @@ from ase import Atoms
 
 from vaspen.core.neb import (
     detect_order_mismatch,
+    interpolate_idpp,
     interpolate_neb,
     neb_distance,
     pbc_wrap,
@@ -251,3 +252,122 @@ def test_interpolate_neb_matches_reference_implementation():
     frames = interpolate_neb(ini, fin, 4)
     assert len(frames) == 6
     assert neb_distance(ini, fin) == pytest.approx(2.55619101398937, rel=1e-12)
+
+
+# ----------------------------------------------------------------------
+# IDPP interpolation
+# ----------------------------------------------------------------------
+
+ETHANE = REPO / "examples" / "neb_ethane_rotation"
+
+
+def _ethane_pair():
+    """Ethane in a 10 Å box; final = one methyl rotated 120° (the
+    linear path collides H atoms — IDPP's classic demo case)."""
+    from ase.build import molecule
+
+    eth = molecule("C2H6")
+    pos = eth.positions
+    c_idx = [i for i, s in enumerate(eth.get_chemical_symbols()) if s == "C"]
+    c0, c1 = c_idx
+    axis = pos[c1] - pos[c0]
+    axis /= np.linalg.norm(axis)
+    h_idx = [i for i, s in enumerate(eth.get_chemical_symbols()) if s == "H"]
+    methyl0 = [i for i in h_idx
+               if np.linalg.norm(pos[i] - pos[c0]) < np.linalg.norm(pos[i] - pos[c1])]
+
+    def rotate_about_axis(points, origin, axis, angle_deg):
+        a = angle_deg * np.pi / 180
+        K = np.array([[0, -axis[2], axis[1]],
+                      [axis[2], 0, -axis[0]],
+                      [-axis[1], axis[0], 0]])
+        R = np.eye(3) + np.sin(a) * K + (1 - np.cos(a)) * (K @ K)
+        return (points - origin) @ R.T + origin
+
+    def in_box(atoms, a=10.0):
+        atoms.cell = [a, a, a]
+        atoms.pbc = True
+        atoms.center()
+        return atoms
+
+    ini = in_box(eth.copy())
+    fin = eth.copy()
+    for i in [c0] + methyl0:
+        fin.positions[i] = rotate_about_axis(fin.positions[i], pos[c0], axis, 120.0)
+    return ini, in_box(fin)
+
+
+def _min_pair_distance(atoms: Atoms) -> float:
+    d = atoms.get_all_distances(mic=True)
+    np.fill_diagonal(d, np.inf)
+    return float(d.min())
+
+
+def test_interpolate_idpp_frame_count_and_endpoints():
+    ini, fin = _ethane_pair()
+    frames = interpolate_idpp(ini, fin, 4)
+    assert len(frames) == 6
+    assert np.allclose(frames[0].positions, ini.positions)
+    assert np.allclose(frames[-1].positions, fin.positions)
+    for f in frames:
+        assert np.allclose(f.get_cell(), ini.get_cell())
+        assert f.constraints == []
+
+
+def test_interpolate_idpp_avoids_collisions():
+    """Linear interpolation collides the rotating hydrogens; IDPP
+    keeps every interatomic distance physical."""
+    ini, fin = _ethane_pair()
+    linear = interpolate_neb(ini, fin, 5)
+    idpp = interpolate_idpp(ini, fin, 5)
+
+    assert min(_min_pair_distance(f) for f in linear) < 0.75   # collision
+    assert min(_min_pair_distance(f) for f in idpp) > 0.9      # physical
+
+
+def test_interpolate_idpp_uniform_distance_steps():
+    """IDPP evens out the distance-matrix change between adjacent
+    images (its defining property); linear does not."""
+    ini, fin = _ethane_pair()
+    linear = interpolate_neb(ini, fin, 5)
+    idpp = interpolate_idpp(ini, fin, 5)
+
+    def step_std(frames):
+        dm = [f.get_all_distances(mic=True) for f in frames]
+        steps = [np.linalg.norm(dm[i + 1] - dm[i]) for i in range(len(dm) - 1)]
+        return float(np.std(steps))
+
+    assert step_std(idpp) < step_std(linear) / 10
+
+
+def test_interpolate_idpp_validation():
+    a = _cubic(Atoms("Cu2", positions=[[0.0, 0, 0], [2.5, 0, 0]]))
+    b = a.copy()
+    with pytest.raises(ValueError, match="between 1 and 98"):
+        interpolate_idpp(a, b, 0)
+    with pytest.raises(ValueError, match="same elements"):
+        interpolate_idpp(a, _cubic(Atoms("CuAg", positions=[[0.0, 0, 0], [2.5, 0, 0]])), 2)
+    bad_cell = b.copy()
+    bad_cell.cell = [11, 10, 10]
+    with pytest.raises(ValueError, match="cells differ"):
+        interpolate_idpp(a, bad_cell, 2)
+
+
+def test_idpp_wraps_frames_into_cell():
+    """IDPP relaxes in Cartesian space — frames must come back into
+    the cell."""
+    ini, fin = _ethane_pair()
+    for f in interpolate_idpp(ini, fin, 3):
+        frac = f.get_scaled_positions(wrap=False)
+        assert np.all((frac >= 0.0) & (frac < 1.0))
+
+
+def test_ethane_example_files_regression():
+    """The committed example reproduces the collision-free IDPP path."""
+    ini = FileIO.read(str(ETHANE / "initial" / "POSCAR"))
+    fin = FileIO.read(str(ETHANE / "final" / "POSCAR"))
+    assert len(ini) == 8
+    linear = interpolate_neb(ini, fin, 5)
+    idpp = interpolate_idpp(ini, fin, 5)
+    assert min(_min_pair_distance(f) for f in linear) < 0.75
+    assert min(_min_pair_distance(f) for f in idpp) > 0.9

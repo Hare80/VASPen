@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
 from vaspen.core.file_io import FileIO
 from vaspen.core.neb import (
     detect_order_mismatch,
+    interpolate_idpp,
     interpolate_neb,
     neb_distance,
     suggest_n_images,
@@ -168,6 +169,16 @@ class PoscarPanel(QWidget):
         self._warn_label.setWordWrap(True)
         self._warn_label.setStyleSheet("color: #b06000;")
         layout.addWidget(self._warn_label)
+
+        # Interpolation algorithm (linear is the default; IDPP avoids
+        # atoms passing through each other on the straight-line path)
+        algo_row = QHBoxLayout()
+        algo_row.addWidget(QLabel(self.tr("Algorithm:")))
+        self._algo_combo = MenuButton()
+        self._algo_combo.addItems([self.tr("Linear"), self.tr("IDPP")])
+        algo_row.addWidget(self._algo_combo)
+        algo_row.addStretch()
+        layout.addLayout(algo_row)
 
         # Interpolation controls
         interp_row = QHBoxLayout()
@@ -363,7 +374,10 @@ class PoscarPanel(QWidget):
                 return
 
         n = self._images_spin.value()
-        self._images = interpolate_neb(self._init_atoms, self._final_atoms, n)
+        if self._algo_combo.currentIndex() == 1:  # IDPP
+            self._images = interpolate_idpp(self._init_atoms, self._final_atoms, n)
+        else:  # Linear (default)
+            self._images = interpolate_neb(self._init_atoms, self._final_atoms, n)
         self._images_list.clear()
         for i, _atoms in enumerate(self._images):
             if i == 0:

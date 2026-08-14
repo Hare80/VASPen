@@ -1253,6 +1253,18 @@ Interpolate in strict file order anyway?</source>
 
 仍按文件顺序插点吗？</translation>
         </message>
+        <message>
+            <source>Algorithm:</source>
+            <translation>插点算法：</translation>
+        </message>
+        <message>
+            <source>Linear</source>
+            <translation>线性插值</translation>
+        </message>
+        <message>
+            <source>IDPP</source>
+            <translation>IDPP</translation>
+        </message>
     </context>
     <context>
         <name>Neb</name>

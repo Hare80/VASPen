@@ -21,6 +21,7 @@ warn the user.
 
 from __future__ import annotations
 
+import warnings
 from collections import Counter
 
 import numpy as np
@@ -194,6 +195,74 @@ def _frame_copy(atoms: Atoms) -> Atoms:
     out.constraints = []
     out.info = {}
     return out
+
+
+def interpolate_idpp(
+    init: Atoms,
+    final: Atoms,
+    n_images: int,
+    fmax: float = 0.1,
+    steps: int = 100,
+) -> list[Atoms]:
+    """Interpolate a NEB path with the IDPP method (image-dependent
+    pair potential).
+
+    Starts from the linear path and relaxes the intermediate images so
+    that the interatomic distances between adjacent images are evenly
+    distributed — the guess is physically reasonable (no atoms passing
+    through each other) even when the straight-line path would collide.
+
+    The relaxation uses the built-in IDPP implementation of ASE
+    (ase.mep.idpp_interpolate), which optimizes only the geometry —
+    no electronic-structure calculator is involved. The endpoints are
+    not moved (their target distances equal their own geometry).
+
+    Args:
+        init: Initial structure (periodic).
+        final: Final structure (periodic, same cell and composition).
+        n_images: Number of intermediate images (1..98).
+        fmax: Force convergence for the IDPP relaxation.
+        steps: Maximum relaxation steps.
+
+    Returns:
+        List of ``n_images + 2`` Atoms frames (endpoints included).
+
+    Raises:
+        ValueError: Pair mismatch, or n_images out of range.
+    """
+    _validate_neb_pair(init, final)
+    if not (1 <= n_images <= MAX_IMAGES):
+        raise ValueError(
+            _tr("Number of images must be between 1 and {} (got {}).")
+            .format(MAX_IMAGES, n_images))
+
+    frames = interpolate_neb(init, final, n_images)
+
+    from ase.mep import idpp_interpolate as _ase_idpp
+
+    # traj/log=None: the relaxation must not litter the working
+    # directory with idpp.traj / idpp.log files. The NEB constructor
+    # inside warns about its default tangent method, which is
+    # irrelevant here (the calculator is overridden by IDPP).
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="The default method has changed from 'aseneb'")
+        _ase_idpp(frames, traj=None, log=None, fmax=fmax, mic=True, steps=steps)
+
+    # Endpoints are restored to exact copies (the optimizer should
+    # leave them untouched, but zero force is only approximate), and
+    # intermediate frames are wrapped back into the cell.
+    frames[0] = _frame_copy(init)
+    frames[-1] = _frame_copy(final)
+    for k in range(1, n_images + 1):
+        frac = frames[k].get_scaled_positions(wrap=False)
+        frac = np.where(np.abs(frac) < 1e-12, 0.0, frac)
+        frac = np.mod(frac, 1.0)
+        frac = np.where(frac > 1.0 - 1e-12, 0.0, frac)
+        frames[k].set_scaled_positions(frac)
+        frames[k].constraints = []
+        frames[k].info = {}
+    return frames
 
 
 def interpolate_neb(init: Atoms, final: Atoms, n_images: int) -> list[Atoms]:

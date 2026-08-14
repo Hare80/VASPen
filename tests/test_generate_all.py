@@ -436,3 +436,81 @@ def test_kpoints_panel_singular_cell_falls_back(qtbot):
     panel.set_mode("automatic")
     assert panel._preview.toPlainText().startswith("Automatic k-point mesh")
     assert panel.content().startswith("Automatic k-point mesh")
+
+
+# ----------------------------------------------------------------------
+# NEB interpolation algorithm selector (Linear default / IDPP)
+# ----------------------------------------------------------------------
+
+ETHANE = REPO / "examples" / "neb_ethane_rotation"
+
+
+def _ethane_model() -> StructureModel:
+    model = StructureModel()
+    model.load_atoms(FileIO.read(str(ETHANE / "initial" / "POSCAR")))
+    return model
+
+
+def _min_pair_distance(atoms) -> float:
+    import numpy as np
+
+    d = atoms.get_all_distances(mic=True)
+    np.fill_diagonal(d, np.inf)
+    return float(d.min())
+
+
+def test_neb_algorithm_selector_defaults_to_linear(qtbot):
+    model = _example_model()
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+
+    assert panel._algo_combo.currentIndex() == 0  # Linear
+    panel._final_atoms = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    panel._update_diagnostics()
+    panel._on_interpolate()
+    # linear path = linear in fractional space
+    frac = panel.images[2].get_scaled_positions(wrap=False)
+    ini = panel._init_atoms.get_scaled_positions(wrap=False)
+    assert np.allclose(frac, ini + (panel.images[-1].get_scaled_positions(wrap=False) - ini) * (2 / 5))
+
+
+def test_neb_idpp_algorithm_avoids_collisions(qtbot, monkeypatch):
+    # Ethane's equivalent hydrogens can be relabeled, so the order
+    # diagnostic fires — confirm "continue in strict file order".
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QMessageBox.question",
+        staticmethod(lambda *a, **k: QMessageBox.Yes),
+    )
+    model = _ethane_model()
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+
+    panel._final_atoms = FileIO.read(str(ETHANE / "final" / "POSCAR"))
+    panel._update_diagnostics()
+    panel._images_spin.setValue(5)
+    panel._algo_combo.setCurrentIndex(1)  # IDPP
+    panel._on_interpolate()
+
+    assert panel.n_images == 5
+    assert min(_min_pair_distance(f) for f in panel.images) > 0.9
+
+
+def test_neb_linear_algorithm_collides_ethane(qtbot, monkeypatch):
+    """Contrast test: the same pair interpolated linearly collides."""
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QMessageBox.question",
+        staticmethod(lambda *a, **k: QMessageBox.Yes),
+    )
+    model = _ethane_model()
+    dlg = GenerateAllDialog(model, default_task="neb")
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+
+    panel._final_atoms = FileIO.read(str(ETHANE / "final" / "POSCAR"))
+    panel._update_diagnostics()
+    panel._images_spin.setValue(5)
+    panel._on_interpolate()  # default Linear
+
+    assert min(_min_pair_distance(f) for f in panel.images) < 0.75
