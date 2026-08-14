@@ -234,6 +234,12 @@ class MainWindow(QMainWindow):
             self.tr("Convert a molecule into a periodic structure (vacuum box)"))
         self.act_wrap_periodic.triggered.connect(self._on_wrap_periodic)
 
+        self.act_rebox = QAction(self.tr("&Re-box Slab..."), self)
+        self.act_rebox.setStatusTip(self.tr(
+            "Re-apply the vacuum of a structure that already carries it "
+            "(e.g. a cut surface)"))
+        self.act_rebox.triggered.connect(self._on_rebox)
+
         self.act_edit_lattice = QAction(self.tr("Edit &Lattice..."), self)
         self.act_edit_lattice.setStatusTip(
             self.tr("Edit the unit cell parameters with live preview"))
@@ -408,6 +414,7 @@ class MainWindow(QMainWindow):
         self._menu_tools.addAction(self.act_surface)
         self._menu_tools.addAction(self.act_supercell)
         self._menu_tools.addAction(self.act_wrap_periodic)
+        self._menu_tools.addAction(self.act_rebox)
         self._menu_tools.addSeparator()
         self._menu_tools.addAction(self.act_edit_lattice)
         self._menu_tools.addAction(self.act_symmetry)
@@ -1133,6 +1140,7 @@ class MainWindow(QMainWindow):
         for act in (self.act_new, self.act_open, self.act_surface,
                     self.act_supercell, self.act_edit_lattice,
                     self.act_symmetry,
+                    self.act_wrap_periodic, self.act_rebox,
                     self.act_delete_selection, self.act_undo, self.act_redo,
                     self.act_detect_bonds, self.act_freeze, self.act_unfreeze,
                     self.act_select_all, self.act_select_none,
@@ -1222,6 +1230,44 @@ class MainWindow(QMainWindow):
             )
             return
         self._wrap_molecule_to_periodic()
+
+    def _on_rebox(self) -> None:
+        """Tools → Re-box Slab: re-apply vacuum to a slab-like structure.
+
+        The counterpart of Cleave Surface for structures that already
+        carry vacuum. The atom order is unchanged (pure c-translations
+        + re-vacuum), so frozen flags and magnetic moments are carried
+        over 1:1 — unlike cleave, which builds a new atom set.
+        """
+        from vaspen.ui.rebox_dialog import ReBoxDialog
+
+        if self._structure.n_atoms == 0:
+            QMessageBox.information(
+                self,
+                self.tr("Re-box Slab"),
+                self.tr("Load a structure first."),
+            )
+            return
+        if not self._structure.is_periodic:
+            QMessageBox.information(
+                self,
+                self.tr("Re-box Slab"),
+                self.tr("Re-boxing requires a periodic structure "
+                        "(a full-rank cell with periodic boundary "
+                        "conditions)."),
+            )
+            return
+        dlg = ReBoxDialog(self._structure, self)
+        if (dlg.exec() == ReBoxDialog.Accepted
+                and dlg.result_atoms is not None):
+            # replace_atoms: one undo step; atom order preserved, so the
+            # frozen flags and initial moments carry over 1:1.
+            self._structure.replace_atoms(
+                dlg.result_atoms,
+                fixed_flags=self._structure.fixed_flags,
+                magmoms=self._structure.magmoms)
+            self._structure.reset_filepath()  # derived structure → Save As
+            self._set_status(self.tr("Slab re-boxed (vacuum along c)."))
 
     def _on_edit_lattice(self) -> None:
         from vaspen.ui.lattice_dialog import LatticeDialog
@@ -1345,6 +1391,10 @@ class MainWindow(QMainWindow):
         self.act_wrap_periodic.setText(self.tr("Wrap in &Periodic Cell..."))
         self.act_wrap_periodic.setStatusTip(
             self.tr("Convert a molecule into a periodic structure (vacuum box)"))
+        self.act_rebox.setText(self.tr("&Re-box Slab..."))
+        self.act_rebox.setStatusTip(self.tr(
+            "Re-apply the vacuum of a structure that already carries it "
+            "(e.g. a cut surface)"))
         self.act_edit_lattice.setText(self.tr("Edit &Lattice..."))
         self.act_edit_lattice.setStatusTip(
             self.tr("Edit the unit cell parameters with live preview"))

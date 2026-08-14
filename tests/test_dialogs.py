@@ -1240,30 +1240,6 @@ def test_symmetry_dialog_primitive_cell_selection(qtbot, si_bulk):
     assert len(dlg.result_atoms) == 8  # conventional diamond cell
 
 
-def test_surface_dialog_slab_input_shows_rebox_note(qtbot):
-    """A vacuum-carrying input is re-boxed: one termination, the status
-    label explains the re-box."""
-    from pathlib import Path
-
-    from ase.io import read
-
-    slab_in = read(Path(__file__).parent.parent / "examples"
-                   / "Cu_111_slab.vasp")
-    model = StructureModel()
-    model.load_atoms(slab_in)
-    view = _FakeViewport()
-    dlg = SurfaceDialog(model, view)
-    qtbot.addWidget(dlg)
-
-    _wait_slabs(qtbot, dlg, view, 1)
-    assert dlg._termination_combo.count() == 1
-    assert "re-boxed" in dlg._status_label.text()
-    # the previewed slab is contiguous — nothing detached
-    z = np.sort(view.rendered[-1][0].positions[:, 2])
-    levels = np.unique(np.round(z, 3))
-    assert len(levels) == 4
-
-
 def test_surface_dialog_disordered_accept_warns(qtbot, monkeypatch,
                                                 disordered_atoms):
     """Applying a cleave to a disordered structure requires confirmation
@@ -1297,3 +1273,60 @@ def test_surface_dialog_disordered_accept_warns(qtbot, monkeypatch,
     dlg._on_accept()
     assert dlg.result_structure is not None
     assert not dlg.result_structure.has_disorder
+
+
+def test_rebox_dialog_sets_result_and_vacuum(qtbot):
+    """ReBoxDialog stores the re-boxed atoms on OK."""
+    from pathlib import Path
+
+    from ase.io import read
+
+    from vaspen.ui.rebox_dialog import ReBoxDialog
+
+    slab_in = read(Path(__file__).parent.parent / "examples"
+                   / "Cu_111_slab.vasp")
+    model = StructureModel()
+    model.load_atoms(slab_in)
+    dlg = ReBoxDialog(model)
+    qtbot.addWidget(dlg)
+    dlg._vacuum_spin.setValue(20.0)
+    dlg._on_accept()
+    assert dlg.result_atoms is not None
+    cell = np.asarray(dlg.result_atoms.get_cell().array)
+    z = dlg.result_atoms.positions[:, 2]
+    assert (z.max() - z.min()) + 20.0 == pytest.approx(cell[2, 2], abs=1e-6)
+
+
+def test_rebox_dialog_disordered_warns(qtbot, monkeypatch, disordered_atoms):
+    from PySide6.QtWidgets import QMessageBox
+
+    from vaspen.ui.rebox_dialog import ReBoxDialog
+
+    replies = []
+    monkeypatch.setattr(
+        "vaspen.ui.rebox_dialog.QMessageBox.warning",
+        staticmethod(lambda *a, **k:
+                     replies.append(a) or QMessageBox.Cancel))
+    model = StructureModel()
+    model.load_atoms(disordered_atoms)
+    dlg = ReBoxDialog(model)
+    qtbot.addWidget(dlg)
+    dlg._on_accept()
+    assert replies and dlg.result_atoms is None  # cancelled
+    replies.clear()
+    monkeypatch.setattr(
+        "vaspen.ui.rebox_dialog.QMessageBox.warning",
+        staticmethod(lambda *a, **k:
+                     replies.append(a) or QMessageBox.Yes))
+    dlg._on_accept()
+    assert dlg.result_atoms is not None
+
+
+def test_surface_dialog_bulk_hint(qtbot, srtio3):
+    """The cleave dialog states it is for bulk structures and points to
+    Tools → Re-box Slab for vacuum-carrying inputs."""
+    model = StructureModel(srtio3)
+    dlg = SurfaceDialog(model, _FakeViewport())
+    qtbot.addWidget(dlg)
+    assert "BULK" in dlg._preview_hint.text()
+    assert "Re-box Slab" in dlg._preview_hint.text()

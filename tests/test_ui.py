@@ -1557,3 +1557,69 @@ def test_model_selection_change_ignored_during_frame_edit(window, monkeypatch):
     window._frame_edit = {"panel": object(), "index": 1}
     window._on_selection_changed()
     assert highlights == []  # the frame highlight stays untouched
+
+
+# ----------------------------------------------------------------------
+# Tools → Re-box Slab (2026-08-15)
+# ----------------------------------------------------------------------
+
+class _FakeReBoxDialog:
+    """Stands in for ReBoxDialog in main-window flow tests."""
+
+    Accepted = 1
+
+    def __init__(self, model, parent=None):
+        self.model = model
+
+    def exec(self):
+        from vaspen.core.surface import rebox_slab
+
+        self.result_atoms = rebox_slab(self.model.atoms, 15.0)
+        return self.Accepted
+
+
+def test_rebox_applies_and_carries_flags(window, monkeypatch):
+    """Re-box applies in one undo step, resets the filepath, and carries
+    the frozen flags / magmoms 1:1 (same atoms, same order)."""
+    import numpy as np
+
+    # the handler imports the dialog lazily from vaspen.ui.rebox_dialog
+    monkeypatch.setattr("vaspen.ui.rebox_dialog.ReBoxDialog", _FakeReBoxDialog)
+    model = window._structure
+    # build a slab-like model with a frozen atom and a magnetic moment
+    atoms = Atoms("Cu4", cell=[2.5527, 2.5527, 21.0], pbc=True,
+                  positions=[[0, 0, 5.0], [1.276, 2.21, 7.084],
+                             [0, 0, 9.168], [1.276, 2.21, 11.252]])
+    model.load_atoms(atoms, "slab.vasp")
+    model.set_fixed(1, np.array([True, True, True]))
+    model.set_magmom(2, 1.5)
+    flags_before = model.fixed_flags.copy()
+    magmoms_before = model.magmoms.copy()
+
+    window._on_rebox()
+
+    assert model.n_atoms == 4
+    assert model.filepath is None  # derived structure → Save As
+    assert model.can_undo
+    assert np.allclose(model.fixed_flags, flags_before)
+    assert np.allclose(model.magmoms, magmoms_before, equal_nan=True)
+    cell = np.asarray(model.cell)
+    z = model.positions[:, 2]
+    assert (z.max() - z.min()) + 15.0 == pytest.approx(cell[2, 2], abs=1e-6)
+
+
+def test_rebox_guards(window, monkeypatch):
+    """Empty / non-periodic structures are rejected with a message."""
+    import numpy as np
+
+    from PySide6.QtWidgets import QMessageBox
+
+    calls = []
+    monkeypatch.setattr(
+        "vaspen.ui.main_window.QMessageBox.information",
+        staticmethod(lambda *a, **k: calls.append(a)))
+    monkeypatch.setattr("vaspen.ui.rebox_dialog.ReBoxDialog", _FakeReBoxDialog)
+
+    window._structure.load_atoms(Atoms("H2O", positions=np.eye(3) * 1.5))
+    window._on_rebox()  # non-periodic → message, no apply
+    assert calls and window._structure.n_atoms == 3

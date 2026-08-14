@@ -674,7 +674,7 @@ Files: {}</source>
             <source>Nothing to redo for this image.</source>
             <translation>该图像没有可重做的操作。</translation>
         </message>
-    </context>
+    <message><source>&amp;Re-box Slab...</source><translation>重新装盒(&amp;R)...</translation></message><message><source>Re-apply the vacuum of a structure that already carries it (e.g. a cut surface)</source><translation>重新施加已有结构的真空层(例如切面)</translation></message></context>
     <context>
         <name>Viewport3D</name>
         <message>
@@ -2030,8 +2030,14 @@ Continue?</source>
             <translation>{n} 个原子 · 真空 {v} Å</translation>
         </message>
         <message>
-            <source>Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure editing is paused until you close this dialog.</source>
-            <translation>预览：主视图实时显示切面结构，可旋转/缩放查看。关闭此对话框前结构编辑已暂停。</translation>
+            <source>For BULK structures (dense periodic crystals).
+Structures that already carry vacuum belong to Tools → Re-box Slab.
+
+Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure editing is paused until you close this dialog.</source>
+            <translation>适用于体相(致密周期结构)。
+已带真空的结构请用 工具 → 重新装盒。
+
+预览:主视图显示切面;可旋转/缩放检查。此对话框关闭前结构编辑保持暂停。</translation>
         </message>
         <message>
             <source>No Structure</source>
@@ -2174,4 +2180,14 @@ This is the standard VASP pseudopotential directory layout.</source>
             <translation>无法移动已冻结的原子：{}</translation>
         </message>
     </context>
-</TS>
+<context><name>ReBoxDialog</name><message><source>Re-box Slab</source><translation>重新装盒</translation></message><message><source>For periodic structures that already carry vacuum (e.g. cut surfaces): layers split across the periodic boundary are unwrapped, the vacuum along c is re-applied and the slab is centered. The in-plane cell stays unchanged.
+
+For BULK structures, use Calculate → Cleave Surface.</source><translation>适用于已带真空的周期结构(例如切面):跨周期边界拆散的层将被展开,沿 c 重新施加真空并居中,面内格子不变。
+
+体相结构请使用 计算 → 切面。</translation></message><message><source>Vacuum:</source><translation>真空:</translation></message><message><source>Remember this value</source><translation>记住此数值</translation></message><message><source>Partial Occupancy</source><translation>部分占据(无序)</translation></message><message><source>This structure has partial occupancy (disorder).
+Re-boxing will discard the fractional occupancy information.
+
+Continue?</source><translation>此结构含有部分占据(无序)。
+重新装盒将丢弃分数占据信息。
+
+是否继续?</translation></message></context></TS>

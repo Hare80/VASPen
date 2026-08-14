@@ -214,6 +214,9 @@ class SurfaceDialog(QDialog):
 
         # ── Preview note ──
         self._preview_hint = QLabel(self.tr(
+            "For BULK structures (dense periodic crystals).\n"
+            "Structures that already carry vacuum belong to "
+            "Tools → Re-box Slab.\n\n"
             "Preview: the main view shows the cut slab; rotate/zoom to "
             "inspect it. Structure editing is paused until you close this "
             "dialog."))
@@ -380,11 +383,9 @@ class SurfaceDialog(QDialog):
                 top=_subscript_formula(info.top_composition),
                 bottom=_subscript_formula(info.bottom_composition),
             ))
-        note = (self.tr("  (re-boxed — input already carried vacuum)")
-                if info.reboxed else "")
         self._status_label.setText(
             self.tr("{n} atoms · {v} Å vacuum").format(
-                n=len(atoms), v=f"{self._vacuum_spin.value():.1f}") + note)
+                n=len(atoms), v=f"{self._vacuum_spin.value():.1f}"))
 
     def _set_hint(self, state: str | None, detail: str = "") -> None:
         """Show/clear the error hint; state is remembered for retranslate."""
@@ -475,6 +476,9 @@ class SurfaceDialog(QDialog):
             "The vacuum direction (c) is never expanded."))
         self._termination_group.setTitle(self.tr("Termination"))
         self._preview_hint.setText(self.tr(
+            "For BULK structures (dense periodic crystals).\n"
+            "Structures that already carry vacuum belong to "
+            "Tools → Re-box Slab.\n\n"
             "Preview: the main view shows the cut slab; rotate/zoom to "
             "inspect it. Structure editing is paused until you close this "
             "dialog."))

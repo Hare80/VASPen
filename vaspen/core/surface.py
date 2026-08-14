@@ -34,10 +34,6 @@ class SlabInfo:
             with the default ``bonds=None``; kept for future
             bond-aware filtering.
         n_atoms: Number of atoms in the slab.
-        reboxed: True when the input already carried vacuum and the
-            result is the input re-boxed in place (no re-cut; the
-            in-plane cell is unchanged and the Miller index is
-            ignored).
     """
 
     atoms: Atoms
@@ -45,7 +41,6 @@ class SlabInfo:
     bottom_composition: str
     broken_bonds: int
     n_atoms: int
-    reboxed: bool = False
 
 
 def _d_hkl(atoms: Atoms, miller: tuple[int, int, int]) -> float:
@@ -204,39 +199,17 @@ def _subscript_formula(formula: str) -> str:
     return formula.translate(_SUBSCRIPT)
 
 
-def _is_vacuum_carrying(atoms: Atoms) -> bool:
-    """True when the cell carries a large empty region along c.
+def rebox_slab(atoms: Atoms, vacuum: float) -> Atoms:
+    """Re-box a slab: unwrap split layers, re-apply vacuum, center.
 
-    Such inputs (a slab with vacuum) must NOT go through pymatgen's
-    termination enumeration — its shifts assume a dense bulk and wrap
-    layers across the periodic boundary (the user sees detached layers
-    on the other side of the box). Detection: the largest fractional-c
-    gap between consecutive atom layers is more than 3× the smallest
-    one (a bulk's gaps are all equal to 1/n_layers; the vacuum gap
-    dominates a slab). The 3× threshold is conservative — layered
-    bulks (e.g. graphite, gap ratio 2×) are not flagged.
-    """
-    if len(atoms) == 0 or atoms.get_cell().rank < 3:
-        return False
-    frac_z = np.asarray(atoms.get_scaled_positions())[:, 2]
-    gaps = np.diff(np.sort(frac_z))
-    # wrap-around gap closes the circle
-    gaps = np.concatenate([gaps, [1.0 - (frac_z.max() - frac_z.min())]])
-    gaps = gaps[gaps > 1e-9]
-    if len(gaps) < 2:
-        return False
-    return gaps.max() > 3.0 * gaps.min()
-
-
-def _rebox_slab(atoms: Atoms, vacuum: float) -> Atoms:
-    """Re-box a vacuum-carrying slab instead of re-cutting it.
-
-    Unwraps layers that pymatgen-style periodicity would split across
-    the boundary (pure ±c translations per atom), then re-applies the
-    requested vacuum along c with the slab centered — the ASE
-    manual-recommended primitive. The in-plane cell (a, b) is
-    untouched and the atom set is unchanged; only the c length and a
-    rigid c-shift differ from the input.
+    The standalone "Re-box Slab" feature (Tools menu) for periodic
+    structures that already carry vacuum (e.g. cut surfaces). Unwraps
+    layers that periodic wrapping would split across the boundary
+    (pure ±c translations per atom), then re-applies the requested
+    vacuum along c with the slab centered. The in-plane cell (a, b)
+    is untouched, the atom order and set are unchanged (fixed flags /
+    magnetic moments map 1:1); only the c length and a rigid c-shift
+    differ from the input.
     """
     out = atoms.copy()
     cell = np.asarray(out.get_cell().array, dtype=float)
@@ -348,13 +321,9 @@ class SurfaceCutter:
         get_slabs (stable order; broken-bond count). Initial magnetic
         moments round-trip through site properties automatically.
 
-        A vacuum-carrying input (an existing slab) is NOT re-cut:
-        pymatgen's termination shifts wrap layers across the periodic
-        boundary there (detached layers on the other side of the box).
-        Such inputs are re-boxed in place instead — layers unwrapped,
-        vacuum re-applied along c, in-plane cell unchanged; a single
-        SlabInfo with ``reboxed=True`` is returned and the Miller
-        index is ignored.
+        Inputs are assumed to be dense bulks (per the pymatgen manual);
+        structures that already carry vacuum belong to the separate
+        Tools → Re-box Slab feature, not here.
 
         Args:
             miller: Miller indices (h, k, l) of the surface.
@@ -368,19 +337,6 @@ class SurfaceCutter:
             ValueError: If the Miller indices are invalid or the cut
                 cannot be performed.
         """
-        if (self._model.atoms.get_cell().rank == 3
-                and self._model.atoms.get_pbc().any()
-                and _is_vacuum_carrying(self._model.atoms)):
-            reboxed = _rebox_slab(self._model.atoms, float(vacuum))
-            top, bottom = _surface_compositions(reboxed)
-            return [SlabInfo(
-                atoms=reboxed,
-                top_composition=top,
-                bottom_composition=bottom,
-                broken_bonds=0,
-                n_atoms=len(reboxed),
-                reboxed=True,
-            )]
         struct = AseAtomsAdaptor.get_structure(self._model.atoms)
         d = _d_hkl(self._model.atoms, miller)
         gen = SlabGenerator(

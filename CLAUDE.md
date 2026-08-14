@@ -562,19 +562,25 @@ a ∥ x, b in the xy-plane — the VESTA-style presentation; spglib's own
 basis reads as a skewed box). Pure rotation — atom distances unchanged.
 See examples/Cu_bulk_primitive.vasp (fcc primitive, a=3.61/√2, 60°).
 
-**Re-cutting a slab input (settled 2026-08-15, user request):** pymatgen
-SlabGenerator assumes a dense bulk (per its manual); a vacuum-carrying
-input makes its termination shifts wrap layers across the periodic
-boundary (detached layers). `slabs()` detects such inputs
-(`_is_vacuum_carrying`: largest fractional-c gap > 3× the smallest —
-conservative; layered bulks like graphite are not flagged) and re-boxes
-them in place instead: `_rebox_slab` unwraps the layers (±c
-translations), re-applies the vacuum along c with the slab centered,
-in-plane cell untouched; a single `SlabInfo(reboxed=True)` is returned
-and the Miller index/layers are ignored (the dialog status shows the
-re-box note). Cleaving a disordered structure asks for confirmation
-first (the fractional occupancy cannot survive the cut — same policy
-as the symmetrize confirm).
+**Cleave vs re-box are separate features, no vacuum detection
+(settled 2026-08-15, user decision):** pymatgen SlabGenerator assumes a
+dense bulk (per its manual); an automatic vacuum-detection heuristic
+mis-flagged dense bulks (e.g. a 134-atom cell with near-coplanar
+layers), so detection is deliberately REMOVED — no such code may be
+re-introduced.
+- **Calculate → Cleave Surface** (bulk inputs only; the dialog says so
+  and points to the re-box feature). `slabs()` is a pure pymatgen
+  pipeline (orthogonal c + standard presentation + exact vacuum).
+- **Tools → Re-box Slab** (`rebox_slab(atoms, vacuum)` +
+  `vaspen/ui/rebox_dialog.py`, next to Wrap in Periodic Cell) for
+  structures that already carry vacuum: unwraps layers split across
+  the periodic boundary (±c translations), re-applies the vacuum along
+  c with the slab centered; the in-plane cell and the atom ORDER are
+  unchanged. Applied via `replace_atoms` with the frozen flags and
+  magmoms carried over 1:1 (same atoms — unlike cleave, which builds a
+  new atom set and clears them); filepath reset, one undo step.
+- Both features confirm before discarding partial occupancy (disorder)
+  — same message pattern as the symmetrize confirm.
 
 ---
 
