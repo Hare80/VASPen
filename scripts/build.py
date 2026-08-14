@@ -25,6 +25,9 @@ def build_pyinstaller() -> None:
         "--name", "VASPen",
         "--windowed",
         "--onedir",
+        # Rebuild in place: overwrite the previous dist/VASPen instead of
+        # aborting with "output directory is not empty".
+        "--noconfirm",
         "--add-data", f"{RESOURCES}{os.pathsep}vaspen{os.sep}resources",
         # ASE's format plugins (extxyz/vasp/cif/…) are imported lazily via
         # the format registry — PyInstaller's static analysis cannot see
