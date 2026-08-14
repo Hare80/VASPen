@@ -10,7 +10,15 @@ Cancel/Esc restores the viewport to the model state.
 from __future__ import annotations
 
 from ase import Atoms
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QRunnable,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -36,6 +44,40 @@ from vaspen.core.surface import (
 from vaspen.ui.menu_button import MenuButton
 
 
+class _SlabResultHolder(QObject):
+    """Main-thread relay for pool results (auto-connection → queued)."""
+
+    done = Signal(object, object, int, object)  # infos, error, gen, key
+
+
+class _SlabTask(QRunnable):
+    """One slab computation on the global thread pool.
+
+    QThreadPool manages the threads — unlike a hand-rolled QThread with
+    deleteLater/quit, there is no thread-lifecycle race (the pattern
+    crashed intermittently when queued signals were delivered during
+    processEvents).
+    """
+
+    def __init__(self, holder: _SlabResultHolder, atoms: Atoms,
+                 key: tuple, generation: int) -> None:
+        super().__init__()
+        self._holder = holder
+        self._atoms = atoms
+        self._key = key
+        self._generation = generation
+
+    def run(self) -> None:
+        try:
+            # StructureModel wraps the copy (derived-state init is cheap
+            # relative to pymatgen and keeps the core API surface).
+            model = StructureModel(self._atoms.copy())
+            infos = SurfaceCutter(model).slabs(*self._key)
+            self._holder.done.emit(infos, None, self._generation, self._key)
+        except Exception as e:  # noqa: BLE001 — surfaced in the dialog
+            self._holder.done.emit(None, e, self._generation, self._key)
+
+
 class SurfaceDialog(QDialog):
     """Cleave a surface/slab from a bulk structure with live preview.
 
@@ -59,6 +101,15 @@ class SurfaceDialog(QDialog):
         self._debounce: QTimer | None = None
         self._hint_state: str | None = None
         self._hint_detail = ""
+        # Async computation on the global thread pool, one task at a
+        # time: a generation counter guards against out-of-order
+        # results; parameter changes arriving while a task runs are
+        # queued as _pending_key and chained on completion.
+        self._generation = 0
+        self._busy = False
+        self._pending_key: tuple | None = None
+        self._result_holder = _SlabResultHolder()
+        self._result_holder.done.connect(self._on_slabs_ready)
 
         self.setWindowTitle(self.tr("Cleave Surface / Slab"))
         self.setWindowFlags(self.windowFlags() | Qt.Tool)  # floats above parent
@@ -217,26 +268,56 @@ class SurfaceDialog(QDialog):
         self._cache_key = key
 
         if key[0] == (0, 0, 0):
+            # Invalidate any in-flight/queued computation — its result
+            # must not overwrite the zero-index error state.
+            self._generation += 1
+            self._pending_key = None
             self._slab_infos = []
             self._ok_button.setEnabled(False)
             self._rebuild_termination_combo()
             self._set_hint("zero_miller")
             return
 
-        try:
-            infos = SurfaceCutter(self._model).slabs(*key)
-        except Exception as e:  # noqa: BLE001 — surface errors are user-facing
-            self._slab_infos = []
-            self._ok_button.setEnabled(False)
-            self._rebuild_termination_combo()
-            self._set_hint("error", str(e))
-            return
+        self._start_compute(key)
 
-        self._slab_infos = infos
-        self._ok_button.setEnabled(bool(infos))
-        self._set_hint(None)
-        self._rebuild_termination_combo()
-        self._push_preview()
+    def _start_compute(self, key: tuple) -> None:
+        """Run slab generation on the thread pool (the GUI must not
+        freeze — pymatgen takes seconds per parameter change). At most
+        one task runs at a time; a key requested mid-run is queued as
+        ``_pending_key`` and chained on completion."""
+        if self._busy:
+            self._pending_key = key  # the running task chains it
+            return
+        self._pending_key = None
+        self._busy = True
+        self._generation += 1
+        self._ok_button.setEnabled(False)
+        self._status_label.setText(self.tr("Computing slab…"))
+        task = _SlabTask(self._result_holder, self._model.atoms.copy(),
+                         key, self._generation)
+        QThreadPool.globalInstance().start(task)
+
+    def _on_slabs_ready(self, infos, error, generation: int,
+                        key: tuple) -> None:
+        """Apply a finished computation; chain a queued newer one."""
+        self._busy = False
+        if generation == self._generation:
+            if error is not None:
+                self._slab_infos = []
+                self._ok_button.setEnabled(False)
+                self._rebuild_termination_combo()
+                self._set_hint("error", str(error))
+                self._status_label.setText("")
+            else:
+                self._slab_infos = infos
+                self._ok_button.setEnabled(bool(infos))
+                self._set_hint(None)
+                self._rebuild_termination_combo()
+                self._push_preview()
+        if self._pending_key is not None:
+            next_key = self._pending_key
+            self._pending_key = None
+            self._start_compute(next_key)
 
     def _rebuild_termination_combo(self) -> None:
         """Re-populate the termination combo, keeping the current index."""

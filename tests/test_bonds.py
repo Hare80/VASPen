@@ -188,3 +188,25 @@ def test_metal_pair_in_molecule_keeps_tolerance_rule():
                   cell=[20, 20, 20], pbc=False)
     bonds = _bonds_of(atoms)
     assert len(bonds) == 1
+
+
+# ----------------------------------------------------------------------
+# Code-review regression test (2026-08-14, user-found surface hang)
+# ----------------------------------------------------------------------
+
+def test_find_bonds_caps_large_structures(monkeypatch):
+    """Auto detection is O(N²) with a 27-image distance matrix — beyond
+    the cap it must return [] instead of allocating gigabytes (a 10×10
+    slab supercell froze the surface dialog for minutes / MemoryError)."""
+    import vaspen.core.bonds as bonds_mod
+
+    atoms = Atoms("H6", positions=[(i, 0, 0) for i in range(6)],
+                  cell=[20, 20, 20], pbc=True)
+    cell, pbc = _cell_pbc(atoms)
+    monkeypatch.setattr(bonds_mod, "MAX_AUTO_BOND_ATOMS", 5)
+    assert find_bonds(atoms.get_positions(), atoms.get_chemical_symbols(),
+                      cell, pbc) == []
+    monkeypatch.setattr(bonds_mod, "MAX_AUTO_BOND_ATOMS", 6)
+    result = find_bonds(atoms.get_positions(), atoms.get_chemical_symbols(),
+                        cell, pbc)
+    assert isinstance(result, list)  # just below the cap runs normally

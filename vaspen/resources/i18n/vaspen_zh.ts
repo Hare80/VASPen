@@ -2069,7 +2069,7 @@ Continue?</source>
             <source>In-plane supercell size (a × b). The vacuum direction (c) is never expanded.</source>
             <translation>面内超胞尺寸（a × b）。真空层方向（c）不扩展。</translation>
         </message>
-    </context>
+    <message><source>Computing slab…</source><translation>正在计算切面…</translation></message></context>
     <context>
         <name>SettingsDialog</name>
         <message>

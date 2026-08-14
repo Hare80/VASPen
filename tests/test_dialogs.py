@@ -615,13 +615,20 @@ def test_display_options_measurement_reset_defaults(qtbot):
 # ----------------------------------------------------------------------
 
 
+def _wait_slabs(qtbot, dlg, view, n_rendered: int = 1) -> None:
+    """Slab generation runs on a pool thread — pump events until it lands."""
+    qtbot.waitUntil(
+        lambda: len(view.rendered) >= n_rendered and bool(dlg._slab_infos))
+    qtbot.waitUntil(lambda: not dlg._busy)
+
+
 def test_surface_dialog_opens_with_preview(qtbot, srtio3):
     model = StructureModel(srtio3)
     view = _FakeViewport()
     dlg = SurfaceDialog(model, view)
     qtbot.addWidget(dlg)
 
-    assert len(view.rendered) == 1  # preview pushed on open
+    _wait_slabs(qtbot, dlg, view, 1)
     atoms, reset_view, bonds = view.rendered[-1]
     assert reset_view is False
     assert bonds is None  # auto-detected — model bond indices are invalid
@@ -636,6 +643,7 @@ def test_surface_dialog_termination_combo_and_preview_switch(qtbot, gaas):
     dlg = SurfaceDialog(model, view)  # default Miller (1,1,1)
     qtbot.addWidget(dlg)
 
+    _wait_slabs(qtbot, dlg, view, 1)
     combo = dlg._termination_combo
     assert combo.count() == 2
     items = [combo.itemText(i) for i in range(combo.count())]
@@ -657,12 +665,15 @@ def test_surface_dialog_param_change_debounced(qtbot, srtio3):
     dlg = SurfaceDialog(model, view)
     qtbot.addWidget(dlg)
 
+    _wait_slabs(qtbot, dlg, view, 1)
     n_before = len(view.rendered)
     dlg._layers_spin.setValue(5)
     dlg._vacuum_spin.setValue(20.0)
     assert len(view.rendered) == n_before  # still debounced
     qtbot.wait(250)
-    assert len(view.rendered) == n_before + 1  # one recompute for both spins
+    # one async recompute for both spins
+    _wait_slabs(qtbot, dlg, view, n_before + 1)
+    assert len(view.rendered) == n_before + 1
 
 
 def test_surface_dialog_termination_switch_reuses_cache(qtbot, gaas):
@@ -671,6 +682,7 @@ def test_surface_dialog_termination_switch_reuses_cache(qtbot, gaas):
     dlg = SurfaceDialog(model, view)
     qtbot.addWidget(dlg)
 
+    _wait_slabs(qtbot, dlg, view, 1)
     key = dlg._cache_key
     dlg._termination_combo.setCurrentIndex(1)
     dlg._termination_combo.setCurrentIndex(0)
@@ -683,6 +695,7 @@ def test_surface_dialog_accept_sets_result(qtbot, gaas):
     dlg = SurfaceDialog(model, view)
     qtbot.addWidget(dlg)
 
+    _wait_slabs(qtbot, dlg, view, 1)
     dlg._termination_combo.setCurrentIndex(1)
     dlg._on_accept()
     assert dlg.result_structure is not None
@@ -698,6 +711,7 @@ def test_surface_dialog_reject_restores_viewport(qtbot, srtio3):
     dlg = SurfaceDialog(model, view)
     qtbot.addWidget(dlg)
 
+    _wait_slabs(qtbot, dlg, view, 1)
     dlg.reject()
     atoms, reset_view, bonds = view.rendered[-1]
     assert reset_view is False
@@ -728,6 +742,7 @@ def test_surface_dialog_zero_miller_warns(qtbot, srtio3, monkeypatch):
     dlg._on_accept()  # no slab to accept — warns and stays open
     assert dlg.result_structure is None
     assert len(warnings) == 1
+    qtbot.waitUntil(lambda: not dlg._busy)  # in-flight task finishes
 
 
 def test_surface_dialog_supercell_expands_preview(qtbot, gaas):
@@ -736,6 +751,7 @@ def test_surface_dialog_supercell_expands_preview(qtbot, gaas):
     dlg = SurfaceDialog(model, view)
     qtbot.addWidget(dlg)
 
+    _wait_slabs(qtbot, dlg, view, 1)
     base_n = dlg._slab_infos[0].n_atoms
     assert len(view.rendered[-1][0]) == base_n  # 1x1 default
 
@@ -819,6 +835,7 @@ def test_dialog_dropdowns_are_menu_buttons(qtbot, periodic_model, srtio3):
     dlg = SurfaceDialog(model, _FakeViewport())
     qtbot.addWidget(dlg)
     checkables.append(dlg._termination_combo)
+    qtbot.waitUntil(lambda: not dlg._busy)  # pool task finishes cleanly
     dlg.close()
 
     dlg = TransformDialog(periodic_model)
@@ -1126,3 +1143,74 @@ def test_atom_properties_rejects_nan_coordinates(qtbot, periodic_model):
     panel._on_cartesian_edited()
     assert np.allclose(periodic_model.positions, before)
     assert panel._x_edit.text() != "nan"  # reverted to the model value
+
+
+# ----------------------------------------------------------------------
+# Code-review regression tests (2026-08-14, user-found surface hang)
+# ----------------------------------------------------------------------
+
+class _SlowSurfaceCutter:
+    """Stands in for SurfaceCutter with a controllable per-key delay."""
+
+    def __init__(self, model):
+        self._model = model
+
+    def slabs(self, miller, layers, vacuum):
+        import time
+
+        time.sleep(0.4 if layers == 4 else 0.02)
+        from vaspen.core.surface import SlabInfo
+
+        # marker: the layer count rides on the top composition
+        return [SlabInfo(
+            atoms=self._model.atoms.copy(),
+            top_composition=f"L{layers}",
+            bottom_composition="X",
+            broken_bonds=0,
+            n_atoms=len(self._model.atoms),
+        )]
+
+
+def test_surface_dialog_compute_runs_off_gui_thread(qtbot, srtio3, monkeypatch):
+    """Slab generation must not block the GUI — the dialog returns at
+    once with a status note, the result lands asynchronously."""
+    import time
+
+    monkeypatch.setattr(
+        "vaspen.ui.surface_dialog.SurfaceCutter", _SlowSurfaceCutter)
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    t0 = time.time()
+    dlg = SurfaceDialog(model, view)
+    elapsed = time.time() - t0
+    qtbot.addWidget(dlg)
+
+    assert elapsed < 0.2  # returned immediately despite a 0.4 s compute
+    assert dlg._slab_infos == []
+    assert not dlg._ok_button.isEnabled()
+    assert dlg._status_label.text()  # "Computing slab…"
+    _wait_slabs(qtbot, dlg, view, 1)
+    assert dlg._slab_infos[0].top_composition == "L4"
+    assert dlg._ok_button.isEnabled()
+
+
+def test_surface_dialog_rapid_param_changes_serialize(qtbot, srtio3, monkeypatch):
+    """A parameter change arriving mid-compute must not be lost or race
+    the running task — it is queued and chained on completion."""
+    monkeypatch.setattr(
+        "vaspen.ui.surface_dialog.SurfaceCutter", _SlowSurfaceCutter)
+    model = StructureModel(srtio3)
+    view = _FakeViewport()
+    dlg = SurfaceDialog(model, view)   # gen 1: layers=4, slow (0.4 s)
+    qtbot.addWidget(dlg)
+
+    dlg._layers_spin.setValue(5)
+    dlg._ensure_slabs()                # queued while gen 1 runs
+    qtbot.waitUntil(lambda: bool(dlg._slab_infos) and
+                    dlg._slab_infos[0].top_composition == "L5")
+    qtbot.waitUntil(lambda: not dlg._busy)
+
+    qtbot.wait(600)                    # nothing outstanding remains
+    assert dlg._slab_infos[0].top_composition == "L5"
+    assert dlg._pending_key is None
+    assert dlg._termination_combo.itemText(0).startswith("1/1")

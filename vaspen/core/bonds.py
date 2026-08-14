@@ -139,6 +139,10 @@ def mic_vector(
     return np.asarray(best_v, dtype=float)
 
 
+#: Largest atom count for automatic bond detection (see find_bonds).
+MAX_AUTO_BOND_ATOMS = 1000
+
+
 def find_bonds(
     positions: np.ndarray,
     symbols: list[str],
@@ -155,9 +159,16 @@ def find_bonds(
 
     Returns:
         List of :class:`Bond` (single order) in (i, j) pair order.
+
+    Structures larger than ``MAX_AUTO_BOND_ATOMS`` return an empty list:
+    the O(N²) minimum-image distance matrix blows up first (ASE computes
+    all 27 lattice-image shifts at once — at 4800 atoms that allocation
+    alone is ~4.8 GB). Manual bonds still work per pair.
     """
     n = len(positions)
     if n == 0:
+        return []
+    if n > MAX_AUTO_BOND_ATOMS:
         return []
 
     radii = np.array([

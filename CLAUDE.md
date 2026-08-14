@@ -531,6 +531,18 @@ Behaviors pinned by the fixes:
 - Generate-all write loop removes partially written files on failure
   (no half-generated set that reads as complete).
 
+**Surface dialog responsiveness (settled 2026-08-14, user-reported hang):**
+- Slab generation (pymatgen, seconds per call) NEVER runs on the GUI
+  thread — `SurfaceDialog` computes on a QThread worker (`_SlabWorker`)
+  with a generation counter: only the newest parameter set applies its
+  result; stale workers finishing late are discarded. While computing,
+  OK is disabled and the status label shows "Computing slab…".
+- Auto bond detection (`find_bonds`) is capped at
+  `MAX_AUTO_BOND_ATOMS = 1000` atoms — the O(N²) minimum-image distance
+  matrix blows up beyond that (a 10×10 slab supercell froze the app for
+  minutes / hit MemoryError at ~4.8 GB). Larger structures render
+  without auto bonds; manual bonds still work per pair.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
