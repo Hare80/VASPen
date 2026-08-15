@@ -48,7 +48,7 @@ vaspen = "vaspen.main:main"
 
 [project.urls]
 Homepage = "https://github.com/Hare80/VASPen"
-Documentation = "https://vaspen.readthedocs.io"
+Documentation = "https://github.com/Hare80/VASPen/blob/main/docs/user-guide-en.md"
 
 [tool.setuptools.packages.find]
 include = ["vaspen*"]

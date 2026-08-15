@@ -992,6 +992,22 @@ pyinstaller --name VASPen \
 (The add-data dest must mirror the package layout — `vaspen/resources`,
 not `resources` — the code resolves resources via `__file__`.)
 
+**Release pipeline (settled 2026-08-16):** `scripts/build.py` now does
+the full release steps after the PyInstaller build (Nuitka branch
+unchanged): generates the Windows VERSIONINFO file from
+`vaspen/__init__.py __version__` (single source of truth, written to
+gitignored `build/version_info.txt`, passed via `--version-file`;
+`--specpath build` keeps the root clean); copies LICENSE + README +
+both user guides + `examples/` into `dist/VASPen/` (zip must be
+self-contained; MIT text travels with the binary; the pseudopotential
+library is never bundled); zips it as `dist/VASPen-v<version>-win64.zip`
+with a single top-level `VASPen/` folder; verifies the key files exist
+(hard fail). `python scripts/build.py --smoke` additionally launches
+the exe, waits (≤90 s) for the frozen log
+(`%LOCALAPPDATA%\VASPen\vaspen.log`) to grow with the startup line,
+then `taskkill /T /F` — it aborts if a VASPen.exe was already running
+(never kills a live session).
+
 ### 10.3 Nuitka (optimized build, release use)
 
 ```bash
@@ -1092,8 +1108,8 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 
 ### v0.3 — Release (Sprint 5)
 - [x] Test suite
-- [ ] PyInstaller Windows build
-- [ ] User documentation
+- [x] PyInstaller Windows build
+- [x] User documentation
 
 ### v1.0+ — Future
 - [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6

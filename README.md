@@ -1,25 +1,44 @@
 # VASPen
 
-A cross-platform desktop GUI for VASP first-principles calculations. Provides visual structure modeling, VASP input file generation (INCAR, KPOINTS, POSCAR, POTCAR), and surface/slab building — similar to Materials Studio, BURAI, and MedeA.
+A cross-platform desktop GUI for VASP first-principles calculations. Provides visual structure modeling, VASP input file generation (INCAR, KPOINTS, POSCAR, POTCAR), surface/slab building, and a NEB workflow.
+
+## Download & Run (Windows)
+
+- Download the latest `VASPen-v<version>-win64.zip` from
+  [GitHub Releases](https://github.com/Hare80/VASPen/releases/latest).
+- Unzip anywhere; run `VASPen/VASPen.exe`. **Keep `VASPen.exe` and the
+  `_internal/` folder together** — moving the exe alone breaks it.
+- The exe is not code-signed: on first run Windows SmartScreen may
+  show a warning → **More info → Run anyway**.
+- No Python installation required. See the user guides:
+  [English](docs/user-guide-en.md) · [中文](docs/user-guide-zh.md)
+
+Linux users run from source (Quick Start below).
 
 ## Features
 
 - **Structure visualization** — ball-and-stick 3D rendering with mouse rotation, zoom, and pan (Qt native OpenGL)
 - **Multi-format support** — open CIF, XYZ, POSCAR, CONTCAR, XSF, PDB and more (via ASE)
 - **Structure editing** — add/remove/replace atoms, create supercells, sort/wrap atoms
-- **Surface/slab cutting** — specify Miller indices (hkl), layers, and vacuum thickness
+- **Surface/slab cutting** — specify Miller indices (hkl), layers, and vacuum thickness; re-box slabs that already carry vacuum
+- **Symmetry analysis & cell conversion** — space group / point group, symmetrize, conventional ↔ primitive cells
+- **Periodic wrap** — molecules wrapped into a vacuum box before saving to VASP/CIF formats
 - **INCAR generation** — presets for SCF, Optimization, Band, DOS, Optical, and NEB (community-standard defaults)
 - **KPOINTS generation** — Automatic KSPACING, manual mesh, and line-mode for band structure
 - **POTCAR generation** — per-element pseudopotential selection with recommended semi-core variants, auto-concatenation
 - **One-click input generation** — generate all four VASP input files at once
-- **i18n** — English and Chinese interface (switchable)
+- **NEB workflow** — Linear & IDPP interpolation, frozen-atom handling, per-frame editing, standard VASP image layout
+- **Measurements** — distances, angles, dihedrals in the 3D viewport
+- **i18n** — English and Chinese interface (switchable live)
+- **Theming** — light/dark themes with live switching
+- **Welcome page** — recent files (click selects, double-click opens) and drag-and-drop opening
 - **Cross-platform** — Windows (primary) and Linux
 
 ## Requirements
 
 - Python 3.11+
 - PySide6 ≥ 6.6
-- ASE ≥ 3.22
+- ASE ≥ 3.29
 - pymatgen ≥ 2024.1
 - spglib ≥ 2.3
 - NumPy ≥ 1.26 / SciPy ≥ 1.12
@@ -113,8 +132,8 @@ pip install -e ".[dev]"
 # Run tests
 pytest
 
-# Update translations
-pyside6-lupdate vaspen/ -ts vaspen/resources/i18n/vaspen_zh.ts
+# Update translations (hand-edit vaspen_zh.ts, then sync + compile)
+python scripts/sync_en_ts.py
 pyside6-lrelease vaspen/resources/i18n/*.ts
 
 # Build Windows executable
@@ -133,8 +152,10 @@ python scripts/build.py
 - [x] Structure tree panel (atom list, cell parameters, selection sync)
 - [x] Structure editing (add/delete atoms, position editing, undo/redo)
 - [x] Test suite (unit + UI smoke tests)
-- [ ] Welcome page with recent files
-- [ ] QSS theming
+- [x] Welcome page with recent files
+- [x] QSS theming
+- [x] PyInstaller Windows build (version resource, bundled docs, release zip, smoke test)
+- [x] User documentation (bilingual en/zh user guides)
 - [ ] SSH remote server connection + job submission (future)
 - [ ] Post-processing (band structure / DOS plotting)
 - [ ] Plugin system
