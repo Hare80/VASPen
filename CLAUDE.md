@@ -363,6 +363,7 @@ PyVista was also considered (VTK-based) but is heavier and harder to embed in Qt
 - The same flow runs before **Generate All Input Files** (POSCAR + KPOINTS mesh need a cell). Saving to xyz never triggers it.
 - **Slabs** (pbc partially True with a full-rank cell) count as periodic and are never re-boxed. `is_periodic` = `cell.rank == 3 and pbc.any()` (structure.py).
 - **`FileIO.write` stays pure** (no dialogs, no mutation): saving a rank-<3 cell to vasp/cif raises a translatable `ValueError` before any file is created — the UI wrap makes this unreachable in normal flow.
+- **CIF space-group headers (settled 2026-08-16):** the CIF reader sanitizes unusable space-group headers before ASE parses — a number tag (`_symmetry_Int_Tables_number` etc.) valued `0`/`?`/`.`/blank is dropped, and a blank/unknown H-M symbol is rewritten to `'P 1'` (identity database metadata; the file's explicit symmetry operations then define the structure — a `0`-numbered export with its own ops parses exactly). Usable headers pass through byte-identical. Pinned by tests in test_file_io.py.
 
 ### 7.6 Materials Project Integration (planned — security policy, 2026-08-13)
 

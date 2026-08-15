@@ -236,6 +236,89 @@ def _sanitize_cif_occupancy(text: str) -> str:
     return "\n".join(out)
 
 
+# Space-group number tags read by ASE's CIF parser (ase/io/cif.py
+# _get_spacegroup_number) and the H-M name tags (_get_spacegroup_name).
+_SPG_NUMBER_LINE_RE = re.compile(
+    r"^(?P<tag>_symmetry_int_tables_number|_space_group_it_number|"
+    r"_space_group\.it_number)\s+(?P<val>.*?)\s*$",
+    re.IGNORECASE,
+)
+_SPG_NAME_LINE_RE = re.compile(
+    r"^(?P<tag>_symmetry_space_group_name_h-m|_space_group_name_h-m_alt|"
+    r"_space_group\.patterson_name_h-m|_space_group_patterson_name_h-m)"
+    r"\s+(?P<val>.*?)\s*$",
+    re.IGNORECASE,
+)
+_SPG_OPS_TAG_RE = re.compile(
+    r"^(_symmetry_equiv_pos_as_xyz|_space_group_symop_operation_xyz|"
+    r"_space_group_symop\.operation_xyz)(\s|$)",
+    re.IGNORECASE,
+)
+_SPG_UNUSABLE_NUMBER = {"", "0", "0.0", "?", "."}
+_SPG_BLANK_NAME = {"", "?", "."}
+
+
+def _spg_bare_value(value: str) -> str:
+    """Strip CIF quoting (''/"") and whitespace from a tag value."""
+    return value.strip().strip("\"'").strip()
+
+
+def _sanitize_cif_spacegroup(text: str) -> str:
+    """Neutralize unusable space-group headers in CIF text.
+
+    With explicit symmetry operations present, ASE's CIF reader resolves
+    the group via ``spacegroup_from_data(no, symbol, sitesym, setting=1)``,
+    which prefers the numeric database lookup — a CIF carrying
+    ``_symmetry_Int_Tables_number 0`` (some modelers export "unknown
+    group" this way) crashes with ``SpacegroupNotFoundError``. Dropping
+    the number alone is not enough: ``spacegroup_from_data`` requires a
+    valid number or symbol. The blank/unknown H-M symbol is therefore
+    rewritten to ``'P 1'`` — identity database metadata, so the file's
+    own cell is not re-expressed (``crystal()`` applies the entry's
+    scaled_primitive_cell) and the file's explicit symmetry operations
+    then replace the rotations/translations wholesale, giving the exact
+    structure. Files with a usable number pass through byte-identical.
+    """
+    lines = text.splitlines()
+
+    # First pass: flags (the header order in a CIF is not fixed).
+    has_number_tag = False
+    dropped_number = False
+    has_explicit_ops = False
+    for line in lines:
+        stripped = line.strip()
+        m = _SPG_NUMBER_LINE_RE.match(stripped)
+        if m:
+            has_number_tag = True
+            if _spg_bare_value(m.group("val")) in _SPG_UNUSABLE_NUMBER:
+                dropped_number = True
+        elif _SPG_OPS_TAG_RE.match(stripped):
+            has_explicit_ops = True
+
+    # A blank H-M name also needs a valid symbol when there are explicit
+    # ops (spacegroup_from_data rejects no + symbol both missing).
+    rewrite_blank_name = dropped_number or (
+        not has_number_tag and has_explicit_ops
+    )
+    if not (dropped_number or rewrite_blank_name):
+        return text
+
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        m = _SPG_NUMBER_LINE_RE.match(stripped)
+        if (m and dropped_number
+                and _spg_bare_value(m.group("val")) in _SPG_UNUSABLE_NUMBER):
+            continue  # drop the unusable space-group number
+        m = _SPG_NAME_LINE_RE.match(stripped)
+        if (m and rewrite_blank_name
+                and _spg_bare_value(m.group("val")) in _SPG_BLANK_NAME):
+            out.append(f"{m.group('tag')}  'P 1'")
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def extract_occupancy(atoms: Atoms) -> list[dict[str, float]] | None:
     """Return per-atom site compositions from ASE occupancy info, or None.
 
@@ -475,12 +558,15 @@ def _ase_writer(path: str | Path, atoms: Atoms) -> None:
 
 
 def _cif_reader(path: str | Path) -> Atoms:
-    """CIF reader — sanitizes invalid occupancy tokens before ASE reads.
+    """CIF reader — sanitizes invalid tokens before ASE reads.
 
     Real-world CIFs (ICSD) often mark unknown occupancy with ``?`` or
     ``.``; ASE crashes on those when merging partially-occupied sites
     (see ``_sanitize_cif_occupancy``). Unknown occupancy is read as full
-    occupation (1.0).
+    occupation (1.0). CIFs with an unusable space-group number (``0`` or
+    ``?``) and a blank H-M symbol are likewise normalized (see
+    ``_sanitize_cif_spacegroup``) — the file's explicit symmetry
+    operations still define the structure.
     """
     import io
 
@@ -491,7 +577,8 @@ def _cif_reader(path: str | Path) -> Atoms:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         text = data.decode("latin-1")
-    return ase_read(io.StringIO(_sanitize_cif_occupancy(text)), format="cif")
+    text = _sanitize_cif_spacegroup(_sanitize_cif_occupancy(text))
+    return ase_read(io.StringIO(text), format="cif")
 
 
 # Register all common structure formats

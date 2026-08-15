@@ -207,6 +207,186 @@ def test_cif_unknown_occupancy_reads(tmp_path):
     assert occ[0]["Fe"] == 1.0  # '?' normalized to full occupation
 
 
+# ----------------------------------------------------------------------
+# Unusable space-group headers (number 0 / blank H-M + explicit ops)
+# ----------------------------------------------------------------------
+
+# A modeler-style export of the fcc Cu primitive cell: "unknown group"
+# (number 0, blank H-M symbol) with the full set of 48 symmetry
+# operations written out explicitly.
+CIF_UNKNOWN_GROUP_PRIMITIVE = """data_Cu_bulk
+_symmetry_space_group_name_H-M    ' '
+_symmetry_Int_Tables_number       0
+_symmetry_cell_setting            cubic
+loop_
+_symmetry_equiv_pos_as_xyz
+  x,y,z
+  y,x,-x-y-z
+  z,-x-y-z,x
+  -x-y-z,z,y
+  z,x,y
+  -x-y-z,y,x
+  x,z,-x-y-z
+  y,-x-y-z,z
+  y,z,x
+  x,-x-y-z,y
+  -x-y-z,x,z
+  z,y,-x-y-z
+  -x,-y,x+y+z
+  -y,-x,-z
+  -z,x+y+z,-y
+  x+y+z,-z,-x
+  -z,-x,x+y+z
+  x+y+z,-y,-z
+  -x,-z,-y
+  -y,x+y+z,-x
+  -y,-z,x+y+z
+  -x,x+y+z,-z
+  x+y+z,-x,-y
+  -z,-y,-x
+  -x,-y,-z
+  -y,-x,x+y+z
+  -z,x+y+z,-x
+  x+y+z,-z,-y
+  -z,-x,-y
+  x+y+z,-y,-x
+  -x,-z,x+y+z
+  -y,x+y+z,-z
+  -y,-z,-x
+  -x,x+y+z,-y
+  x+y+z,-x,-z
+  -z,-y,x+y+z
+  x,y,-x-y-z
+  y,x,z
+  z,-x-y-z,y
+  -x-y-z,z,x
+  z,x,-x-y-z
+  -x-y-z,y,z
+  x,z,y
+  y,-x-y-z,x
+  y,z,-x-y-z
+  x,-x-y-z,z
+  -x-y-z,x,y
+  z,y,x
+_cell_length_a                    2.5527
+_cell_length_b                    2.5527
+_cell_length_c                    2.5527
+_cell_angle_alpha                 60.0000
+_cell_angle_beta                  60.0000
+_cell_angle_gamma                 60.0000
+loop_
+_atom_site_type_symbol
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+  Cu  Cu1  0.0000  0.0000  0.0000  1.0
+"""
+
+
+def test_sanitize_cif_spacegroup():
+    """Unusable numbers are dropped and a blank H-M name becomes 'P 1'
+    (identity metadata — the file's explicit operations then define the
+    structure); usable headers pass through byte-identical."""
+    from vaspen.core.file_io import _sanitize_cif_spacegroup
+
+    cif = """data_x
+_symmetry_space_group_name_H-M    ' '
+_symmetry_Int_Tables_number       0
+_cell_length_a                    3.6
+"""
+    out = _sanitize_cif_spacegroup(cif)
+    assert "_symmetry_Int_Tables_number" not in out
+    assert "_symmetry_space_group_name_H-M" in out and "'P 1'" in out
+
+    # quoted '0' is dropped the same way
+    quoted = cif.replace("      0", "      '0'")
+    assert "_symmetry_Int_Tables_number" not in _sanitize_cif_spacegroup(quoted)
+
+    # a usable number leaves the text untouched
+    good = """data_x
+_symmetry_space_group_name_H-M    'Fm-3m'
+_symmetry_Int_Tables_number       225
+_cell_length_a                    3.61
+"""
+    assert _sanitize_cif_spacegroup(good) == good
+
+
+def test_cif_spacegroup_number_zero_with_ops_reads(tmp_path):
+    """Regression: a CIF with _symmetry_Int_Tables_number 0, a blank
+    H-M symbol and explicit symmetry operations crashed with
+    SpacegroupNotFoundError (the number lookup runs before the
+    operations are consulted). The operations define the structure —
+    1 Cu atom in the 2.5527 A / 60 deg primitive cell."""
+    path = tmp_path / "unknown_group_primitive.cif"
+    path.write_text(CIF_UNKNOWN_GROUP_PRIMITIVE, encoding="utf-8")
+    atoms = FileIO.read(str(path))
+    assert len(atoms) == 1
+    assert atoms.get_chemical_symbols() == ["Cu"]
+    assert atoms.get_cell().lengths() == pytest.approx([2.5527] * 3, rel=1e-4)
+    assert atoms.get_cell().angles() == pytest.approx([60.0] * 3, rel=1e-4)
+    assert all(atoms.get_pbc())
+
+
+def test_cif_spacegroup_number_zero_no_ops_reads(tmp_path):
+    """Number 0 without operations falls back to P 1 — just the listed
+    sites."""
+    cif = """data_x
+_symmetry_space_group_name_H-M    ' '
+_symmetry_Int_Tables_number       0
+_cell_length_a                    3.6
+_cell_length_b                    3.6
+_cell_length_c                    3.6
+_cell_angle_alpha                 90
+_cell_angle_beta                  90
+_cell_angle_gamma                 90
+loop_
+_atom_site_type_symbol
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+  Fe  Fe1  0.5  0.5  0.5  1.0
+"""
+    path = tmp_path / "unknown_group_no_ops.cif"
+    path.write_text(cif, encoding="utf-8")
+    atoms = FileIO.read(str(path))
+    assert len(atoms) == 1
+    assert atoms.get_chemical_symbols() == ["Fe"]
+    assert atoms.get_scaled_positions()[0] == pytest.approx([0.5, 0.5, 0.5])
+
+
+def test_cif_spacegroup_number_zero_valid_symbol_reads(tmp_path):
+    """Number 0 with a valid H-M symbol is resolved through the symbol:
+    Fm-3m expands the one listed site to the 4-atom conventional cell."""
+    cif = """data_x
+_symmetry_space_group_name_H-M    'Fm-3m'
+_symmetry_Int_Tables_number       0
+_cell_length_a                    3.61
+_cell_length_b                    3.61
+_cell_length_c                    3.61
+_cell_angle_alpha                 90
+_cell_angle_beta                  90
+_cell_angle_gamma                 90
+loop_
+_atom_site_type_symbol
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+  Cu  Cu1  0.0  0.0  0.0  1.0
+"""
+    path = tmp_path / "unknown_group_valid_symbol.cif"
+    path.write_text(cif, encoding="utf-8")
+    atoms = FileIO.read(str(path))
+    assert len(atoms) == 4
+    assert set(atoms.get_chemical_symbols()) == {"Cu"}
+    assert atoms.get_cell().lengths() == pytest.approx([3.61] * 3, rel=1e-4)
+
+
 def test_cif_mixed_occupancy_preserves_info(tmp_path, disordered_atoms):
     """Co-located species merge into one atom per site; the full
     composition survives in info['occupancy'] + spacegroup_kinds."""
