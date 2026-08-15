@@ -27,9 +27,10 @@ File naming convention: `<Formula>_<structure>.<ext>`.
 Each tree contains an `initial/POSCAR` and `final/POSCAR` pair (plus a
 README) for the NEB tab of Generate All Input Files:
 
-- `neb_vacancy_hop/` — vacancy hop in fcc Cu (linear interpolation)
 - `neb_ethane_rotation/` — methyl-group rotation (IDPP vs linear)
-- `neb_frozen/` — frozen-atom pass / block case pairs
+- `neb_au111_vacancy_hop/` — surface vacancy hop on Au(111) with a
+  frozen slab
+- `neb_adsorbate_migration/` — P–O–H group migrating on carbon
 
 ## Provenance
 

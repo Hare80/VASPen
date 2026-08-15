@@ -448,8 +448,9 @@ afterwards):
   `atoms_with_fixed_constraints`). If a frozen atom has different
   positions in the initial and final structures, interpolation is
   BLOCKED with a message listing the atom (1-based) — a frozen atom
-  cannot move during the NEB run either. `examples/neb_frozen/`
-  provides pass/block case pairs.
+  cannot move during the NEB run either. The frozen pass/block case
+  pairs are built in code and pinned by the tests (conftest fixture
+  `frozen_pass_block_pair`).
 - **Frame editing (settled 2026-08-14):** clicking a MIDDLE frame in
   the image list enters frame-edit mode — the viewport's move/rotate/
   delete/create-bond tools (and per-frame Ctrl+Z/Ctrl+Shift+Z) become
