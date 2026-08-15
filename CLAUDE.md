@@ -597,6 +597,67 @@ re-introduced.
 - Both features confirm before discarding partial occupancy (disorder)
   — same message pattern as the symmetrize confirm.
 
+## 7.8.1 Code Review 2026-08-15 — Settled Behaviors (do not re-litigate)
+
+Follow-up review of the 9 commits after the 2026-08-14 review (report:
+`docs/review-2026-08-15.md`). Behaviors pinned by the fixes:
+
+**Surface computation:**
+- `iter_slabs` yields every index **exactly once** — a priority jump
+  advances the sequential cursor past the computed index (it used to
+  rebuild the clicked slab twice).
+- Closing or accepting the SurfaceDialog **cancels the pool task**
+  (`_cancel_compute`: generation bump + cooperative cancel); a late
+  item must never re-push a preview over the restored model.
+- `termination_labels` is **deleted**. Instant exact chemistry labels
+  would require replicating pymatgen's slab pipeline in miniature (the
+  ouc-plane shortcut was wrong on 10/13 benchmark structures — see the
+  gate table in the review report). Labels come from the built slabs
+  only (stream in per item, click jumps the queue) — that path can
+  never lie. Do not re-introduce a cluster/ouc-based label shortcut.
+- `_surface_compositions` tolerance has a **0.1 Å floor** (merges
+  rumpled mixed faces; zincblende (111) double layers stay distinct —
+  pinned by test).
+- `rebox_slab` raises translatable ValueError for non-periodic input or
+  vacuum ≤ 0. Rebox vacuum range 0.5–100 Å (vs wrap 0.5–50) is
+  intentional — slab vacuum can be larger than molecule padding.
+- Per-termination c lengths may differ between shifts of the same
+  cleave (pymatgen's raw material extent depends on the shift's wrap
+  position); the requested vacuum is exact in every case — documented
+  quirk, not a bug.
+
+**Preview pause (extends the §7.8 list):**
+- `act_auto_bonds` and the Bond Order submenu are in the pause tuple;
+  bond/background viewport clicks are guarded viewport-local during
+  previews (`_on_bond_clicked`/`_on_background_clicked`); on resume,
+  stateful actions are re-derived (`_update_edit_actions` +
+  `_sync_auto_bonds_action` + selection handlers) — never a blind
+  `setEnabled(True)`.
+
+**Dialogs:**
+- SymmetryDialog's Conventional/Primitive cell selector is **periodic
+  only** (hidden for point-group molecules).
+- Rebox dialog remember semantics mirror the wrap dialog:
+  `rebox_vacuum` / `remember_rebox` config properties (value always
+  saved; the checkbox decides whether it is the default next time).
+- Symmetrize resets the filepath (derived structure → Save As), like
+  cleave/supercell/rebox.
+- The disorder confirm lives in ONE shared helper
+  `confirm_disorder_loss(parent, operation)` in `vaspen/ui/tools.py`
+  (strings in the MainWindow .ts context); message pattern unchanged.
+  `_confirm_disorder_poscar_save` is a different message and stays
+  separate.
+
+**i18n (extends §11.1):**
+- `vaspen_en.ts` is now a **generated full mirror of zh.ts**
+  (translation = source — en IS the source language): regenerate it
+  programmatically from zh.ts, never hand-edit both.
+- `tests/test_i18n.py` enforces two-way ast parity (every tr()/
+  translate() literal of MainWindow / SurfaceDialog / ReBoxDialog /
+  SymmetryDialog / tools.py is in both .ts files; no .ts entry lacks a
+  caller) plus a compiled-zh.qm runtime check. Run it after every
+  string change.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
