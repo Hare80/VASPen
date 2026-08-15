@@ -80,13 +80,28 @@ def test_open_file_switches_to_viewport_and_refreshes_recents(
     assert window._welcome_page._recent_list.item(0).text() == "fake.xyz"
 
 
-def test_new_returns_to_welcome_page(window, monkeypatch):
+def test_new_enters_empty_viewport_session(window, monkeypatch):
+    """New Structure = an explicit empty session: the viewport is shown
+    (its own empty-state overlay takes over), not the welcome page."""
     monkeypatch.setattr(
         "PySide6.QtWidgets.QMessageBox.question",
         lambda *args, **kwargs: QMessageBox.Yes,
     )
     window._on_new()
-    assert window._central_stack.currentWidget() is window._welcome_page
+    assert window._central_stack.currentWidget() is window._viewport
+    assert window._structure.n_atoms == 0
+
+
+def test_new_on_empty_state_skips_confirm(window, monkeypatch):
+    """With nothing to discard, New must not ask for confirmation."""
+    asked = []
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QMessageBox.question",
+        lambda *args, **kwargs: asked.append(1) or QMessageBox.Yes,
+    )
+    window._on_new()
+    assert asked == []
+    assert window._central_stack.currentWidget() is window._viewport
 
 
 def test_language_switch_is_live_and_roundtrips(window):

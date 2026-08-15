@@ -756,23 +756,30 @@ class MainWindow(QMainWindow):
     def _on_new(self) -> None:
         """Create a new empty structure (for now, reset to empty)."""
         # TODO: Launch a "new structure" dialog (crystal builder, import molecule, etc.)
-        reply = QMessageBox.question(
-            self,
-            self.tr("New Structure"),
-            self.tr("Discard current changes and create a new empty structure?"),
-        )
-        if reply == QMessageBox.Yes:
-            self._structure = StructureModel()
-            self._connect_model_signals(self._structure)
-            self._structure_tree.set_model(self._structure)
-            self._measurement_manager.clear()
-            self._measurement_manager.set_model(self._structure)
-            self._atom_props.set_model(self._structure)
-            self._viewport.set_structure(None)
-            self._update_welcome_visibility()
-            self._update_status_bar()
-            self._update_edit_actions()
-            self._set_status(self.tr("New structure created."))
+        if self._structure.n_atoms > 0:
+            # Only ask when there is something to discard — on an
+            # empty state (the welcome page) the question is noise.
+            reply = QMessageBox.question(
+                self,
+                self.tr("New Structure"),
+                self.tr("Discard current changes and create a new empty structure?"),
+            )
+            if reply != QMessageBox.Yes:
+                return
+        self._structure = StructureModel()
+        self._connect_model_signals(self._structure)
+        self._structure_tree.set_model(self._structure)
+        self._measurement_manager.clear()
+        self._measurement_manager.set_model(self._structure)
+        self._atom_props.set_model(self._structure)
+        self._viewport.set_structure(None)
+        # New = an explicit empty SESSION: enter the viewport workspace
+        # (the welcome page stays for a never-started state; it comes
+        # back when the model is emptied again).
+        self._central_stack.setCurrentIndex(1)
+        self._update_status_bar()
+        self._update_edit_actions()
+        self._set_status(self.tr("New structure created."))
 
     def _on_open(self) -> None:
         """Open a structure file."""

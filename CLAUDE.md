@@ -802,6 +802,12 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   `_open_file`. Zero new QSS rules — the page composes from the theme
   palette + existing selectors; the title font is set in code
   (`QFont`, not QSS — the no-font-rules policy covers QSS only).
+- **New Structure semantics (settled)**: New is an explicit empty
+  SESSION — it enters the viewport workspace (the viewport's own
+  empty-state overlay takes over), skips the discard-confirm when
+  `n_atoms == 0` (nothing to discard — asking on the welcome page was
+  noise), and the welcome page returns when the model is emptied
+  again (delete-all).
 - i18n: WelcomePage context is in `CHECKED_MODULES`
   (tests/test_i18n.py); the page is persistent → changeEvent +
   `_retranslate()` per §11.2.
