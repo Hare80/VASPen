@@ -7,9 +7,10 @@ site (path length 2.84 Å).
 - `initial/POSCAR` — vacancy at a hollow site
 - `final/POSCAR` — a neighbor hopped into the vacancy
 
-The slab atoms carry `F F F` selective-dynamics flags (18 atoms fully
-frozen) and the hopping atom is free (`T T T`): interpolation keeps the
-frozen atoms exactly in place while the free atom travels.
+The bottom two layers carry `F F F` selective-dynamics flags (18 atoms
+fully frozen) and the rest of the slab is free (`T T T`, 17 atoms) —
+only one of the free atoms actually hops (2.84 Å) into the vacancy.
+Interpolation keeps the frozen atoms exactly in place.
 
 ## How to test in VASPen
 

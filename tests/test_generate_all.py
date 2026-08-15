@@ -15,9 +15,13 @@ from vaspen.ui.generate_all_dialog import GenerateAllDialog
 
 @pytest.fixture
 def example_model(vacancy_hop_pair) -> StructureModel:
-    """Model loaded with the fcc Cu vacancy-hop initial structure."""
+    """Model loaded with the fcc Cu vacancy-hop initial structure.
+
+    load_atoms aliases (and strips constraints from) the Atoms it is
+    given — hand it a copy so the shared fixture pair stays pristine.
+    """
     model = StructureModel()
-    model.load_atoms(vacancy_hop_pair[0])
+    model.load_atoms(vacancy_hop_pair[0].copy())
     return model
 
 
@@ -454,7 +458,7 @@ def test_kpoints_panel_singular_cell_falls_back(qtbot):
 def ethane_model(ethane_pair) -> StructureModel:
     """Model loaded with the ethane rotation initial structure."""
     model = StructureModel()
-    model.load_atoms(ethane_pair[0])
+    model.load_atoms(ethane_pair[0].copy())
     return model
 
 
@@ -536,7 +540,7 @@ def test_neb_frozen_atoms_flow_pass(qtbot, tmp_path, monkeypatch,
     frames keep them put and the written POSCARs carry F F F rows."""
     pi, pf, _bi, _bf = frozen_pass_block_pair
     model = StructureModel()
-    model.load_atoms(pi)
+    model.load_atoms(pi.copy())  # copy: load_atoms strips constraints in place
     assert model.fixed_flags.all(axis=1).sum() == 6
 
     fin_dir = tmp_path / "final"
@@ -581,7 +585,7 @@ def test_neb_frozen_atoms_block_flow(qtbot, tmp_path, monkeypatch,
     """The final moving a frozen atom blocks interpolation."""
     _pi, _pf, bi, bf = frozen_pass_block_pair
     model = StructureModel()
-    model.load_atoms(bi)
+    model.load_atoms(bi.copy())  # copy: load_atoms strips constraints in place
     fin_dir = tmp_path / "final"
     fin_dir.mkdir(parents=True, exist_ok=True)
     fin_path = _write_poscar(bf, fin_dir / "POSCAR")

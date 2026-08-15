@@ -1,9 +1,9 @@
 # NEB Example: Adsorbate Migration on Carbon
 
 A P–O–H functional group migrating between two surface sites on a
-carbon framework (C16 P O H, 19 atoms; ~7.3 × 6.5 Å hexagonal cell
-with vacuum along c). The oxygen atom moves 1.31 Å between the
-endpoints.
+carbon framework (C16 P O H, 19 atoms; ~7.3 × 6.5 Å in-plane cell,
+γ ≈ 117°, with vacuum along c). The oxygen atom moves 1.31 Å between
+the endpoints.
 
 - `initial/POSCAR` — the group bound at one site
 - `final/POSCAR` — the group at the neighboring site

@@ -75,19 +75,30 @@ VASPen/
 │       ├── config.py           # AppConfig — QSettings wrapper
 │       ├── logger.py           # Centralized logging
 │       └── theme.py            # QSS theming engine (Fusion + palette + QSS, §7.9)
+├── examples/                    # Curated demo structures + NEB trees (README inside; tests never read from here — §9)
 ├── tests/
 │   ├── __init__.py
+│   ├── conftest.py              # Shared pytest fixtures — structures built in code (§9)
 │   ├── test_structure.py
 │   ├── test_file_io.py
 │   ├── test_vasp_input.py
 │   ├── test_surface.py
 │   ├── test_neb.py
+│   ├── test_generate_all.py
 │   ├── test_dialogs.py
 │   ├── test_ui.py
+│   ├── test_ui_tools.py
 │   ├── test_theme.py
 │   ├── test_welcome_page.py
 │   ├── test_i18n.py
-│   └── test_icon_assets.py     # icon letterbox zero-crop + asset pins
+│   ├── test_bonds.py
+│   ├── test_measure.py
+│   ├── test_menu_button.py
+│   ├── test_render_settings.py
+│   ├── test_symmetry.py
+│   ├── test_transform.py
+│   ├── test_viewport_geometry.py
+│   └── test_icon_assets.py      # icon letterbox zero-crop + asset pins
 └── scripts/
     ├── build.py                # PyInstaller / Nuitka build script
     ├── make_icon.py            # Regenerate the app icon set (never crops)
@@ -1075,11 +1086,11 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] App icon (letterboxed full source art — never cropped; title bar / taskbar / exe; §7.8.2)
 - [x] i18n (en/zh)
 - [x] QSS theming (light/dark, Fusion + QSS, live switch; §7.9)
-- [x] Welcome page with recent files (central stack, single-click open; §7.10)
+- [x] Welcome page with recent files (central stack; click selects, double-click/Enter opens — §7.10)
 - [x] Drag-and-drop file opening (MainWindow-level, any URL, first file)
 
 ### v0.3 — Release (Sprint 5)
-- [ ] Test suite
+- [x] Test suite
 - [ ] PyInstaller Windows build
 - [ ] User documentation
 

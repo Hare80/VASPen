@@ -147,10 +147,17 @@ def test_symmetrize_primitive_cu_standard_orientation():
     assert cell[0, 0] > 0 and cell[1, 1] > 0 and cell[2, 2] > 0
 
 
-def test_symmetrize_primitive_matches_reference_file(cu_primitive_standard):
-    """Loose reference check against the standard-orientation primitive
-    (a = 3.61/√2, 60° rhombohedron, 1 atom)."""
-    ref = cu_primitive_standard
+def test_symmetrize_primitive_matches_reference_cell():
+    """Pinned against the numeric reference cell of the fcc Cu primitive
+    (a = 3.61/√2, 60° rhombohedron) — independent of ASE's
+    cellpar_to_cell, which builds both sides otherwise."""
+    ref_cell = np.array([
+        [2.5526554800834367, 0.0, 0.0],
+        [1.2763277400417181, 2.2106644928618184, 0.0],
+        [1.2763277400417181, 0.7368881642872728, 2.0842344717745491],
+    ])
+    ref = Atoms("Cu", cell=ref_cell,
+                scaled_positions=[[0.0, 0.0, 0.0]], pbc=True)
     atoms = symmetrize(_cu_conventional(), cell_type="primitive")
     assert len(ref) == 1
     assert np.allclose(np.sort(np.asarray(ref.get_cell().array), axis=0),
@@ -167,8 +174,7 @@ def test_symmetrize_conventional_unchanged_for_cu():
     assert np.allclose(atoms.get_cell().array, np.eye(3) * 3.61, atol=1e-6)
 
 
-def test_symmetrize_bcc_supercell_primitive_vs_conventional(
-        tmp_path, fe_bcc_2x2x2):
+def test_symmetrize_bcc_supercell_primitive_vs_conventional(fe_bcc_2x2x2):
     """Fe bcc 2×2×2 (16 atoms): conventional → 2 atoms bcc,
     primitive → 1 atom with a = a_conv·√3/2."""
     from ase.geometry import cell_to_cellpar

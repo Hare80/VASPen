@@ -148,9 +148,8 @@ def frozen_pass_block_pair() -> tuple[Atoms, Atoms, Atoms, Atoms]:
     from ase.constraints import FixAtoms
 
     pi, pf = _vacancy_hop_pair()
-    fixed = FixAtoms(indices=[0, 2, 3, 4, 5, 6])
-    pi.constraints = [fixed]
-    pf.constraints = [fixed]
+    pi.constraints = [FixAtoms(indices=[0, 2, 3, 4, 5, 6])]
+    pf.constraints = [FixAtoms(indices=[0, 2, 3, 4, 5, 6])]
     bi = pi.copy()
     bf = pf.copy()
     bf.positions[0] = bf.cell.T @ np.array(
@@ -215,14 +214,3 @@ def benzene_molecule() -> Atoms:
     """Benzene ring: no cell, pbc=False."""
     from ase.build import molecule
     return molecule("C6H6")
-
-
-@pytest.fixture
-def cu_primitive_standard() -> Atoms:
-    """fcc Cu primitive in the standard orientation (a || x, b in the
-    xy-plane): a = 3.61/sqrt(2), 60 deg rhombohedron, 1 atom."""
-    from ase.geometry import cellpar_to_cell
-
-    a_p = 3.61 / np.sqrt(2)
-    cell = cellpar_to_cell([a_p, a_p, a_p, 60.0, 60.0, 60.0])
-    return Atoms("Cu", cell=cell, scaled_positions=[[0.0, 0.0, 0.0]], pbc=True)

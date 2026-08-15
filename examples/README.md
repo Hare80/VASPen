@@ -1,7 +1,9 @@
 # VASPen Examples
 
 A small curated set of structure files for exploring VASPen's features.
-File naming convention: `<Formula>_<structure>.<ext>`.
+File naming convention: `<Formula>_<structure>.<ext>` (molecules use just
+the formula — e.g. `benzene.xyz`; framework codes such as `MFI` take the
+formula slot — e.g. `MFI_zeolite.vasp`).
 
 ## Structure files
 
