@@ -773,9 +773,16 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
 ## 7.10 Welcome Page Policy (settled 2026-08-15 — do not re-litigate)
 
 - **`vaspen/ui/welcome_page.py`** (WelcomePage, context in i18n): title
-  + tagline, recent-files list (single click opens, full path in the
-  item data), New Structure / Open buttons, drag-and-drop hint.
-  Standard scope — user chose it over an examples-section variant.
+  + tagline, recent-files list, New Structure / Open / Browse buttons,
+  drag-and-drop hint. Standard scope — user chose it over an
+  examples-section variant.
+- **Interaction (user-decided, do not re-litigate)**: a click SELECTS
+  a recent file; **double-click or Enter opens it** (`itemActivated`).
+  **Open = opens the SELECTED recent file** (no dialog; disabled when
+  nothing is selected — `selected_file()` drives it). **Browse... =
+  the standard file dialog** (same `_on_open` as the File menu /
+  toolbar). A small "Double-click to open a file" hint sits under the
+  list.
 - **Central stack**: `MainWindow._central_stack` = QStackedWidget
   (index 0 welcome page, index 1 viewport), replacing the plain
   viewport slot in `_central_layout`; the edit toolbar's
@@ -798,10 +805,11 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   clear); the menu-bar creation call stays menu-only (the welcome
   page does not exist yet there — it is seeded in
   `_create_central_widget`).
-- Welcome buttons reuse `_on_new` / `_on_open`; list clicks reuse
-  `_open_file`. Zero new QSS rules — the page composes from the theme
-  palette + existing selectors; the title font is set in code
-  (`QFont`, not QSS — the no-font-rules policy covers QSS only).
+- Welcome buttons reuse `_on_new` / `_on_welcome_open` /
+  `_on_open` (Browse); list activation reuses `_open_file`. Zero new
+  QSS rules — the page composes from the theme palette + existing
+  selectors; the title font is set in code (`QFont`, not QSS — the
+  no-font-rules policy covers QSS only).
 - **New Structure semantics (settled)**: New is an explicit empty
   SESSION — it enters the viewport workspace (the viewport's own
   empty-state overlay takes over), skips the discard-confirm when

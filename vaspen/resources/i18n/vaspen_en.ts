@@ -2349,8 +2349,20 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <translation>New Structure...</translation>
     </message>
     <message>
-      <source>Open...</source>
-      <translation>Open...</translation>
+      <source>Double-click to open a file</source>
+      <translation>Double-click to open a file</translation>
+    </message>
+    <message>
+      <source>Open</source>
+      <translation>Open</translation>
+    </message>
+    <message>
+      <source>Open the selected file</source>
+      <translation>Open the selected file</translation>
+    </message>
+    <message>
+      <source>Browse...</source>
+      <translation>Browse...</translation>
     </message>
     <message>
       <source>Drag and drop a structure file anywhere in this window.</source>

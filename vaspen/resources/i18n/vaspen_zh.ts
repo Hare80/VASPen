@@ -2233,8 +2233,20 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         <translation>新建结构...</translation>
     </message>
     <message>
-        <source>Open...</source>
-        <translation>打开...</translation>
+        <source>Double-click to open a file</source>
+        <translation>双击打开文件</translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation>打开</translation>
+    </message>
+    <message>
+        <source>Open the selected file</source>
+        <translation>打开选中的文件</translation>
+    </message>
+    <message>
+        <source>Browse...</source>
+        <translation>浏览...</translation>
     </message>
     <message>
         <source>Drag and drop a structure file anywhere in this window.</source>

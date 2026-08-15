@@ -1,10 +1,11 @@
 """Welcome page — shown in the central stack when no structure is loaded.
 
-Standard layout: title, tagline, a recent-files list (single click
-opens), New Structure / Open buttons, and a drag-and-drop hint. All
-strings live in the "WelcomePage" i18n context (enforced by
-tests/test_i18n.py); the widget is persistent (never destroyed), so it
-implements changeEvent/_retranslate per CLAUDE.md §11.2.
+Standard layout: title, tagline, a recent-files list (click selects,
+double-click/Enter opens), New Structure / Open / Browse buttons, and
+a drag-and-drop hint. All strings live in the "WelcomePage" i18n
+context (enforced by tests/test_i18n.py); the widget is persistent
+(never destroyed), so it implements changeEvent/_retranslate per
+CLAUDE.md §11.2.
 
 No stylesheet, no hardcoded colors — the theme's palette + QSS rules
 style every widget here (CLAUDE.md §7.9); the title uses a code-level
@@ -35,9 +36,10 @@ _LIST_MAX_HEIGHT = 260
 class WelcomePage(QWidget):
     """Empty-state landing page with recent files and quick actions."""
 
-    open_file_requested = Signal(str)   # full path
+    open_file_requested = Signal(str)   # full path (double-click / Enter)
     new_requested = Signal()
-    open_requested = Signal()
+    open_requested = Signal()           # open the SELECTED recent file
+    browse_requested = Signal()         # file dialog
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -71,8 +73,15 @@ class WelcomePage(QWidget):
         self._recent_list.setMaximumHeight(_LIST_MAX_HEIGHT)
         self._recent_list.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._recent_list.itemClicked.connect(self._on_item_clicked)
+        # Click selects only; double-click / Enter open (itemActivated).
+        self._recent_list.itemActivated.connect(self._on_item_activated)
+        self._recent_list.itemSelectionChanged.connect(
+            self._update_open_enabled)
         layout.addWidget(self._recent_list)
+
+        dbl_hint = QLabel(self.tr("Double-click to open a file"), self)
+        dbl_hint.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(dbl_hint)
 
         self._no_recent_label = QLabel(
             self.tr("(No recent files)"), self)
@@ -88,11 +97,16 @@ class WelcomePage(QWidget):
         self._new_btn.clicked.connect(
             lambda checked=False: self.new_requested.emit())
         button_row.addWidget(self._new_btn)
-        self._open_btn = QPushButton(self.tr("Open..."), self)
-        self._open_btn.setDefault(True)
+        self._open_btn = QPushButton(self.tr("Open"), self)
+        self._open_btn.setToolTip(self.tr("Open the selected file"))
+        self._open_btn.setEnabled(False)  # enabled with a selection
         self._open_btn.clicked.connect(
             lambda checked=False: self.open_requested.emit())
         button_row.addWidget(self._open_btn)
+        self._browse_btn = QPushButton(self.tr("Browse..."), self)
+        self._browse_btn.clicked.connect(
+            lambda checked=False: self.browse_requested.emit())
+        button_row.addWidget(self._browse_btn)
         button_row.addStretch()
         layout.addLayout(button_row)
 
@@ -107,6 +121,7 @@ class WelcomePage(QWidget):
         self._title = title
         self._tagline = tagline
         self._recent_label = recent_label
+        self._dbl_hint = dbl_hint
         self._hint = hint
 
     # ------------------------------------------------------------------
@@ -125,8 +140,21 @@ class WelcomePage(QWidget):
         has_files = bool(files)
         self._recent_list.setVisible(has_files)
         self._no_recent_label.setVisible(not has_files)
+        self._update_open_enabled()
 
-    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+    def selected_file(self) -> str | None:
+        """Full path of the currently selected recent file (None if no
+        selection — the Open button is disabled then anyway)."""
+        item = self._recent_list.currentItem()
+        if item is None:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def _update_open_enabled(self) -> None:
+        self._open_btn.setEnabled(self.selected_file() is not None)
+
+    def _on_item_activated(self, item: QListWidgetItem) -> None:
+        # itemActivated = double-click OR Enter.
         self.open_file_requested.emit(
             item.data(Qt.ItemDataRole.UserRole))
 
@@ -143,8 +171,11 @@ class WelcomePage(QWidget):
         self._title.setText(self.tr("VASPen"))
         self._tagline.setText(self.tr("Visual structure modeling for VASP"))
         self._recent_label.setText(self.tr("Recent Files"))
+        self._dbl_hint.setText(self.tr("Double-click to open a file"))
         self._no_recent_label.setText(self.tr("(No recent files)"))
         self._new_btn.setText(self.tr("New Structure..."))
-        self._open_btn.setText(self.tr("Open..."))
+        self._open_btn.setText(self.tr("Open"))
+        self._open_btn.setToolTip(self.tr("Open the selected file"))
+        self._browse_btn.setText(self.tr("Browse..."))
         self._hint.setText(self.tr(
             "Drag and drop a structure file anywhere in this window."))

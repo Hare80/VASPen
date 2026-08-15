@@ -735,7 +735,8 @@ class MainWindow(QMainWindow):
         # Welcome page quick actions
         self._welcome_page.open_file_requested.connect(self._open_file)
         self._welcome_page.new_requested.connect(self._on_new)
-        self._welcome_page.open_requested.connect(self._on_open)
+        self._welcome_page.open_requested.connect(self._on_welcome_open)
+        self._welcome_page.browse_requested.connect(self._on_open)
 
     def _connect_model_signals(self, model: StructureModel) -> None:
         """Connect a StructureModel's signals to window/UI updates.
@@ -782,7 +783,8 @@ class MainWindow(QMainWindow):
         self._set_status(self.tr("New structure created."))
 
     def _on_open(self) -> None:
-        """Open a structure file."""
+        """Open a structure file via the file dialog (File menu,
+        toolbar, and the welcome page's Browse button)."""
         file_filter = FileIO.file_filter(for_writing=False)
         filepath, _ = QFileDialog.getOpenFileName(
             self,
@@ -792,6 +794,13 @@ class MainWindow(QMainWindow):
         )
         if filepath:
             self._open_file(filepath)
+
+    def _on_welcome_open(self) -> None:
+        """Open the SELECTED recent file (welcome page's Open button —
+        no dialog; the button is disabled without a selection)."""
+        path = self._welcome_page.selected_file()
+        if path:
+            self._open_file(path)
 
     def _open_file(self, filepath: str) -> None:
         """Load a structure from the given path."""

@@ -104,6 +104,39 @@ def test_new_on_empty_state_skips_confirm(window, monkeypatch):
     assert window._central_stack.currentWidget() is window._viewport
 
 
+def test_welcome_open_opens_selected_file_without_dialog(
+        window, monkeypatch):
+    """Open = the SELECTED recent file, no file dialog."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: atoms)
+    )
+    def _fail_dialog(*args, **kwargs):
+        raise AssertionError("file dialog must not open")
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName", _fail_dialog)
+    window._welcome_page.set_recent_files(["D:/vasp/cu111.vasp"])
+    window._welcome_page._recent_list.setCurrentRow(0)
+    window._on_welcome_open()
+    # StructureModel normalizes the stored path (Windows separators).
+    assert window._structure.filepath == str(Path("D:/vasp/cu111.vasp"))
+    assert window._central_stack.currentWidget() is window._viewport
+
+
+def test_welcome_browse_opens_file_dialog(window, monkeypatch):
+    """Browse = the standard file dialog (same as the File menu)."""
+    calls = []
+
+    def _fake_dialog(*args, **kwargs):
+        calls.append(1)
+        return "", ""
+
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName", _fake_dialog)
+    window._on_open()
+    assert calls == [1]
+
+
 def test_language_switch_is_live_and_roundtrips(window):
     window._switch_language("zh")
     assert window.act_open.text() == "打开(&O)..."
