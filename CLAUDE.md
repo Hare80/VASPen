@@ -85,7 +85,8 @@ VASPen/
 │   └── test_icon_assets.py     # icon letterbox zero-crop + asset pins
 └── scripts/
     ├── build.py                # PyInstaller / Nuitka build script
-    └── make_icon.py            # Regenerate the app icon set (never crops)
+    ├── make_icon.py            # Regenerate the app icon set (never crops)
+    └── sync_en_ts.py           # Regenerate vaspen_en.ts as a mirror of zh.ts
 ```
 
 ---
@@ -656,12 +657,17 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
 
 **i18n (extends §11.1):**
 - `vaspen_en.ts` is now a **generated full mirror of zh.ts**
-  (translation = source — en IS the source language): regenerate it
-  programmatically from zh.ts, never hand-edit both.
-- `tests/test_i18n.py` enforces two-way ast parity (every tr()/
-  translate() literal of MainWindow / SurfaceDialog / ReBoxDialog /
-  SymmetryDialog / tools.py is in both .ts files; no .ts entry lacks a
-  caller) plus a compiled-zh.qm runtime check. Run it after every
+  (translation = source — en IS the source language): `scripts/
+  sync_en_ts.py` is the ONLY regeneration path — never hand-edit both;
+  the mirror property (translation == source) is pinned by a test.
+- `tests/test_i18n.py` enforces two-way ast parity over **every**
+  tr()/translate() context — all UI modules plus the core `_tr`
+  contexts (Neb / StructureModel / VaspInput; FileIO is
+  hand-maintained because its strings are dynamic `_tr(dict_value)`s,
+  pinned by a dedicated test) — plus a compiled-zh.qm runtime check.
+  Dynamically-translated strings (`self.tr(text)` over data tuples,
+  translate callables passed to shared helpers) are whitelisted in
+  `DYNAMIC_LITERALS` with a presence check. Run it after every
   string change.
 
 ## 7.8.2 App Icon Policy (settled 2026-08-15 — do not re-litigate)
@@ -916,8 +922,13 @@ Rules for new code:
   they pick up the current language automatically — no retranslate needed.
 - Any future **non-modal/persistent** widget must implement `changeEvent()` +
   a `_retranslate()` method and re-apply its `tr()` strings there.
-- After adding/editing user-visible strings, re-run `pyside6-lupdate` so the
-  `.ts` files stay in sync.
+- After adding/editing user-visible strings, hand-edit `vaspen_zh.ts`
+  (new `<message>` with source + zh translation), then run
+  `python scripts/sync_en_ts.py` (regenerates the en mirror), compile
+  with `pyside6-lrelease` via `.venv/Scripts/python.exe
+  .venv/Scripts/pyside6-lrelease.exe`, and run
+  `pytest tests/test_i18n.py`. Do NOT run `pyside6-lupdate` — broken
+  on this machine (§11.1).
 
 ### 11.3 Default Language
 
@@ -939,10 +950,10 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 
 ### v0.2 — Polish (Sprint 4)
 - [x] App icon (letterboxed full source art — never cropped; title bar / taskbar / exe; §7.8.2)
-- [ ] i18n (en/zh)
+- [x] i18n (en/zh)
 - [ ] QSS theming
 - [ ] Welcome page with recent files
-- [ ] Drag-and-drop file opening
+- [x] Drag-and-drop file opening (MainWindow-level, any URL, first file)
 
 ### v0.3 — Release (Sprint 5)
 - [ ] Test suite

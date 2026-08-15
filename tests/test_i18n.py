@@ -1,4 +1,5 @@
-"""i18n synchronization guards (code review 2026-08-15).
+"""i18n synchronization guards (code review 2026-08-15, extended
+2026-08-15 to every tr()-using module).
 
 pyside6-lupdate is broken in this environment (extracts 0 strings), so
 the .ts files are hand-maintained — drift is invisible at runtime until
@@ -7,8 +8,17 @@ three MainWindow rebox messages that shipped in English in the Chinese
 UI). These tests pin the failure modes:
 
 - a tr() literal missing from a .ts file, or a .ts entry no code emits
-  (ast parity check, both directions, over the four UI modules whose
-  contexts are fully hand-maintained), and
+  (ast parity check, both directions, over EVERY UI module that uses
+  tr()/translate() and the core ``_tr()`` contexts Neb / StructureModel
+  / VaspInput — the IncarEditorPanel presets that shipped in English
+  in the Chinese UI were invisible until this extension),
+- the FileIO context, whose strings are translated dynamically
+  (``_tr(dict_value)`` — statically invisible; kept hand-maintained,
+  its .ts sources must all come from EXTENSION_DISPLAY_NAMES or a
+  static ``_tr`` literal),
+- en.ts being a full mirror of zh.ts (translation == source — en IS
+  the source language; regenerate via scripts/sync_en_ts.py, never
+  hand-edit both), and
 - a compiled .qm that predates the .ts (runtime QTranslator check).
 """
 
@@ -32,7 +42,58 @@ CHECKED_MODULES = (
     ("vaspen/ui/rebox_dialog.py", "ReBoxDialog"),
     ("vaspen/ui/symmetry_dialog.py", "SymmetryDialog"),
     ("vaspen/ui/tools.py", "MainWindow"),
+    ("vaspen/ui/incar_editor.py", "IncarEditorPanel"),
+    ("vaspen/ui/incar_editor.py", "IncarEditorDialog"),
+    ("vaspen/ui/kpoints_editor.py", "KpointsEditorPanel"),
+    ("vaspen/ui/kpoints_editor.py", "KpointsEditorDialog"),
+    ("vaspen/ui/potcar_dialog.py", "PotcarPanel"),
+    ("vaspen/ui/potcar_dialog.py", "PotcarDialog"),
+    ("vaspen/ui/periodic_wrap_dialog.py", "PeriodicWrapDialog"),
+    ("vaspen/ui/display_options_dialog.py", "DisplayOptionsDialog"),
+    ("vaspen/ui/generate_all_dialog.py", "PoscarPanel"),
+    ("vaspen/ui/generate_all_dialog.py", "GenerateAllDialog"),
+    ("vaspen/ui/settings_dialog.py", "SettingsDialog"),
+    ("vaspen/ui/structure_tree.py", "StructureTreePanel"),
+    ("vaspen/ui/viewport3d.py", "Viewport3D"),
+    ("vaspen/ui/measurement.py", "MeasurementPanel"),
+    ("vaspen/ui/atom_properties.py", "AtomPropertiesPanel"),
+    ("vaspen/ui/lattice_dialog.py", "LatticeDialog"),
+    ("vaspen/ui/supercell_dialog.py", "SupercellDialog"),
+    ("vaspen/ui/periodic_table_dialog.py", "PeriodicTableDialog"),
+    ("vaspen/ui/transform_dialog.py", "TransformDialog"),
 )
+
+#: Core modules translate via a module-level ``_tr(text)`` helper —
+#: the context is fixed per module (the helper wraps
+#: QCoreApplication.translate with it as a constant). FileIO is
+#: deliberately absent: its strings are translated dynamically
+#: (``_tr(dict_value)``) and pinned by test_fileio_context instead.
+CORE_CONTEXTS = {
+    "vaspen/core/neb.py": "Neb",
+    "vaspen/core/structure.py": "StructureModel",
+    "vaspen/core/vasp_input.py": "VaspInput",
+}
+
+#: Dynamically-translated strings — the tr()/translate() call site
+#: carries no constant literal (``self.tr(text)`` over a module-level
+#: data tuple, or a translate callable handed to a shared helper), so
+#: the ast walk cannot see them. They are real runtime callers: the
+#: orphan direction is relaxed for exactly these, and their presence
+#: in both .ts files is pinned by test_dynamic_literals below.
+DYNAMIC_LITERALS = {
+    "DisplayOptionsDialog": {
+        # _make_choice_button: QAction(self.tr(text), btn) over
+        # _STYLE_ITEMS / _SCHEME_ITEMS.
+        "Ball & Stick", "Space Filling (CPK)", "Wireframe",
+        "Jmol (default)", "Metal / Non-metal",
+        "Periodic table blocks (s/p/d/f)",
+    },
+    # structure_tree.composition_text(..., self.tr) — "Vacancy" is
+    # resolved through the passed translate callable (both panels
+    # share the helper, each with its own context).
+    "StructureTreePanel": {"Vacancy"},
+    "AtomPropertiesPanel": {"Vacancy"},
+}
 
 
 def _norm(text: str) -> str:
@@ -44,10 +105,12 @@ def _norm(text: str) -> str:
 
 def _literals(module_rel: str) -> dict[str, set[str]]:
     """{context: string literals} — ``tr()`` calls (context = enclosing
-    class) and ``QCoreApplication.translate("ctx", "literal")`` calls
-    (context = the explicit first argument)."""
+    class), ``QCoreApplication.translate("ctx", "literal")`` calls
+    (context = the explicit first argument), and core ``_tr("literal")``
+    calls (context = CORE_CONTEXTS[module])."""
     tree = ast.parse(
         (Path(__file__).parent.parent / module_rel).read_text("utf-8"))
+    core_context = CORE_CONTEXTS.get(module_rel)
     found: dict[str, set[str]] = {}
     stack: list[str] = []
 
@@ -73,6 +136,13 @@ def _literals(module_rel: str) -> dict[str, set[str]]:
                     and isinstance(node.args[1].value, str)):
                 found.setdefault(node.args[0].value, set()).add(
                     node.args[1].value)
+            if (core_context
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "_tr"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                found.setdefault(core_context, set()).add(node.args[0].value)
             self.generic_visit(node)
 
     _Visitor().visit(tree)
@@ -115,7 +185,9 @@ def test_no_orphan_entries_in_checked_contexts():
     """No .ts source of the checked contexts may exist without a
     matching tr()/translate() literal — orphans accumulate silently
     (the review pruned 14: stale Transform/POTCAR-era messages,
-    wrong-context duplicates, a stale tooltip split)."""
+    wrong-context duplicates, a stale tooltip split). Dynamically-
+    translated strings (DYNAMIC_LITERALS) are exempt here and pinned
+    by test_dynamic_literals_present_in_both_ts_files."""
     orphan: list[str] = []
     by_context: dict[str, set[str]] = {}
     for module, context in CHECKED_MODULES:
@@ -125,9 +197,23 @@ def test_no_orphan_entries_in_checked_contexts():
         literals = {_norm(s) for s in literals}
         for ts_name, messages in (("zh.ts", ZH), ("en.ts", EN)):
             for src in messages.get(context, set()):
+                if src in DYNAMIC_LITERALS.get(context, set()):
+                    continue
                 if src not in literals:
                     orphan.append(f"{ts_name} {context}: {src!r}")
     assert not orphan, "\n".join(orphan)
+
+
+def test_dynamic_literals_present_in_both_ts_files():
+    """The ast-invisible strings still ship in both .ts files — a
+    hand-prune here would silently revert them to English."""
+    missing = []
+    for context, literals in DYNAMIC_LITERALS.items():
+        for literal in literals:
+            for ts_name, messages in (("zh.ts", ZH), ("en.ts", EN)):
+                if _norm(literal) not in messages.get(context, set()):
+                    missing.append(f"{ts_name} {context}: {literal!r}")
+    assert not missing, "\n".join(missing)
 
 
 def test_compiled_zh_qm_resolves_rebox_strings():
@@ -147,3 +233,49 @@ def test_compiled_zh_qm_resolves_rebox_strings():
     ):
         translated = translator.translate(context, source)
         assert translated and translated != source, source
+
+
+def test_en_ts_is_a_full_mirror_of_zh_ts():
+    """en.ts is GENERATED from zh.ts (scripts/sync_en_ts.py): every
+    message's translation equals its source — en IS the source
+    language, so the file must never be hand-edited or drift."""
+    root = ET.parse(I18N / "vaspen_en.ts").getroot()
+    broken = []
+    for ctx in root.findall("context"):
+        name = ctx.find("name").text
+        for msg in ctx.findall("message"):
+            source = msg.find("source")
+            translation = msg.find("translation")
+            if source is None or source.text is None:
+                continue
+            if (translation is None
+                    or _norm(translation.text or "") != _norm(source.text)):
+                broken.append(
+                    f"{name}: {source.text!r} -> "
+                    f"{translation.text if translation is not None else None!r}")
+    assert not broken, "\n".join(broken)
+
+
+def test_fileio_context_sources_are_known_values():
+    """FileIO strings are translated via ``_tr(dict_value)`` — the ast
+    walk cannot see them, so the context is hand-maintained. Pin that
+    every .ts FileIO source comes from EXTENSION_DISPLAY_NAMES or a
+    static ``_tr`` literal (a stale entry here would silently ship an
+    obsolete format name)."""
+    import vaspen.core.file_io as file_io
+
+    static = set()
+    tree = ast.parse(Path(file_io.__file__).read_text("utf-8"))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_tr"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)):
+            static.add(node.args[0].value)
+    known = {_norm(s) for s in set(file_io.EXTENSION_DISPLAY_NAMES.values())
+             | static}
+    for ts_name, messages in (("zh.ts", ZH), ("en.ts", EN)):
+        unknown = {_norm(s) for s in messages.get("FileIO", set())} - known
+        assert not unknown, f"{ts_name} FileIO: {sorted(unknown)}"

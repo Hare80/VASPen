@@ -644,8 +644,12 @@ Continue?</source><translation>此结构含有部分占据(无序)。
     <context>
         <name>Viewport3D</name>
         <message>
-            <source>&lt;h3&gt;3D rendering unavailable&lt;/h3&gt;&lt;p&gt;OpenGL could not be initialized on this system.&lt;/p&gt;&lt;p&gt;Try updating your graphics driver or disable remote desktop.&lt;/p&gt;</source>
-            <translation>&lt;h3&gt;3D 渲染不可用&lt;/h3&gt;&lt;p&gt;此系统无法初始化 OpenGL。&lt;/p&gt;&lt;p&gt;请尝试更新显卡驱动或关闭远程桌面。&lt;/p&gt;</translation>
+            <source>3D rendering unavailable
+OpenGL could not be initialized on this system.
+Try updating your graphics driver or disable remote desktop.</source>
+            <translation>3D 渲染不可用
+此系统无法初始化 OpenGL。
+请尝试更新显卡驱动或关闭远程桌面。</translation>
         </message>
         <message>
             <source>Open a structure file to begin
@@ -656,10 +660,6 @@ Continue?</source><translation>此结构含有部分占据(无序)。
     </context>
     <context>
         <name>IncarEditorPanel</name>
-        <message>
-            <source>Duplicate Tag</source>
-            <translation>参数重复</translation>
-        </message>
         <message>
             <source>Duplicate INCAR tags: {}. Remove or rename the extra rows.</source>
             <translation>INCAR 参数重复：{}。请删除或重命名多余的行。</translation>
@@ -687,22 +687,118 @@ Continue?</source><translation>此结构含有部分占据(无序)。
 {}</translation>
         </message>
         <message>
-            <source>Invalid INCAR Lines</source>
-            <translation>无效的 INCAR 行</translation>
+            <source>Tags without a value: {}</source>
+            <translation>未填写数值的参数：{}</translation>
+        </message>
+        <message>
+            <source>Tag</source>
+            <translation>参数</translation>
+        </message>
+        <message>
+            <source>Value</source>
+            <translation>值</translation>
+        </message>
+        <message>
+            <source>Description</source>
+            <translation>说明</translation>
+        </message>
+        <message>
+            <source>Add Tag</source>
+            <translation>添加参数</translation>
+        </message>
+        <message>
+            <source>Remove Selected Tag</source>
+            <translation>删除选中参数</translation>
+        </message>
+        <message>
+            <source>Custom tag</source>
+            <translation>自定义参数</translation>
+        </message>
+        <message>
+            <source>Reset to Preset</source>
+            <translation>重置为预设</translation>
+        </message>
+        <message>
+            <source>Calculation Type:</source>
+            <translation>计算类型：</translation>
+        </message>
+        <message>
+            <source>SCF (Static)</source>
+            <translation>SCF（静态）</translation>
+        </message>
+        <message>
+            <source>Optimization</source>
+            <translation>结构优化</translation>
+        </message>
+        <message>
+            <source>Band Structure</source>
+            <translation>能带结构</translation>
+        </message>
+        <message>
+            <source>DOS</source>
+            <translation>态密度</translation>
+        </message>
+        <message>
+            <source>Optical</source>
+            <translation>光学性质</translation>
+        </message>
+        <message>
+            <source>NEB</source>
+            <translation>NEB</translation>
+        </message>
+        <message>
+            <source>Custom</source>
+            <translation>自定义</translation>
+        </message>
+        <message>
+            <source>Preview:</source>
+            <translation>预览：</translation>
+        </message>
+        <message>
+            <source>Estimate ENCUT from POTCAR</source>
+            <translation>从 POTCAR 估算 ENCUT</translation>
+        </message>
+        <message>
+            <source>Read ENMAX from POTCAR and set ENCUT = 1.3 × ENMAX</source>
+            <translation>从 POTCAR 读取 ENMAX 并设置 ENCUT = 1.3 × ENMAX</translation>
+        </message>
+        <message>
+            <source>ENCUT Estimated</source>
+            <translation>ENCUT 估算完成</translation>
+        </message>
+        <message>
+            <source>Estimation Failed</source>
+            <translation>估算失败</translation>
+        </message>
+        <message>
+            <source>ENCUT = {} eV (1.3 × ENMAX).
+Please verify this value for your calculation.</source>
+            <translation>ENCUT = {} eV（1.3 × ENMAX）。
+请根据您的计算核实该数值。</translation>
+        </message>
+        <message>
+            <source>Could not estimate ENCUT:
+{}
+
+Set POTCAR library path in Edit → Preferences.</source>
+            <translation>无法估算 ENCUT：
+{}
+
+请在「编辑 → 首选项」中设置 POTCAR 库路径。</translation>
+        </message>
+        <message>
+            <source>Load a structure first to estimate ENCUT.</source>
+            <translation>请先打开结构以估算 ENCUT。</translation>
+        </message>
+        <message>
+            <source>No Structure</source>
+            <translation>没有结构</translation>
         </message>
         <message>
             <source>These lines are not valid INCAR tag lines:
-{}
-
-Save anyway?</source>
+{}</source>
             <translation>以下行不是有效的 INCAR 参数行：
-{}
-
-仍要保存吗？</translation>
-        </message>
-        <message>
-            <source>Tags without a value: {}</source>
-            <translation>未填写数值的参数：{}</translation>
+{}</translation>
         </message>
     </context>
     <context>
@@ -795,34 +891,6 @@ Labels: G=Gamma, X, M, R, K, L, W, etc.</source>
         <message>
             <source># {}</source>
             <translation># {}</translation>
-        </message>
-        <message>
-            <source>Partial Occupancy</source>
-            <translation>部分占据</translation>
-        </message>
-        <message>
-            <source>This structure has partial occupancy (disorder).
-The VASP POSCAR format does not support fractional occupancy — the saved file will contain only the dominant species per site and the composition information will be lost.
-
-Continue saving?</source>
-            <translation>该结构存在部分占据（无序）。
-VASP POSCAR 格式不支持分数占据——保存的文件每个位置将只包含主占元素，组分信息将丢失。
-
-是否继续保存？</translation>
-        </message>
-        <message>
-            <source>Creating a supercell</source>
-            <translation>创建超胞</translation>
-        </message>
-        <message>
-            <source>This structure has partial occupancy (disorder).
-{} will discard the fractional occupancy information.
-
-Continue?</source>
-            <translation>该结构存在部分占据（无序）。
-{} 将丢弃分数占据信息。
-
-是否继续？</translation>
         </message>
         <message>
             <source># The structure is not periodic — wrap it in a periodic cell first.</source>
@@ -1113,7 +1181,14 @@ Files: {}</source>
 
 Partially written files were removed.</source><translation>{}
 
-已删除本次已写入的文件.</translation></message></context>
+已删除本次已写入的文件.</translation></message><message>
+    <source>Not Periodic</source>
+    <translation>非周期结构</translation>
+</message>
+<message>
+    <source>The structure is not periodic. Close the dialog, wrap the structure in a periodic cell and try again.</source>
+    <translation>当前结构不是周期性的。请关闭此对话框，先将结构包裹为周期性晶胞后再试。</translation>
+</message></context>
     <context>
         <name>PoscarPanel</name>
         <message>
@@ -1375,10 +1450,6 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
         <message>
             <source>Fractional</source>
             <translation>分数坐标</translation>
-        </message>
-        <message>
-            <source>Show and edit fractional coordinates</source>
-            <translation>显示并编辑分数坐标</translation>
         </message>
         <message>
             <source>Click to switch between Cartesian and fractional coordinates</source>

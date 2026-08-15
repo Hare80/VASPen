@@ -685,8 +685,12 @@ Continue?</translation>
   <context>
     <name>Viewport3D</name>
     <message>
-      <source>&lt;h3&gt;3D rendering unavailable&lt;/h3&gt;&lt;p&gt;OpenGL could not be initialized on this system.&lt;/p&gt;&lt;p&gt;Try updating your graphics driver or disable remote desktop.&lt;/p&gt;</source>
-      <translation>&lt;h3&gt;3D rendering unavailable&lt;/h3&gt;&lt;p&gt;OpenGL could not be initialized on this system.&lt;/p&gt;&lt;p&gt;Try updating your graphics driver or disable remote desktop.&lt;/p&gt;</translation>
+      <source>3D rendering unavailable
+OpenGL could not be initialized on this system.
+Try updating your graphics driver or disable remote desktop.</source>
+      <translation>3D rendering unavailable
+OpenGL could not be initialized on this system.
+Try updating your graphics driver or disable remote desktop.</translation>
     </message>
     <message>
       <source>Open a structure file to begin
@@ -697,10 +701,6 @@ Continue?</translation>
   </context>
   <context>
     <name>IncarEditorPanel</name>
-    <message>
-      <source>Duplicate Tag</source>
-      <translation>Duplicate Tag</translation>
-    </message>
     <message>
       <source>Duplicate INCAR tags: {}. Remove or rename the extra rows.</source>
       <translation>Duplicate INCAR tags: {}. Remove or rename the extra rows.</translation>
@@ -728,22 +728,118 @@ Continue?</translation>
 {}</translation>
     </message>
     <message>
-      <source>Invalid INCAR Lines</source>
-      <translation>Invalid INCAR Lines</translation>
+      <source>Tags without a value: {}</source>
+      <translation>Tags without a value: {}</translation>
+    </message>
+    <message>
+      <source>Tag</source>
+      <translation>Tag</translation>
+    </message>
+    <message>
+      <source>Value</source>
+      <translation>Value</translation>
+    </message>
+    <message>
+      <source>Description</source>
+      <translation>Description</translation>
+    </message>
+    <message>
+      <source>Add Tag</source>
+      <translation>Add Tag</translation>
+    </message>
+    <message>
+      <source>Remove Selected Tag</source>
+      <translation>Remove Selected Tag</translation>
+    </message>
+    <message>
+      <source>Custom tag</source>
+      <translation>Custom tag</translation>
+    </message>
+    <message>
+      <source>Reset to Preset</source>
+      <translation>Reset to Preset</translation>
+    </message>
+    <message>
+      <source>Calculation Type:</source>
+      <translation>Calculation Type:</translation>
+    </message>
+    <message>
+      <source>SCF (Static)</source>
+      <translation>SCF (Static)</translation>
+    </message>
+    <message>
+      <source>Optimization</source>
+      <translation>Optimization</translation>
+    </message>
+    <message>
+      <source>Band Structure</source>
+      <translation>Band Structure</translation>
+    </message>
+    <message>
+      <source>DOS</source>
+      <translation>DOS</translation>
+    </message>
+    <message>
+      <source>Optical</source>
+      <translation>Optical</translation>
+    </message>
+    <message>
+      <source>NEB</source>
+      <translation>NEB</translation>
+    </message>
+    <message>
+      <source>Custom</source>
+      <translation>Custom</translation>
+    </message>
+    <message>
+      <source>Preview:</source>
+      <translation>Preview:</translation>
+    </message>
+    <message>
+      <source>Estimate ENCUT from POTCAR</source>
+      <translation>Estimate ENCUT from POTCAR</translation>
+    </message>
+    <message>
+      <source>Read ENMAX from POTCAR and set ENCUT = 1.3 × ENMAX</source>
+      <translation>Read ENMAX from POTCAR and set ENCUT = 1.3 × ENMAX</translation>
+    </message>
+    <message>
+      <source>ENCUT Estimated</source>
+      <translation>ENCUT Estimated</translation>
+    </message>
+    <message>
+      <source>Estimation Failed</source>
+      <translation>Estimation Failed</translation>
+    </message>
+    <message>
+      <source>ENCUT = {} eV (1.3 × ENMAX).
+Please verify this value for your calculation.</source>
+      <translation>ENCUT = {} eV (1.3 × ENMAX).
+Please verify this value for your calculation.</translation>
+    </message>
+    <message>
+      <source>Could not estimate ENCUT:
+{}
+
+Set POTCAR library path in Edit → Preferences.</source>
+      <translation>Could not estimate ENCUT:
+{}
+
+Set POTCAR library path in Edit → Preferences.</translation>
+    </message>
+    <message>
+      <source>Load a structure first to estimate ENCUT.</source>
+      <translation>Load a structure first to estimate ENCUT.</translation>
+    </message>
+    <message>
+      <source>No Structure</source>
+      <translation>No Structure</translation>
     </message>
     <message>
       <source>These lines are not valid INCAR tag lines:
-{}
-
-Save anyway?</source>
+{}</source>
       <translation>These lines are not valid INCAR tag lines:
-{}
-
-Save anyway?</translation>
-    </message>
-    <message>
-      <source>Tags without a value: {}</source>
-      <translation>Tags without a value: {}</translation>
+{}</translation>
     </message>
   </context>
   <context>
@@ -844,34 +940,6 @@ Labels: G=Gamma, X, M, R, K, L, W, etc.</translation>
     <message>
       <source># {}</source>
       <translation># {}</translation>
-    </message>
-    <message>
-      <source>Partial Occupancy</source>
-      <translation>Partial Occupancy</translation>
-    </message>
-    <message>
-      <source>This structure has partial occupancy (disorder).
-The VASP POSCAR format does not support fractional occupancy — the saved file will contain only the dominant species per site and the composition information will be lost.
-
-Continue saving?</source>
-      <translation>This structure has partial occupancy (disorder).
-The VASP POSCAR format does not support fractional occupancy — the saved file will contain only the dominant species per site and the composition information will be lost.
-
-Continue saving?</translation>
-    </message>
-    <message>
-      <source>Creating a supercell</source>
-      <translation>Creating a supercell</translation>
-    </message>
-    <message>
-      <source>This structure has partial occupancy (disorder).
-{} will discard the fractional occupancy information.
-
-Continue?</source>
-      <translation>This structure has partial occupancy (disorder).
-{} will discard the fractional occupancy information.
-
-Continue?</translation>
     </message>
     <message>
       <source># The structure is not periodic — wrap it in a periodic cell first.</source>
@@ -1166,6 +1234,14 @@ Partially written files were removed.</source>
 
 Partially written files were removed.</translation>
     </message>
+    <message>
+      <source>Not Periodic</source>
+      <translation>Not Periodic</translation>
+    </message>
+    <message>
+      <source>The structure is not periodic. Close the dialog, wrap the structure in a periodic cell and try again.</source>
+      <translation>The structure is not periodic. Close the dialog, wrap the structure in a periodic cell and try again.</translation>
+    </message>
   </context>
   <context>
     <name>PoscarPanel</name>
@@ -1432,10 +1508,6 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
     <message>
       <source>Fractional</source>
       <translation>Fractional</translation>
-    </message>
-    <message>
-      <source>Show and edit fractional coordinates</source>
-      <translation>Show and edit fractional coordinates</translation>
     </message>
     <message>
       <source>Click to switch between Cartesian and fractional coordinates</source>
