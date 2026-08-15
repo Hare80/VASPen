@@ -67,7 +67,7 @@ VASPen/
 │   │   │   ├── vaspen_en.ts   # English source translations
 │   │   │   └── vaspen_zh.ts   # Chinese translations
 │   │   ├── templates/          # Default input file templates
-│   │   └── icons/              # SVG icons
+│   │   └── icons/              # App icon set — PNG + ICO (regenerate via scripts/make_icon.py)
 │   └── utils/
 │       ├── __init__.py
 │       ├── config.py           # AppConfig — QSettings wrapper
@@ -77,9 +77,15 @@ VASPen/
 │   ├── test_structure.py
 │   ├── test_file_io.py
 │   ├── test_vasp_input.py
-│   └── test_ui.py
+│   ├── test_surface.py
+│   ├── test_neb.py
+│   ├── test_dialogs.py
+│   ├── test_ui.py
+│   ├── test_i18n.py
+│   └── test_icon_assets.py     # icon letterbox zero-crop + asset pins
 └── scripts/
-    └── build.py                # PyInstaller / Nuitka build script
+    ├── build.py                # PyInstaller / Nuitka build script
+    └── make_icon.py            # Regenerate the app icon set (never crops)
 ```
 
 ---
@@ -658,6 +664,44 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   caller) plus a compiled-zh.qm runtime check. Run it after every
   string change.
 
+## 7.8.2 App Icon Policy (settled 2026-08-15 — do not re-litigate)
+
+- **Source artwork** = `vaspen/resources/icons/vaspen_icon.png`
+  (1536×1024, 3:2 landscape, RGBA; committed to the repo — regeneration
+  never depends on a file outside it). It carries a slight global
+  transparency (alpha max 254) and semi-transparent rounded corners;
+  the art floats inside a transparent margin. `make_icon.py`
+  normalizes the alpha channel to 255 at generation time (a pure
+  alpha stretch, spatial pixels untouched — NOT a crop), so the icon
+  renders fully opaque; the committed source stays byte-identical to
+  the original.
+- **The artwork is NEVER cropped and NEVER zoomed.** Square sizes are
+  produced only by letterboxing the ENTIRE source canvas — including
+  the semi-transparent corners — centered on a transparent square
+  canvas. The earlier center-zoom attempts (81d1041, 62e1440, bdd22de)
+  and the About-dialog logo (59a1747) were all reverted by the user.
+  Content loss is a hard failure pinned by `tests/test_icon_assets.py`
+  (letterbox = zero-crop is verified pixel-exact).
+- **`scripts/make_icon.py` is the only regeneration path** (Pillow;
+  letterbox → resize → save). Outputs: `app_16/24/32/48/64/128/256.png`
+  (24 added for Windows small-icon contexts), `app.png` (256×256
+  **square** letterboxed fallback — never the raw 3:2 art, Qt would
+  stretch it), `app.ico` (7 sizes, PNG-compressed entries). The 1.5 MB
+  source PNG rides along in the PyInstaller dist by design.
+- **Scope: application icon only** (window title bar, taskbar, exe
+  file icon). No toolbar/menu/About icons.
+- **Windows taskbar identity**: AUMID is `"VASPen"` — never versioned
+  (grouping stays stable across upgrades) — and must be set BEFORE the
+  first window is created (`_set_windows_app_id()` in main.py).
+  Explorer binds the taskbar button to the host process when the first
+  window is shown; the previous after-show call was the "icon sometimes
+  displays, sometimes doesn't" bug. The old WM_SETICON/LoadImageW hook
+  was deleted — Qt propagates the window icon to the HWND itself when
+  the icon is set before show. Icon failures are logged, never silently
+  swallowed.
+- `build.py` fails loudly when `app.ico` is missing (run
+  `python scripts/make_icon.py` first).
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -785,20 +829,27 @@ python -m vaspen.main     # Run from source
 
 ### 10.2 PyInstaller (quick build, dev use)
 
+`python scripts/build.py` is the canonical path (also collects ASE/
+pymatgen data that the bare command below misses). The bare equivalent:
+
 ```bash
 pyinstaller --name VASPen \
     --windowed \
     --icon vaspen/resources/icons/app.ico \
-    --add-data "vaspen/resources:resources" \
+    --add-data "vaspen/resources;vaspen/resources" \
     vaspen/main.py
 ```
+
+(The add-data dest must mirror the package layout — `vaspen/resources`,
+not `resources` — the code resolves resources via `__file__`.)
 
 ### 10.3 Nuitka (optimized build, release use)
 
 ```bash
 python -m nuitka --standalone --windows-console-mode=disable \
     --enable-plugin=pyside6 \
-    --include-data-dir=vaspen/resources=resources \
+    --windows-icon-from-ico=vaspen/resources/icons/app.ico \
+    --include-data-dir=vaspen/resources=vaspen/resources \
     --output-dir=dist \
     vaspen/main.py
 ```
@@ -879,6 +930,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] Surface/slab cutting
 
 ### v0.2 — Polish (Sprint 4)
+- [x] App icon (letterboxed full source art — never cropped; title bar / taskbar / exe; §7.8.2)
 - [ ] i18n (en/zh)
 - [ ] QSS theming
 - [ ] Welcome page with recent files

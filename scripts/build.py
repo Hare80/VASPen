@@ -19,7 +19,13 @@ def build_pyinstaller() -> None:
     # --add-data takes "source<os.pathsep>dest" (';' on Windows, ':' on Linux).
     # Dest "vaspen/resources" mirrors the source layout so the frozen code
     # finds i18n/icons next to the package (Path(__file__).parent).
+    # Fail loudly instead of silently building without the exe icon —
+    # the .ico is a committed generated asset.
     icon = RESOURCES / "icons" / "app.ico"
+    if not icon.exists():
+        raise SystemExit(
+            f"app.ico missing ({icon}) — run "
+            f"`python scripts/make_icon.py` first")
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", "VASPen",
@@ -28,6 +34,7 @@ def build_pyinstaller() -> None:
         # Rebuild in place: overwrite the previous dist/VASPen instead of
         # aborting with "output directory is not empty".
         "--noconfirm",
+        "--icon", str(icon),
         "--add-data", f"{RESOURCES}{os.pathsep}vaspen{os.sep}resources",
         # ASE's format plugins (extxyz/vasp/cif/…) are imported lazily via
         # the format registry — PyInstaller's static analysis cannot see
@@ -42,10 +49,8 @@ def build_pyinstaller() -> None:
         # directory". Collect all package data for both.
         "--collect-data", "ase",
         "--collect-data", "pymatgen",
+        str(ROOT / "vaspen" / "main.py"),
     ]
-    if icon.exists():
-        cmd += ["--icon", str(icon)]
-    cmd += [str(ROOT / "vaspen" / "main.py")]
     print(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, cwd=ROOT, check=True)
     print("Build complete → dist/VASPen/")
@@ -53,12 +58,20 @@ def build_pyinstaller() -> None:
 
 def build_nuitka() -> None:
     """Build with Nuitka — compiles to C, better performance and code protection."""
+    icon = RESOURCES / "icons" / "app.ico"
+    if not icon.exists():
+        raise SystemExit(
+            f"app.ico missing ({icon}) — run "
+            f"`python scripts/make_icon.py` first")
     cmd = [
         sys.executable, "-m", "nuitka",
         "--standalone",
         "--windows-console-mode=disable",
         "--enable-plugin=pyside6",
-        f"--include-data-dir={ROOT / 'vaspen' / 'resources'}=resources",
+        "--windows-icon-from-ico", str(icon),
+        # Dest mirrors the PyInstaller layout (vaspen/resources next to
+        # the module) — the code resolves resources via __file__.
+        f"--include-data-dir={ROOT / 'vaspen' / 'resources'}=vaspen{os.sep}resources",
         f"--output-dir={ROOT / 'dist'}",
         str(ROOT / "vaspen" / "main.py"),
     ]
