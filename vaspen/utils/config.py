@@ -96,6 +96,32 @@ class AppConfig:
         self.set("remember_wrap_padding", bool(value))
 
     @property
+    def rebox_vacuum(self) -> float:
+        """Remembered vacuum for the Re-box Slab dialog (Angstrom).
+
+        Corrupt stored values fall back to the documented default (15 Å).
+        """
+        try:
+            return float(self.get("rebox_vacuum", 15.0))
+        except (TypeError, ValueError):
+            return 15.0
+
+    @rebox_vacuum.setter
+    def rebox_vacuum(self, value: float) -> None:
+        self.set("rebox_vacuum", float(value))
+
+    @property
+    def remember_rebox(self) -> bool:
+        """Whether the rebox dialog should default to the remembered vacuum."""
+        # QSettings on Windows returns bools as the string "false" —
+        # bool("false") is True, so compare the string form.
+        return str(self.get("remember_rebox", False)).lower() in ("true", "1")
+
+    @remember_rebox.setter
+    def remember_rebox(self, value: bool) -> None:
+        self.set("remember_rebox", bool(value))
+
+    @property
     def poscar_coords_direct(self) -> bool:
         """Whether VASP structures are saved in fractional (Direct) coordinates.
 

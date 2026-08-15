@@ -1623,3 +1623,123 @@ def test_rebox_guards(window, monkeypatch):
     window._structure.load_atoms(Atoms("H2O", positions=np.eye(3) * 1.5))
     window._on_rebox()  # non-periodic → message, no apply
     assert calls and window._structure.n_atoms == 3
+
+
+# ----------------------------------------------------------------------
+# Code review 2026-08-15 — preview-pause completeness + click guards
+# ----------------------------------------------------------------------
+
+class _RaiseTrackingSurfaceDialog(_FakeSurfaceDialog):
+    """The standard fake dialog + raise_/activateWindow tracking."""
+
+    created = 0
+    raised = 0
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        type(self).created += 1
+
+    def raise_(self):
+        type(self).raised += 1
+
+    def activateWindow(self):
+        pass
+
+    def close(self):
+        self.finished.emit(0)
+
+    def deleteLater(self):
+        pass
+
+
+def test_surface_double_open_raises_existing(window, monkeypatch, si_bulk):
+    """A second Calculate → Cleave Surface while the dialog is open
+    raises/activates the existing one instead of creating another."""
+    window._structure.load_atoms(si_bulk)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.SurfaceDialog",
+                        _RaiseTrackingSurfaceDialog)
+    _RaiseTrackingSurfaceDialog.created = 0
+    _RaiseTrackingSurfaceDialog.raised = 0
+    window._on_surface()
+    assert window._surface_dialog is not None
+    window._on_surface()
+    assert _RaiseTrackingSurfaceDialog.created == 1
+    assert _RaiseTrackingSurfaceDialog.raised == 1
+    window._surface_dialog.finished.emit(0)  # cleanup
+    assert window._surface_dialog is None
+
+
+def test_cleave_apply_clears_flags_and_magmoms(window, si_bulk):
+    """Cleaving builds a NEW atom set — frozen flags / magmoms are
+    cleared (settled §7.8); re-box carries them, cleave does not."""
+    from vaspen.core.structure import StructureModel
+
+    model = window._structure
+    model.load_atoms(si_bulk, "bulk.vasp")
+    model.set_fixed(0, np.array([True, True, True]))
+    model.set_magmom(1, 2.0)
+
+    dlg = _FakeSurfaceDialog(model, None)
+    dlg.result_structure = StructureModel(si_bulk.copy())
+    window._apply_surface_result(dlg)
+
+    assert not model.any_fixed
+    assert np.isnan(model.magmoms).all()
+    assert model.filepath is None  # never silently overwrite the bulk
+
+
+def test_preview_pauses_auto_bonds_and_bond_order(window):
+    """Auto Detect Bonds + Bond Order mutate the model and rebind the
+    viewport off the preview — they must be paused with the other
+    editing entry points (code review 2026-08-15)."""
+    window._set_preview_editing_enabled(False)
+    assert not window.act_auto_bonds.isEnabled()
+    assert all(not a.isEnabled()
+               for a in window._bond_order_actions.values())
+    window._set_preview_editing_enabled(True)
+    assert window.act_auto_bonds.isEnabled()
+
+
+def test_bond_click_ignored_during_preview(window):
+    """Preview bond indices are temporary — a bond click during a slab/
+    NEB preview must not select a model bond (code review 2026-08-15)."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]],
+                  cell=[10, 10, 10])
+    window._structure.load_atoms(atoms)
+    window._surface_dialog = _FakePreviewDialog()
+    window._on_bond_clicked(0)
+    assert window._structure.selected_bonds == set()
+
+
+def test_background_click_ignored_during_preview(window):
+    """Clicking empty space during a preview clears nothing on the model."""
+    atoms = Atoms("H2O", positions=np.eye(3) * 1.5)
+    window._structure.load_atoms(atoms)
+    window._structure.set_selection([0, 1])
+    window._surface_dialog = _FakePreviewDialog()
+    window._on_background_clicked()
+    assert window._structure.selected_indices == {0, 1}
+
+
+class _FakeSymmetryDialog:
+    """Stands in for SymmetryDialog in main-window flow tests."""
+
+    Accepted = 1
+
+    def __init__(self, model, parent=None):
+        self.model = model
+
+    def exec(self):
+        self.result_atoms = self.model.atoms.copy()
+        return self.Accepted
+
+
+def test_symmetry_resets_filepath(window, monkeypatch, si_bulk):
+    """Symmetrizing derives a new cell — the filepath is reset so
+    Ctrl+S prompts Save As instead of silently overwriting the source
+    (same policy as cleave/supercell/rebox; code review 2026-08-15)."""
+    monkeypatch.setattr("vaspen.ui.symmetry_dialog.SymmetryDialog",
+                        _FakeSymmetryDialog)
+    window._structure.load_atoms(si_bulk, "bulk.vasp")
+    window._on_symmetry()
+    assert window._structure.filepath is None

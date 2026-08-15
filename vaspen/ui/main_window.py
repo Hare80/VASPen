@@ -1062,11 +1062,16 @@ class MainWindow(QMainWindow):
         self._frame_selection = set()
         if self._generate_dialog is dlg:
             self._generate_dialog = None
-            self._update_edit_actions()
             # Both preview dialogs can be open at once — editing stays
             # paused until the LAST one closes.
             if self._surface_dialog is None:
                 self._set_preview_editing_enabled(True)
+                # re-derive stateful actions after the unconditional
+                # re-enable (see _on_surface_dialog_finished)
+                self._update_edit_actions()
+                self._sync_auto_bonds_action()
+                self._on_selection_changed()
+                self._on_bond_selection_changed()
         self._previewing_neb = False
         self._rebind_viewport_to_model()
         dlg.deleteLater()
@@ -1122,11 +1127,17 @@ class MainWindow(QMainWindow):
         """Re-enable editing entry points after the dialog closes."""
         if self._surface_dialog is dlg:
             self._surface_dialog = None
-            self._update_edit_actions()  # undo/redo reflect the applied cut
             # Both preview dialogs can be open at once — editing stays
             # paused until the LAST one closes.
             if self._generate_dialog is None:
                 self._set_preview_editing_enabled(True)
+                # re-enabling enables everything unconditionally —
+                # re-derive the stateful actions (undo/redo stacks,
+                # auto-bonds check state, selection-dependent tools)
+                self._update_edit_actions()
+                self._sync_auto_bonds_action()
+                self._on_selection_changed()
+                self._on_bond_selection_changed()
             dlg.deleteLater()
 
     def _set_preview_editing_enabled(self, enabled: bool) -> None:
@@ -1134,8 +1145,10 @@ class MainWindow(QMainWindow):
 
         Rotate/zoom/pan stay active (mouse handlers, not actions) so the
         user can inspect the slab from any angle. Save/generate actions
-        stay enabled — the model is untouched during preview and the
-        periodic-wrap path is unreachable (the dialog requires is_periodic).
+        stay enabled — the model is untouched during preview. Pausing is
+        belt-and-braces on top of the click guards in _on_bond_clicked /
+        _on_background_clicked, which keep viewport clicks local to the
+        preview structure.
         """
         for act in (self.act_new, self.act_open, self.act_surface,
                     self.act_supercell, self.act_edit_lattice,
@@ -1145,7 +1158,9 @@ class MainWindow(QMainWindow):
                     self.act_detect_bonds, self.act_freeze, self.act_unfreeze,
                     self.act_select_all, self.act_select_none,
                     self.act_select_invert, self.act_select_neighbors,
-                    self.act_select_connected):
+                    self.act_select_connected,
+                    self.act_auto_bonds,
+                    *self._bond_order_actions.values()):
             act.setEnabled(enabled)
         for mode, act in self._mode_actions.items():
             if mode is not ToolMode.SELECT:
@@ -1298,6 +1313,7 @@ class MainWindow(QMainWindow):
                 and dlg.result_atoms is not None):
             # replace_atoms: one undo step; bonds/selection reset (new indices)
             self._structure.replace_atoms(dlg.result_atoms)
+            self._structure.reset_filepath()  # derived structure → Save As
             self._set_status(self.tr("Structure symmetrized."))
 
     # ------------------------------------------------------------------
@@ -1630,6 +1646,8 @@ class MainWindow(QMainWindow):
             self._frame_selection = set()
             self._viewport.set_highlight(set())
             return
+        if self._previewing_neb or self._surface_dialog is not None:
+            return  # preview clicks stay viewport-local (model untouched)
         self._structure.clear_selection()
         self._structure.clear_bond_selection()
 
@@ -1803,6 +1821,8 @@ class MainWindow(QMainWindow):
         """Select tool clicked a bond → select it (bond list index)."""
         if self._frame_edit is not None:
             return  # bond selection is a model feature — frames skip it
+        if self._previewing_neb or self._surface_dialog is not None:
+            return  # preview bond indices are temporary — never model indices
         self._structure.select_bond(index)
 
     def _on_bond_selection_changed(self) -> None:

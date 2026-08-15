@@ -1404,6 +1404,48 @@ def test_surface_dialog_retranslate_keeps_compute_status(qtbot, srtio3,
     assert all(dlg._slab_infos)
 
 
+def test_symmetry_dialog_molecule_has_no_cell_type_selector(
+        qtbot, water_molecule):
+    """For point-group (molecule) analysis the Conventional/Primitive
+    choice is meaningless — it must not be shown, and symmetrizing
+    works without it (code review 2026-08-15)."""
+    m = StructureModel()
+    m.load_atoms(water_molecule)
+    dlg = SymmetryDialog(m)
+    qtbot.addWidget(dlg)
+    assert not hasattr(dlg, "_cell_type_combo")
+    dlg._on_symmetrize()
+    assert dlg.result_atoms is not None
+    assert len(dlg.result_atoms) == len(water_molecule)
+
+
+def test_rebox_dialog_remembers_vacuum(qtbot):
+    """Same remember semantics as the wrap dialog: the value is always
+    saved; the checkbox decides whether it becomes the default next
+    time (code review 2026-08-15)."""
+    from vaspen.ui.rebox_dialog import ReBoxDialog
+    from vaspen.utils.config import AppConfig
+
+    config = AppConfig()
+    config.remember_rebox = True
+    config.rebox_vacuum = 18.0
+    model = StructureModel()
+    model.load_atoms(Atoms("Cu4", cell=[2.5527, 2.5527, 21.0], pbc=True,
+                           positions=[[0, 0, 5.0], [1.276, 2.21, 7.084],
+                                      [0, 0, 9.168], [1.276, 2.21, 11.252]]))
+
+    dlg = ReBoxDialog(model)
+    qtbot.addWidget(dlg)
+    assert abs(dlg._vacuum_spin.value() - 18.0) < 1e-9
+    assert dlg._remember_check.isChecked()
+
+    dlg._vacuum_spin.setValue(22.0)
+    dlg._remember_check.setChecked(False)
+    dlg._on_accept()
+    assert abs(config.rebox_vacuum - 22.0) < 1e-9
+    assert config.remember_rebox is False
+
+
 def test_surface_dialog_bulk_hint(qtbot, srtio3):
     """The cleave dialog states it is for bulk structures and points to
     Tools → Re-box Slab for vacuum-carrying inputs."""

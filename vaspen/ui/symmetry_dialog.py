@@ -24,10 +24,12 @@ class SymmetryDialog(QDialog):
     """Show the space group of the current structure.
 
     For periodic structures a "Symmetrize" button standardizes the cell
-    and positions (conventional cell, spglib); the result is exposed as
-    ``result_atoms`` after a successful exec. Non-periodic structures
-    only show an explanatory message. Modal, created fresh per
-    invocation (current language, no retranslate needed).
+    and positions with a Conventional/Primitive cell choice (primitive =
+    spglib to_primitive + standard VESTA-style orientation); the result
+    is exposed as ``result_atoms`` after a successful exec. Non-periodic
+    structures (point group) keep the symmetrize button but have no cell
+    choice — the cell type is meaningless for a molecule. Modal, created
+    fresh per invocation (current language, no retranslate needed).
     """
 
     def __init__(self, model: StructureModel, parent: QWidget | None = None) -> None:
@@ -68,17 +70,19 @@ class SymmetryDialog(QDialog):
             layout.addLayout(form)
 
         if info is not None:
-            cell_row = QHBoxLayout()
-            self._cell_type_label = QLabel(self.tr("Cell type:"))
-            cell_row.addWidget(self._cell_type_label)
-            self._cell_type_combo = MenuButton()
-            self._cell_type_combo.addItems([
-                self.tr("Conventional cell"),
-                self.tr("Primitive cell"),
-            ])
-            cell_row.addWidget(self._cell_type_combo)
-            cell_row.addStretch()
-            layout.addLayout(cell_row)
+            if info.kind == "space":
+                # periodic only — a cell type is meaningless for a molecule
+                cell_row = QHBoxLayout()
+                self._cell_type_label = QLabel(self.tr("Cell type:"))
+                cell_row.addWidget(self._cell_type_label)
+                self._cell_type_combo = MenuButton()
+                self._cell_type_combo.addItems([
+                    self.tr("Conventional cell"),
+                    self.tr("Primitive cell"),
+                ])
+                cell_row.addWidget(self._cell_type_combo)
+                cell_row.addStretch()
+                layout.addLayout(cell_row)
 
             self._symmetrize_btn = QPushButton(self.tr("&Symmetrize"))
             self._symmetrize_btn.setToolTip(self.tr(
@@ -108,8 +112,9 @@ class SymmetryDialog(QDialog):
             )
             if reply != QMessageBox.Yes:
                 return
-        cell_type = ("conventional", "primitive")[
-            self._cell_type_combo.currentIndex()]
+        combo = getattr(self, "_cell_type_combo", None)
+        cell_type = ("conventional", "primitive")[combo.currentIndex()] \
+            if combo is not None else "conventional"
         result = symmetrize(self._model.atoms, cell_type=cell_type)
         if result is None:
             QMessageBox.warning(
