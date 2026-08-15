@@ -20,12 +20,12 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QLabel,
-    QMessageBox,
     QVBoxLayout,
 )
 
 from vaspen.core.structure import StructureModel
 from vaspen.core.surface import rebox_slab
+from vaspen.ui.tools import confirm_disorder_loss
 from vaspen.utils.config import AppConfig
 
 
@@ -84,18 +84,8 @@ class ReBoxDialog(QDialog):
         self._config.remember_rebox = self._remember_check.isChecked()
         # Re-boxing rebuilds the box from scratch — fractional occupancy
         # (disorder) cannot survive it (same policy as cleave/symmetrize).
-        if self._model.has_disorder:
-            reply = QMessageBox.warning(
-                self, self.tr("Partial Occupancy"),
-                self.tr(
-                    "This structure has partial occupancy (disorder).\n"
-                    "Re-boxing will discard the fractional occupancy "
-                    "information.\n\n"
-                    "Continue?"),
-                QMessageBox.Yes | QMessageBox.Cancel,
-                QMessageBox.Cancel,
-            )
-            if reply != QMessageBox.Yes:
-                return
+        if self._model.has_disorder and not confirm_disorder_loss(
+                self, self.tr("Re-boxing")):
+            return
         self.result_atoms = rebox_slab(self._model.atoms, vacuum)
         self.accept()

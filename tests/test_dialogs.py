@@ -1307,7 +1307,7 @@ def test_rebox_dialog_disordered_warns(qtbot, monkeypatch, disordered_atoms):
 
     replies = []
     monkeypatch.setattr(
-        "vaspen.ui.rebox_dialog.QMessageBox.warning",
+        "vaspen.ui.tools.QMessageBox.warning",
         staticmethod(lambda *a, **k:
                      replies.append(a) or QMessageBox.Cancel))
     model = StructureModel()
@@ -1318,7 +1318,7 @@ def test_rebox_dialog_disordered_warns(qtbot, monkeypatch, disordered_atoms):
     assert replies and dlg.result_atoms is None  # cancelled
     replies.clear()
     monkeypatch.setattr(
-        "vaspen.ui.rebox_dialog.QMessageBox.warning",
+        "vaspen.ui.tools.QMessageBox.warning",
         staticmethod(lambda *a, **k:
                      replies.append(a) or QMessageBox.Yes))
     dlg._on_accept()

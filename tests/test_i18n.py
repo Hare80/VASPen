@@ -23,12 +23,15 @@ from PySide6.QtCore import QTranslator
 I18N = Path(__file__).parent.parent / "vaspen" / "resources" / "i18n"
 
 #: UI modules whose tr() strings must be present in both .ts files
-#: under their enclosing class's context.
+#: under their enclosing class's context. tools.py carries no tr()
+#: calls — its shared confirm helper uses QCoreApplication.translate
+#: with an explicit "MainWindow" context, which is checked too.
 CHECKED_MODULES = (
     ("vaspen/ui/main_window.py", "MainWindow"),
     ("vaspen/ui/surface_dialog.py", "SurfaceDialog"),
     ("vaspen/ui/rebox_dialog.py", "ReBoxDialog"),
     ("vaspen/ui/symmetry_dialog.py", "SymmetryDialog"),
+    ("vaspen/ui/tools.py", "MainWindow"),
 )
 
 
@@ -39,11 +42,13 @@ def _norm(text: str) -> str:
     return text.replace("\\n", "\n")
 
 
-def _tr_literals(module_rel: str, context: str) -> set[str]:
-    """Every ``tr("literal")`` call inside the given class."""
+def _literals(module_rel: str) -> dict[str, set[str]]:
+    """{context: string literals} — ``tr()`` calls (context = enclosing
+    class) and ``QCoreApplication.translate("ctx", "literal")`` calls
+    (context = the explicit first argument)."""
     tree = ast.parse(
         (Path(__file__).parent.parent / module_rel).read_text("utf-8"))
-    found: set[str] = set()
+    found: dict[str, set[str]] = {}
     stack: list[str] = []
 
     class _Visitor(ast.NodeVisitor):
@@ -55,11 +60,19 @@ def _tr_literals(module_rel: str, context: str) -> set[str]:
         def visit_Call(self, node: ast.Call) -> None:
             if (isinstance(node.func, ast.Attribute)
                     and node.func.attr == "tr"
-                    and stack and stack[-1] == context
+                    and stack
                     and node.args
                     and isinstance(node.args[0], ast.Constant)
                     and isinstance(node.args[0].value, str)):
-                found.add(node.args[0].value)
+                found.setdefault(stack[-1], set()).add(node.args[0].value)
+            if (isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "translate"
+                    and len(node.args) >= 2
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[1], ast.Constant)
+                    and isinstance(node.args[1].value, str)):
+                found.setdefault(node.args[0].value, set()).add(
+                    node.args[1].value)
             self.generic_visit(node)
 
     _Visitor().visit(tree)
@@ -84,13 +97,13 @@ EN = _ts_messages("vaspen_en.ts")
 
 
 def test_all_tr_literals_present_in_both_ts_files():
-    """Every tr() literal of the checked UI modules exists in zh.ts AND
-    en.ts under its class context — a missing zh entry ships English
-    text in the Chinese UI; a missing en entry breaks the hand-
-    maintained mirror."""
+    """Every tr()/translate() literal of the checked UI modules exists
+    in zh.ts AND en.ts under its context — a missing zh entry ships
+    English text in the Chinese UI; a missing en entry breaks the
+    hand-maintained mirror."""
     missing: list[str] = []
     for module, context in CHECKED_MODULES:
-        for literal in _tr_literals(module, context):
+        for literal in _literals(module).get(context, set()):
             if _norm(literal) not in ZH.get(context, set()):
                 missing.append(f"zh.ts {context}: {literal!r}")
             if _norm(literal) not in EN.get(context, set()):
@@ -100,12 +113,16 @@ def test_all_tr_literals_present_in_both_ts_files():
 
 def test_no_orphan_entries_in_checked_contexts():
     """No .ts source of the checked contexts may exist without a
-    matching tr() literal — orphans accumulate silently (the review
-    pruned 14: stale Transform/POTCAR-era messages, wrong-context
-    duplicates, a stale tooltip split)."""
+    matching tr()/translate() literal — orphans accumulate silently
+    (the review pruned 14: stale Transform/POTCAR-era messages,
+    wrong-context duplicates, a stale tooltip split)."""
     orphan: list[str] = []
+    by_context: dict[str, set[str]] = {}
     for module, context in CHECKED_MODULES:
-        literals = {_norm(s) for s in _tr_literals(module, context)}
+        by_context.setdefault(context, set()).update(_literals(module).get(
+            context, set()))
+    for context, literals in by_context.items():
+        literals = {_norm(s) for s in literals}
         for ts_name, messages in (("zh.ts", ZH), ("en.ts", EN)):
             for src in messages.get(context, set()):
                 if src not in literals:

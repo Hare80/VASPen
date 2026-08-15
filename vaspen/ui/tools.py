@@ -17,7 +17,8 @@ from enum import Enum, auto
 
 import numpy as np
 from ase.data import atomic_numbers, covalent_radii
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QCoreApplication, QPointF, QRectF, Qt
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from vaspen.core.transform import rotation_matrix
 
@@ -699,3 +700,30 @@ def make_tool(mode: ToolMode, viewport) -> Tool:
         kind, need = _MEASURE_SPECS[mode]
         return MeasureTool(viewport, kind, need)
     return TOOL_CLASSES[mode](viewport)
+
+
+def confirm_disorder_loss(parent: QWidget, operation: str) -> bool:
+    """Confirm before an operation that discards partial occupancy.
+
+    The single implementation of the settled §7.8 message pattern
+    (cleave / re-box / symmetrize / supercell share it — the previous
+    four inline copies were byte-identical apart from the operation
+    phrase). ``operation`` is an already-translated phrase ("Cleaving",
+    "Re-boxing", ...). Returns True to continue.
+
+    ``QCoreApplication.translate("MainWindow", ...)``: the strings
+    live in the MainWindow context of the .ts files (hand-maintained,
+    §11.1) — a bare tr() here would land in no context.
+    """
+    reply = QMessageBox.warning(
+        parent,
+        QCoreApplication.translate("MainWindow", "Partial Occupancy"),
+        QCoreApplication.translate(
+            "MainWindow",
+            "This structure has partial occupancy (disorder).\n"
+            "{} will discard the fractional occupancy information.\n\n"
+            "Continue?").format(operation),
+        QMessageBox.Yes | QMessageBox.Cancel,
+        QMessageBox.Cancel,
+    )
+    return reply == QMessageBox.Yes

@@ -1692,21 +1692,9 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
             <source>Could not symmetrize the structure.</source>
             <translation>无法对称化该结构。</translation>
         </message>
-        <message>
-            <source>Partial Occupancy</source>
-            <translation>部分占据</translation>
-        </message>
-        <message>
-            <source>This structure has partial occupancy (disorder).
-Symmetrizing will discard the fractional occupancy information.
-
-Continue?</source>
-            <translation>该结构存在部分占据（无序）。
-对称化将丢弃分数占据信息。
-
-是否继续？</translation>
-        </message>
-    <message><source>Cell type:</source><translation>晶胞类型:</translation></message><message><source>Conventional cell</source><translation>惯用晶胞</translation></message><message><source>Primitive cell</source><translation>原胞</translation></message><message><source>Standardize the cell and positions to the conventional cell, or convert to the primitive cell (standard orientation)</source><translation>将晶胞与坐标标准化为惯用晶胞,或转换为原胞(标准取向)</translation></message></context>
+        
+        
+    <message><source>Cell type:</source><translation>晶胞类型:</translation></message><message><source>Conventional cell</source><translation>惯用晶胞</translation></message><message><source>Primitive cell</source><translation>原胞</translation></message><message><source>Standardize the cell and positions to the conventional cell, or convert to the primitive cell (standard orientation)</source><translation>将晶胞与坐标标准化为惯用晶胞,或转换为原胞(标准取向)</translation></message><message><source>Symmetrizing</source><translation>对称化</translation></message></context>
     <context>
         <name>DisplayOptionsDialog</name>
         <message>
@@ -2035,13 +2023,7 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
             <source>In-plane supercell size (a × b). The vacuum direction (c) is never expanded.</source>
             <translation>面内超胞尺寸（a × b）。真空层方向（c）不扩展。</translation>
         </message>
-    <message><source>Computing slab…</source><translation>正在计算切面…</translation></message><message><source>Partial Occupancy</source><translation>部分占据(无序)</translation></message><message><source>This structure has partial occupancy (disorder).
-Cleaving will discard the fractional occupancy information.
-
-Continue?</source><translation>此结构含有部分占据(无序)。
-切面将丢弃分数占据信息。
-
-是否继续?</translation></message><message><source>{i}/{n} — computing…</source><translation>{i}/{n} — 计算中…</translation></message><message><source>Computing terminations {k}/{n}…</source><translation>正在计算终止面 {k}/{n}…</translation></message><message><source>Termination {k} computing…</source><translation>终止面 {k} 计算中…</translation></message></context>
+    <message><source>Computing slab…</source><translation>正在计算切面…</translation></message><message><source>{i}/{n} — computing…</source><translation>{i}/{n} — 计算中…</translation></message><message><source>Computing terminations {k}/{n}…</source><translation>正在计算终止面 {k}/{n}…</translation></message><message><source>Termination {k} computing…</source><translation>终止面 {k} 计算中…</translation></message><message><source>Cleaving</source><translation>切面</translation></message></context>
     <context>
         <name>SettingsDialog</name>
         <message>
@@ -2144,10 +2126,4 @@ This is the standard VASP pseudopotential directory layout.</source>
 
 For BULK structures, use Calculate → Cleave Surface.</source><translation>适用于已带真空的周期结构(例如切面):跨周期边界拆散的层将被展开,沿 c 重新施加真空并居中,面内格子不变。
 
-体相结构请使用 计算 → 切面。</translation></message><message><source>Vacuum:</source><translation>真空:</translation></message><message><source>Remember this value</source><translation>记住此数值</translation></message><message><source>Partial Occupancy</source><translation>部分占据(无序)</translation></message><message><source>This structure has partial occupancy (disorder).
-Re-boxing will discard the fractional occupancy information.
-
-Continue?</source><translation>此结构含有部分占据(无序)。
-重新装盒将丢弃分数占据信息。
-
-是否继续?</translation></message></context></TS>
+体相结构请使用 计算 → 切面。</translation></message><message><source>Vacuum:</source><translation>真空:</translation></message><message><source>Remember this value</source><translation>记住此数值</translation></message><message><source>Re-boxing</source><translation>重新装盒</translation></message></context></TS>

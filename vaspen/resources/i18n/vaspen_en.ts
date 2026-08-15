@@ -1749,20 +1749,6 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
       <translation>Could not symmetrize the structure.</translation>
     </message>
     <message>
-      <source>Partial Occupancy</source>
-      <translation>Partial Occupancy</translation>
-    </message>
-    <message>
-      <source>This structure has partial occupancy (disorder).
-Symmetrizing will discard the fractional occupancy information.
-
-Continue?</source>
-      <translation>This structure has partial occupancy (disorder).
-Symmetrizing will discard the fractional occupancy information.
-
-Continue?</translation>
-    </message>
-    <message>
       <source>Cell type:</source>
       <translation>Cell type:</translation>
     </message>
@@ -1777,6 +1763,10 @@ Continue?</translation>
     <message>
       <source>Standardize the cell and positions to the conventional cell, or convert to the primitive cell (standard orientation)</source>
       <translation>Standardize the cell and positions to the conventional cell, or convert to the primitive cell (standard orientation)</translation>
+    </message>
+    <message>
+      <source>Symmetrizing</source>
+      <translation>Symmetrizing</translation>
     </message>
   </context>
   <context>
@@ -2111,20 +2101,6 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
       <translation>Computing slab…</translation>
     </message>
     <message>
-      <source>Partial Occupancy</source>
-      <translation>Partial Occupancy</translation>
-    </message>
-    <message>
-      <source>This structure has partial occupancy (disorder).
-Cleaving will discard the fractional occupancy information.
-
-Continue?</source>
-      <translation>This structure has partial occupancy (disorder).
-Cleaving will discard the fractional occupancy information.
-
-Continue?</translation>
-    </message>
-    <message>
       <source>{i}/{n} — computing…</source>
       <translation>{i}/{n} — computing…</translation>
     </message>
@@ -2135,6 +2111,10 @@ Continue?</translation>
     <message>
       <source>Termination {k} computing…</source>
       <translation>Termination {k} computing…</translation>
+    </message>
+    <message>
+      <source>Cleaving</source>
+      <translation>Cleaving</translation>
     </message>
   </context>
   <context>
@@ -2258,18 +2238,8 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <translation>Remember this value</translation>
     </message>
     <message>
-      <source>Partial Occupancy</source>
-      <translation>Partial Occupancy</translation>
-    </message>
-    <message>
-      <source>This structure has partial occupancy (disorder).
-Re-boxing will discard the fractional occupancy information.
-
-Continue?</source>
-      <translation>This structure has partial occupancy (disorder).
-Re-boxing will discard the fractional occupancy information.
-
-Continue?</translation>
+      <source>Re-boxing</source>
+      <translation>Re-boxing</translation>
     </message>
   </context>
 </TS>

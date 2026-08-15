@@ -35,7 +35,7 @@ from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
 from vaspen.ui.generate_all_dialog import GenerateAllDialog
 from vaspen.ui.menu_button import MenuButton
 from vaspen.ui.structure_tree import StructureTreePanel
-from vaspen.ui.tools import ToolMode
+from vaspen.ui.tools import ToolMode, confirm_disorder_loss
 from vaspen.ui.viewport3d import Viewport3D
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger
@@ -854,18 +854,9 @@ class MainWindow(QMainWindow):
         """
         if not self._structure.has_disorder:
             return True
-        reply = QMessageBox.warning(
-            self,
-            self.tr("Partial Occupancy"),
-            self.tr(
-                "This structure has partial occupancy (disorder).\n"
-                "{} will discard the fractional occupancy "
-                "information.\n\n"
-                "Continue?").format(operation),
-            QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
-        return reply == QMessageBox.Yes
+        # the shared helper (vaspen.ui.tools.confirm_disorder_loss) —
+        # also used by the cleave / re-box / symmetrize dialogs
+        return confirm_disorder_loss(self, operation)
 
     def _on_save(self) -> None:
         """Save the current structure."""

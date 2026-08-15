@@ -44,6 +44,7 @@ from vaspen.core.surface import (
     supercell_in_plane,
 )
 from vaspen.ui.menu_button import MenuButton
+from vaspen.ui.tools import confirm_disorder_loss
 
 
 class _SlabResultHolder(QObject):
@@ -537,19 +538,9 @@ class SurfaceDialog(QDialog):
         # Cleaving rebuilds the structure from scratch — fractional
         # occupancy (disorder) cannot survive it (same policy as the
         # symmetrize confirm). Warn and confirm first.
-        if self._model.has_disorder:
-            reply = QMessageBox.warning(
-                self, self.tr("Partial Occupancy"),
-                self.tr(
-                    "This structure has partial occupancy (disorder).\n"
-                    "Cleaving will discard the fractional occupancy "
-                    "information.\n\n"
-                    "Continue?"),
-                QMessageBox.Yes | QMessageBox.Cancel,
-                QMessageBox.Cancel,
-            )
-            if reply != QMessageBox.Yes:
-                return
+        if self._model.has_disorder and not confirm_disorder_loss(
+                self, self.tr("Cleaving")):
+            return
         atoms = self._displayed_atoms()
         if atoms is None:
             QMessageBox.warning(
