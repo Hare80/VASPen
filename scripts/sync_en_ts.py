@@ -79,6 +79,17 @@ def _render_message(indent: str, source: str) -> str:
             f"{indent}</message>")
 
 
+def _render_context(
+    name: str, sources: list[str], ctx_indent: str = "  ",
+) -> str:
+    """A whole <context> block in the en.ts house style."""
+    msgs = "\n".join(_render_message("    ", s) for s in sources)
+    return (f"{ctx_indent}<context>\n"
+            f"{ctx_indent}  <name>{name}</name>\n"
+            f"{msgs}\n"
+            f"{ctx_indent}</context>")
+
+
 def mirror(zh_text: str, en_text: str) -> str:
     """en.ts updated in place: translation == source for every zh.ts
     message; contexts/messages absent from zh.ts are dropped."""
@@ -123,21 +134,18 @@ def mirror(zh_text: str, en_text: str) -> str:
         pos = ctx.end()
     out.append(en_text[pos:])
 
-    # Contexts present in zh.ts but missing from en.ts (not expected —
-    # appended before the closing tag).
+    # Contexts present in zh.ts but missing from en.ts (e.g. a brand-new
+    # context) — rendered in the en.ts house style and inserted before
+    # the closing </TS> tag.
     en_names = {_NAME_RE.search(c).group(1) for c in _CTX_RE.findall(en_text)
                 if _NAME_RE.search(c)}
     missing = [n for n in zh_sources if n not in en_names]
     if missing:
-        tail_pos = out[-1].rfind("</context>") + len("</context>")
-        tail = out[-1][tail_pos:]
-        out[-1] = out[-1][:tail_pos]
-        for name in missing:
-            msgs = "\n".join(_render_message("    ", s)
-                             for s in zh_sources[name])
-            out[-1] += (f"\n  <context>\n    <name>{name}</name>\n"
-                        f"{msgs}\n  </context>")
-        out[-1] += tail
+        tail = out[-1]
+        ts_pos = tail.find("</TS>")
+        rendered = "\n".join(
+            _render_context(name, zh_sources[name]) for name in missing)
+        out[-1] = tail[:ts_pos] + rendered + "\n" + tail[ts_pos:]
     return "".join(out)
 
 

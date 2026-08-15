@@ -54,6 +54,7 @@ VASPen/
 │   │   ├── periodic_wrap_dialog.py  # Vacuum padding dialog before saving molecules to periodic formats
 │   │   ├── measurement.py            # Measurement manager + dock panel (right side)
 │   │   ├── display_options_dialog.py # Render settings dialog (live preview)
+│   │   ├── welcome_page.py           # Empty-state landing page (recent files + quick actions, §7.10)
 │   │   └── tools.py                  # Viewport interaction tools (select/move/rotate/add/delete/bond/measure)
 │   ├── core/
 │   │   ├── __init__.py
@@ -84,6 +85,7 @@ VASPen/
 │   ├── test_dialogs.py
 │   ├── test_ui.py
 │   ├── test_theme.py
+│   ├── test_welcome_page.py
 │   ├── test_i18n.py
 │   └── test_icon_assets.py     # icon letterbox zero-crop + asset pins
 └── scripts/
@@ -768,6 +770,44 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   clamping); every theme-mutating test restores "light" — the
   QApplication is session-wide.
 
+## 7.10 Welcome Page Policy (settled 2026-08-15 — do not re-litigate)
+
+- **`vaspen/ui/welcome_page.py`** (WelcomePage, context in i18n): title
+  + tagline, recent-files list (single click opens, full path in the
+  item data), New Structure / Open buttons, drag-and-drop hint.
+  Standard scope — user chose it over an examples-section variant.
+- **Central stack**: `MainWindow._central_stack` = QStackedWidget
+  (index 0 welcome page, index 1 viewport), replacing the plain
+  viewport slot in `_central_layout`; the edit toolbar's
+  `insertWidget(0, …)` is unaffected. `window._viewport` keeps its
+  attribute name (tests depend on it).
+- **Visibility keyed on the MODEL**: `_update_welcome_visibility()`
+  shows the welcome page iff `self._structure.n_atoms == 0` — NEVER on
+  viewport buffers, which previews (slab/NEB frames) replace
+  temporarily. Called from `_on_structure_loaded`,
+  `_on_structure_modified` (all atoms can be deleted), `_on_new`
+  (the only path back to an empty model — it emits no signal) and
+  once at the end of `__init__`.
+- **The viewport's own empty-state overlay** ("Open a structure file
+  to begin…") is KEPT — still needed when the viewport shows a
+  temporary/empty preview scene; it simply never paints while hidden
+  behind the welcome page.
+- **Recent files refresh**: `_update_recent_ui()` refreshes BOTH
+  surfaces (File menu + welcome list) and replaces the old
+  `_update_recent_menu()` call sites (open, save-as, retranslate,
+  clear); the menu-bar creation call stays menu-only (the welcome
+  page does not exist yet there — it is seeded in
+  `_create_central_widget`).
+- Welcome buttons reuse `_on_new` / `_on_open`; list clicks reuse
+  `_open_file`. Zero new QSS rules — the page composes from the theme
+  palette + existing selectors; the title font is set in code
+  (`QFont`, not QSS — the no-font-rules policy covers QSS only).
+- i18n: WelcomePage context is in `CHECKED_MODULES`
+  (tests/test_i18n.py); the page is persistent → changeEvent +
+  `_retranslate()` per §11.2.
+- CLI file open briefly shows the welcome page before the file loads
+  (window shows before `_open_file`) — accepted quirk.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -1004,7 +1044,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] App icon (letterboxed full source art — never cropped; title bar / taskbar / exe; §7.8.2)
 - [x] i18n (en/zh)
 - [x] QSS theming (light/dark, Fusion + QSS, live switch; §7.9)
-- [ ] Welcome page with recent files
+- [x] Welcome page with recent files (central stack, single-click open; §7.10)
 - [x] Drag-and-drop file opening (MainWindow-level, any URL, first file)
 
 ### v0.3 — Release (Sprint 5)

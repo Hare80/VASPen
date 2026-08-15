@@ -61,6 +61,7 @@ CHECKED_MODULES = (
     ("vaspen/ui/supercell_dialog.py", "SupercellDialog"),
     ("vaspen/ui/periodic_table_dialog.py", "PeriodicTableDialog"),
     ("vaspen/ui/transform_dialog.py", "TransformDialog"),
+    ("vaspen/ui/welcome_page.py", "WelcomePage"),
 )
 
 #: Core modules translate via a module-level ``_tr(text)`` helper —

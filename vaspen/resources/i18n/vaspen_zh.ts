@@ -2209,4 +2209,35 @@ This is the standard VASP pseudopotential directory layout.</source>
 
 For BULK structures, use Calculate → Cleave Surface.</source><translation>适用于已带真空的周期结构(例如切面):跨周期边界拆散的层将被展开,沿 c 重新施加真空并居中,面内格子不变。
 
-体相结构请使用 计算 → 切面。</translation></message><message><source>Vacuum:</source><translation>真空:</translation></message><message><source>Remember this value</source><translation>记住此数值</translation></message><message><source>Re-boxing</source><translation>重新装盒</translation></message></context></TS>
+体相结构请使用 计算 → 切面。</translation></message><message><source>Vacuum:</source><translation>真空:</translation></message><message><source>Remember this value</source><translation>记住此数值</translation></message><message><source>Re-boxing</source><translation>重新装盒</translation></message></context>
+<context>
+    <name>WelcomePage</name>
+    <message>
+        <source>VASPen</source>
+        <translation>VASPen</translation>
+    </message>
+    <message>
+        <source>Visual structure modeling for VASP</source>
+        <translation>面向 VASP 的可视化结构建模</translation>
+    </message>
+    <message>
+        <source>Recent Files</source>
+        <translation>最近文件</translation>
+    </message>
+    <message>
+        <source>(No recent files)</source>
+        <translation>（暂无最近文件）</translation>
+    </message>
+    <message>
+        <source>New Structure...</source>
+        <translation>新建结构...</translation>
+    </message>
+    <message>
+        <source>Open...</source>
+        <translation>打开...</translation>
+    </message>
+    <message>
+        <source>Drag and drop a structure file anywhere in this window.</source>
+        <translation>将结构文件拖放到本窗口任意位置即可打开。</translation>
+    </message>
+</context></TS>

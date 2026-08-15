@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QSizePolicy,
+    QStackedWidget,
     QStatusBar,
     QToolBar,
     QToolButton,
@@ -37,6 +38,7 @@ from vaspen.ui.menu_button import MenuButton
 from vaspen.ui.structure_tree import StructureTreePanel
 from vaspen.ui.tools import ToolMode, confirm_disorder_loss
 from vaspen.ui.viewport3d import Viewport3D
+from vaspen.ui.welcome_page import WelcomePage
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger
 from vaspen.utils import theme
@@ -106,6 +108,7 @@ class MainWindow(QMainWindow):
         self._create_edit_toolbar()
         self._create_dock_widgets()
         self._connect_signals()
+        self._update_welcome_visibility()
         self._restore_window_state()
 
     # ------------------------------------------------------------------
@@ -651,9 +654,27 @@ class MainWindow(QMainWindow):
         self._central_layout = QVBoxLayout(self._central_container)
         self._central_layout.setContentsMargins(0, 0, 0, 0)
         self._central_layout.setSpacing(0)
-        self._viewport = Viewport3D(self._central_container)
-        self._central_layout.addWidget(self._viewport, 1)
+        # Stack: welcome page (index 0, no structure loaded) / viewport
+        # (index 1). Visibility is keyed on the MODEL's atom count —
+        # never on viewport buffers, which previews replace temporarily.
+        self._central_stack = QStackedWidget(self._central_container)
+        self._welcome_page = WelcomePage(self._central_stack)
+        self._central_stack.addWidget(self._welcome_page)
+        self._viewport = Viewport3D(self._central_stack)
+        self._central_stack.addWidget(self._viewport)
+        self._central_layout.addWidget(self._central_stack, 1)
         self.setCentralWidget(self._central_container)
+        # The recent menu was built before the welcome page existed —
+        # seed the list here.
+        self._welcome_page.set_recent_files(self._config.recent_files)
+
+    def _update_welcome_visibility(self) -> None:
+        """Show the welcome page while the model is empty, the viewport
+        otherwise. Called on load, on every structural change (all
+        atoms can be deleted) and after New (the only path back to an
+        empty model — it emits no signal)."""
+        self._central_stack.setCurrentIndex(
+            0 if self._structure.n_atoms == 0 else 1)
 
     # ------------------------------------------------------------------
     # Dock Widgets
@@ -711,6 +732,10 @@ class MainWindow(QMainWindow):
                 self.tr("Cannot move frozen atoms — unfreeze them first.")))
         # Any manager change (add/remove/clear/sync) pushes to the viewport
         self._measurement_manager.changed.connect(self._push_measurements)
+        # Welcome page quick actions
+        self._welcome_page.open_file_requested.connect(self._open_file)
+        self._welcome_page.new_requested.connect(self._on_new)
+        self._welcome_page.open_requested.connect(self._on_open)
 
     def _connect_model_signals(self, model: StructureModel) -> None:
         """Connect a StructureModel's signals to window/UI updates.
@@ -744,6 +769,7 @@ class MainWindow(QMainWindow):
             self._measurement_manager.set_model(self._structure)
             self._atom_props.set_model(self._structure)
             self._viewport.set_structure(None)
+            self._update_welcome_visibility()
             self._update_status_bar()
             self._update_edit_actions()
             self._set_status(self.tr("New structure created."))
@@ -775,7 +801,7 @@ class MainWindow(QMainWindow):
             self._structure.load_atoms(atoms, filepath)  # emits structure_loaded once
             self._config.add_recent_file(filepath)
             self._config.last_directory = str(Path(filepath).parent)
-            self._update_recent_menu()
+            self._update_recent_ui()
             self._set_status(self.tr("Loaded: {}").format(filepath))
             logger.info("Opened file: %s", filepath)
         except Exception as e:
@@ -920,7 +946,7 @@ class MainWindow(QMainWindow):
                 self._structure.save(filepath, direct=self._config.poscar_coords_direct)
                 self._config.add_recent_file(filepath)
                 self._config.last_directory = str(Path(filepath).parent)
-                self._update_recent_menu()
+                self._update_recent_ui()
                 self._set_status(self.tr("Saved: {}").format(filepath))
             except Exception as e:
                 QMessageBox.critical(self, self.tr("Save Failed"), str(e))
@@ -1488,7 +1514,7 @@ class MainWindow(QMainWindow):
             "Pick any element from the periodic table"))
         self._view_dir_btn.setText(self.tr("View"))
         self._view_dir_btn.setToolTip(self.tr("Align the camera with a world axis"))
-        self._update_recent_menu()
+        self._update_recent_ui()
         if self._structure.n_atoms > 0:
             self._update_status_bar()
 
@@ -1580,7 +1606,12 @@ class MainWindow(QMainWindow):
 
     def _clear_recent(self) -> None:
         self._config.recent_files = []
+        self._update_recent_ui()
+
+    def _update_recent_ui(self) -> None:
+        """Refresh both recent-files surfaces (File menu + welcome page)."""
         self._update_recent_menu()
+        self._welcome_page.set_recent_files(self._config.recent_files)
 
     def _on_structure_loaded(self) -> None:
         # Any NEB frame-edit context refers to the PREVIOUS structure —
@@ -1597,6 +1628,7 @@ class MainWindow(QMainWindow):
                                      bonds=self._structure.bonds,
                                      fixed=self._structure.fixed_flags)
         self._sync_auto_bonds_action()
+        self._update_welcome_visibility()
         self._update_status_bar()
         self._update_edit_actions()
         # Loading clears the selection without emitting selection_changed —
@@ -1618,6 +1650,7 @@ class MainWindow(QMainWindow):
         self._viewport.set_bond_highlight(self._structure.selected_bonds)
         self._sync_auto_bonds_action()
         self._measurement_manager.sync_with_model()  # → changed → push
+        self._update_welcome_visibility()
         self._update_status_bar()
         self._update_edit_actions()
 

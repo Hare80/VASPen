@@ -2326,4 +2326,35 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <translation>Re-boxing</translation>
     </message>
   </context>
+  <context>
+    <name>WelcomePage</name>
+    <message>
+      <source>VASPen</source>
+      <translation>VASPen</translation>
+    </message>
+    <message>
+      <source>Visual structure modeling for VASP</source>
+      <translation>Visual structure modeling for VASP</translation>
+    </message>
+    <message>
+      <source>Recent Files</source>
+      <translation>Recent Files</translation>
+    </message>
+    <message>
+      <source>(No recent files)</source>
+      <translation>(No recent files)</translation>
+    </message>
+    <message>
+      <source>New Structure...</source>
+      <translation>New Structure...</translation>
+    </message>
+    <message>
+      <source>Open...</source>
+      <translation>Open...</translation>
+    </message>
+    <message>
+      <source>Drag and drop a structure file anywhere in this window.</source>
+      <translation>Drag and drop a structure file anywhere in this window.</translation>
+    </message>
+  </context>
 </TS>

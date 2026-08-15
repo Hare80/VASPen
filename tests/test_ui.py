@@ -63,6 +63,32 @@ def test_main_window_launch(window):
     assert window._viewport is not None
 
 
+def test_welcome_page_shown_when_no_structure(window):
+    assert window._central_stack.currentWidget() is window._welcome_page
+
+
+def test_open_file_switches_to_viewport_and_refreshes_recents(
+        window, monkeypatch):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(
+        fi.FileIO, "read", classmethod(lambda cls, p: atoms)
+    )
+    window._open_file("fake.xyz")
+    assert window._central_stack.currentWidget() is window._viewport
+    # The welcome list mirrors the persisted recent files.
+    assert window._welcome_page._recent_list.count() == 1
+    assert window._welcome_page._recent_list.item(0).text() == "fake.xyz"
+
+
+def test_new_returns_to_welcome_page(window, monkeypatch):
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.Yes,
+    )
+    window._on_new()
+    assert window._central_stack.currentWidget() is window._welcome_page
+
+
 def test_language_switch_is_live_and_roundtrips(window):
     window._switch_language("zh")
     assert window.act_open.text() == "打开(&O)..."
