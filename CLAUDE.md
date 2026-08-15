@@ -75,6 +75,10 @@ VASPen/
 │       ├── config.py           # AppConfig — QSettings wrapper
 │       ├── logger.py           # Centralized logging
 │       └── theme.py            # QSS theming engine (Fusion + palette + QSS, §7.9)
+├── docs/
+│   ├── user-guide-en.md         # User manual (English) — linked from README
+│   ├── user-guide-zh.md         # User manual (Chinese)
+│   └── reviews/                 # Internal code-review reports (dev records)
 ├── examples/                    # Curated demo structures + NEB trees (README inside; tests never read from here — §9)
 ├── tests/
 │   ├── __init__.py
@@ -502,7 +506,7 @@ afterwards):
 ## 7.8 Code Review 2026-08-14 — Settled Behaviors (do not re-litigate)
 
 First full layered review (4 review agents + light sweep, ~11.7k lines, all
-findings adversarially verified; dispositions in `docs/review-2026-08-14.md`).
+findings adversarially verified; dispositions in `docs/reviews/review-2026-08-14.md`).
 Behaviors pinned by the fixes:
 
 **Preview dialog state machine (surface / generate-all):**
@@ -625,7 +629,7 @@ re-introduced.
 ## 7.8.1 Code Review 2026-08-15 — Settled Behaviors (do not re-litigate)
 
 Follow-up review of the 9 commits after the 2026-08-14 review (report:
-`docs/review-2026-08-15.md`). Behaviors pinned by the fixes:
+`docs/reviews/review-2026-08-15.md`). Behaviors pinned by the fixes:
 
 **Surface computation:**
 - `iter_slabs` yields every index **exactly once** — a priority jump
