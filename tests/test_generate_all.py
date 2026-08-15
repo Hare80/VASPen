@@ -10,17 +10,14 @@ from ase import Atoms
 from ase.io import write as ase_write
 from PySide6.QtWidgets import QMessageBox
 
-from vaspen.core.file_io import FileIO
 from vaspen.core.structure import StructureModel
 from vaspen.ui.generate_all_dialog import GenerateAllDialog
 
-REPO = Path(__file__).resolve().parent.parent
-EXAMPLES = REPO / "examples" / "neb_vacancy_hop"
-
-
-def _example_model() -> StructureModel:
+@pytest.fixture
+def example_model(vacancy_hop_pair) -> StructureModel:
+    """Model loaded with the fcc Cu vacancy-hop initial structure."""
     model = StructureModel()
-    model.load_atoms(FileIO.read(str(EXAMPLES / "initial" / "POSCAR")))
+    model.load_atoms(vacancy_hop_pair[0])
     return model
 
 
@@ -60,8 +57,8 @@ def test_band_task_switches_kpoints_to_line_mode(qtbot):
     assert not preview.startswith("#")
 
 
-def test_incar_preset_change_syncs_task_combo(qtbot):
-    model = _example_model()
+def test_incar_preset_change_syncs_task_combo(qtbot, example_model):
+    model = example_model
     dlg = GenerateAllDialog(model, default_task="scf")
     qtbot.addWidget(dlg)
 
@@ -81,14 +78,14 @@ def _write_poscar(atoms: Atoms, path: Path) -> Path:
     return path
 
 
-def test_neb_end_to_end(qtbot, tmp_path, monkeypatch):
-    model = _example_model()
+def test_neb_end_to_end(qtbot, tmp_path, monkeypatch,
+                        example_model, vacancy_hop_pair):
+    model = example_model
     info = _record(monkeypatch, "information")
 
     fin_dir = tmp_path / "final"
     fin_dir.mkdir(parents=True, exist_ok=True)
-    fin_path = _write_poscar(
-        FileIO.read(str(EXAMPLES / "final" / "POSCAR")), fin_dir / "POSCAR")
+    fin_path = _write_poscar(vacancy_hop_pair[1], fin_dir / "POSCAR")
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(fin_path), ""),
@@ -151,8 +148,9 @@ def test_neb_end_to_end(qtbot, tmp_path, monkeypatch):
     assert "Line-mode" not in (out / "KPOINTS").read_text(encoding="utf-8")
 
 
-def test_neb_blocks_generate_without_images(qtbot, tmp_path, monkeypatch):
-    model = _example_model()
+def test_neb_blocks_generate_without_images(qtbot, tmp_path, monkeypatch,
+                                            example_model):
+    model = example_model
     warnings = _record(monkeypatch, "warning")
 
     dlg = GenerateAllDialog(model, default_task="neb")
@@ -209,9 +207,10 @@ def test_neb_order_mismatch_warns_then_strict_order(qtbot, tmp_path, monkeypatch
     assert np.allclose(mid.positions, [[1.0, 0, 0], [1.0, 0, 0]])
 
 
-def test_neb_cell_mismatch_blocks(qtbot, tmp_path, monkeypatch):
-    model = _example_model()
-    ini = FileIO.read(str(EXAMPLES / "initial" / "POSCAR"))
+def test_neb_cell_mismatch_blocks(qtbot, tmp_path, monkeypatch,
+                                  example_model, vacancy_hop_pair):
+    model = example_model
+    ini = vacancy_hop_pair[0]
     bad = ini.copy()
     bad.set_cell(ini.get_cell() * 1.1)
     fin_dir = tmp_path / "fin"
@@ -234,7 +233,8 @@ def test_neb_cell_mismatch_blocks(qtbot, tmp_path, monkeypatch):
     assert panel.n_images == 0
 
 
-def test_neb_nonperiodic_structure_gets_wrapped(qtbot, monkeypatch):
+def test_neb_nonperiodic_structure_gets_wrapped(qtbot, monkeypatch,
+                                                example_model):
     from vaspen.core.neb import interpolate_neb
 
     class _FakeWrapDialog:
@@ -249,7 +249,7 @@ def test_neb_nonperiodic_structure_gets_wrapped(qtbot, monkeypatch):
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.PeriodicWrapDialog", _FakeWrapDialog)
 
-    model = _example_model()
+    model = example_model
     dlg = GenerateAllDialog(model, default_task="neb")
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
@@ -270,13 +270,14 @@ def test_neb_nonperiodic_structure_gets_wrapped(qtbot, monkeypatch):
     assert panel._ensure_periodic_copy(molecule) is None
 
 
-def test_neb_imimages_survives_task_roundtrip(qtbot):
-    model = _example_model()
+def test_neb_imimages_survives_task_roundtrip(qtbot, example_model,
+                                              vacancy_hop_pair):
+    model = example_model
     dlg = GenerateAllDialog(model, default_task="neb")
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
     # interpolate directly (no file dialogs involved)
-    panel._final_atoms = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    panel._final_atoms = vacancy_hop_pair[1]
     panel._update_diagnostics()
     panel._on_interpolate()
 
@@ -296,8 +297,9 @@ def test_neb_imimages_survives_task_roundtrip(qtbot):
 # Validation + normal task generation
 # ----------------------------------------------------------------------
 
-def test_empty_incar_tag_blocks_generate(qtbot, tmp_path, monkeypatch):
-    model = _example_model()
+def test_empty_incar_tag_blocks_generate(qtbot, tmp_path, monkeypatch,
+                                         example_model):
+    model = example_model
     warnings = _record(monkeypatch, "warning")
 
     dlg = GenerateAllDialog(model, default_task="scf")
@@ -313,8 +315,9 @@ def test_empty_incar_tag_blocks_generate(qtbot, tmp_path, monkeypatch):
     assert not any(out.iterdir())
 
 
-def test_normal_task_writes_all_files(qtbot, tmp_path, monkeypatch):
-    model = _example_model()
+def test_normal_task_writes_all_files(qtbot, tmp_path, monkeypatch,
+                                      example_model):
+    model = example_model
     info = _record(monkeypatch, "information")
 
     dlg = GenerateAllDialog(model, default_task="scf")
@@ -334,8 +337,9 @@ def test_normal_task_writes_all_files(qtbot, tmp_path, monkeypatch):
     assert "Cu" in (out / "POSCAR").read_text(encoding="utf-8")
 
 
-def test_generate_without_output_dir_warns(qtbot, monkeypatch):
-    model = _example_model()
+def test_generate_without_output_dir_warns(qtbot, monkeypatch,
+                                           example_model):
+    model = example_model
     warnings = _record(monkeypatch, "warning")
 
     dlg = GenerateAllDialog(model, default_task="scf")
@@ -345,11 +349,11 @@ def test_generate_without_output_dir_warns(qtbot, monkeypatch):
     assert warnings
 
 
-def test_poscar_coords_config_controls_preview(qtbot):
+def test_poscar_coords_config_controls_preview(qtbot, example_model):
     """The POSCAR tab follows the Direct/Cartesian preference."""
     from vaspen.utils.config import AppConfig
 
-    model = _example_model()
+    model = example_model
     config = AppConfig()
 
     config.poscar_coords_direct = True
@@ -365,8 +369,8 @@ def test_poscar_coords_config_controls_preview(qtbot):
     assert "Cartesian" in dlg2._poscar_panel._poscar_preview.toPlainText()
 
 
-def test_poscar_coord_combo_refreshes_preview(qtbot):
-    model = _example_model()
+def test_poscar_coord_combo_refreshes_preview(qtbot, example_model):
+    model = example_model
     dlg = GenerateAllDialog(model, default_task="scf")
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
@@ -446,12 +450,11 @@ def test_kpoints_panel_singular_cell_falls_back(qtbot):
 # NEB interpolation algorithm selector (Linear default / IDPP)
 # ----------------------------------------------------------------------
 
-ETHANE = REPO / "examples" / "neb_ethane_rotation"
-
-
-def _ethane_model() -> StructureModel:
+@pytest.fixture
+def ethane_model(ethane_pair) -> StructureModel:
+    """Model loaded with the ethane rotation initial structure."""
     model = StructureModel()
-    model.load_atoms(FileIO.read(str(ETHANE / "initial" / "POSCAR")))
+    model.load_atoms(ethane_pair[0])
     return model
 
 
@@ -463,14 +466,15 @@ def _min_pair_distance(atoms) -> float:
     return float(d.min())
 
 
-def test_neb_algorithm_selector_defaults_to_linear(qtbot):
-    model = _example_model()
+def test_neb_algorithm_selector_defaults_to_linear(qtbot, example_model,
+                                                   vacancy_hop_pair):
+    model = example_model
     dlg = GenerateAllDialog(model, default_task="neb")
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
 
     assert panel._algo_combo.currentIndex() == 0  # Linear
-    panel._final_atoms = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    panel._final_atoms = vacancy_hop_pair[1]
     panel._update_diagnostics()
     panel._on_interpolate()
     # linear path = linear in fractional space
@@ -479,19 +483,20 @@ def test_neb_algorithm_selector_defaults_to_linear(qtbot):
     assert np.allclose(frac, ini + (panel.images[-1].get_scaled_positions(wrap=False) - ini) * (2 / 5))
 
 
-def test_neb_idpp_algorithm_avoids_collisions(qtbot, monkeypatch):
+def test_neb_idpp_algorithm_avoids_collisions(qtbot, monkeypatch,
+                                              ethane_model, ethane_pair):
     # Ethane's equivalent hydrogens can be relabeled, so the order
     # diagnostic fires — confirm "continue in strict file order".
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QMessageBox.question",
         staticmethod(lambda *a, **k: QMessageBox.Yes),
     )
-    model = _ethane_model()
+    model = ethane_model
     dlg = GenerateAllDialog(model, default_task="neb")
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
 
-    panel._final_atoms = FileIO.read(str(ETHANE / "final" / "POSCAR"))
+    panel._final_atoms = ethane_pair[1]
     panel._update_diagnostics()
     panel._images_spin.setValue(5)
     panel._algo_combo.setCurrentIndex(1)  # IDPP
@@ -501,18 +506,19 @@ def test_neb_idpp_algorithm_avoids_collisions(qtbot, monkeypatch):
     assert min(_min_pair_distance(f) for f in panel.images) > 0.9
 
 
-def test_neb_linear_algorithm_collides_ethane(qtbot, monkeypatch):
+def test_neb_linear_algorithm_collides_ethane(qtbot, monkeypatch,
+                                              ethane_model, ethane_pair):
     """Contrast test: the same pair interpolated linearly collides."""
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QMessageBox.question",
         staticmethod(lambda *a, **k: QMessageBox.Yes),
     )
-    model = _ethane_model()
+    model = ethane_model
     dlg = GenerateAllDialog(model, default_task="neb")
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
 
-    panel._final_atoms = FileIO.read(str(ETHANE / "final" / "POSCAR"))
+    panel._final_atoms = ethane_pair[1]
     panel._update_diagnostics()
     panel._images_spin.setValue(5)
     panel._on_interpolate()  # default Linear
@@ -524,20 +530,18 @@ def test_neb_linear_algorithm_collides_ethane(qtbot, monkeypatch):
 # Frozen atoms in the NEB flow
 # ----------------------------------------------------------------------
 
-FROZEN = REPO / "examples" / "neb_frozen"
-
-
-def test_neb_frozen_atoms_flow_pass(qtbot, tmp_path, monkeypatch):
+def test_neb_frozen_atoms_flow_pass(qtbot, tmp_path, monkeypatch,
+                                    frozen_pass_block_pair):
     """Opening a POSCAR with selective dynamics freezes those atoms:
     frames keep them put and the written POSCARs carry F F F rows."""
+    pi, pf, _bi, _bf = frozen_pass_block_pair
     model = StructureModel()
-    model.load_atoms(FileIO.read(str(FROZEN / "pass" / "initial" / "POSCAR")))
+    model.load_atoms(pi)
     assert model.fixed_flags.all(axis=1).sum() == 6
 
     fin_dir = tmp_path / "final"
     fin_dir.mkdir(parents=True, exist_ok=True)
-    fin_path = _write_poscar(
-        FileIO.read(str(FROZEN / "pass" / "final" / "POSCAR")), fin_dir / "POSCAR")
+    fin_path = _write_poscar(pf, fin_dir / "POSCAR")
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(fin_path), ""),
@@ -572,14 +576,15 @@ def test_neb_frozen_atoms_flow_pass(qtbot, tmp_path, monkeypatch):
     assert text.count("F   F   F") == 6
 
 
-def test_neb_frozen_atoms_block_flow(qtbot, tmp_path, monkeypatch):
+def test_neb_frozen_atoms_block_flow(qtbot, tmp_path, monkeypatch,
+                                     frozen_pass_block_pair):
     """The final moving a frozen atom blocks interpolation."""
+    _pi, _pf, bi, bf = frozen_pass_block_pair
     model = StructureModel()
-    model.load_atoms(FileIO.read(str(FROZEN / "block" / "initial" / "POSCAR")))
+    model.load_atoms(bi)
     fin_dir = tmp_path / "final"
     fin_dir.mkdir(parents=True, exist_ok=True)
-    fin_path = _write_poscar(
-        FileIO.read(str(FROZEN / "block" / "final" / "POSCAR")), fin_dir / "POSCAR")
+    fin_path = _write_poscar(bf, fin_dir / "POSCAR")
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(fin_path), ""),
@@ -596,17 +601,19 @@ def test_neb_frozen_atoms_block_flow(qtbot, tmp_path, monkeypatch):
     assert panel.n_images == 0
 
 
-def test_neb_browsed_ini_selective_dynamics_freeze(qtbot, tmp_path, monkeypatch):
+def test_neb_browsed_ini_selective_dynamics_freeze(qtbot, tmp_path, monkeypatch,
+                                                   example_model,
+                                                   frozen_pass_block_pair):
     """Flags from a browsed initial file (not the model) also apply."""
-    model = _example_model()
+    pi, pf, _bi, _bf = frozen_pass_block_pair
+    model = example_model
     dlg = GenerateAllDialog(model, default_task="neb")
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
 
     ini_dir = tmp_path / "ini"
     ini_dir.mkdir(parents=True, exist_ok=True)
-    ini_path = _write_poscar(
-        FileIO.read(str(FROZEN / "pass" / "initial" / "POSCAR")), ini_dir / "POSCAR")
+    ini_path = _write_poscar(pi, ini_dir / "POSCAR")
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(ini_path), ""),
@@ -614,7 +621,7 @@ def test_neb_browsed_ini_selective_dynamics_freeze(qtbot, tmp_path, monkeypatch)
     panel._on_browse_ini()
 
     assert panel._ini_fixed_flags.all(axis=1).sum() == 6
-    panel._final_atoms = FileIO.read(str(FROZEN / "pass" / "final" / "POSCAR"))
+    panel._final_atoms = pf
     panel._update_diagnostics()
     panel._on_interpolate()
     mask = panel._ini_fixed_flags.all(axis=1)
@@ -627,21 +634,22 @@ def test_neb_browsed_ini_selective_dynamics_freeze(qtbot, tmp_path, monkeypatch)
 # Frame editing (move/rotate atoms, delete/add bonds, undo, persistence)
 # ----------------------------------------------------------------------
 
-def _interpolated_dialog(model, preview_callback=None):
-    """Dialog with the Cu example pair already interpolated (5 images)."""
+def _interpolated_dialog(model, fin, preview_callback=None):
+    """Dialog with the Cu vacancy-hop pair already interpolated (5 images)."""
     dlg = GenerateAllDialog(model, default_task="neb",
                             preview_callback=preview_callback)
     panel = dlg._poscar_panel
-    panel._final_atoms = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    panel._final_atoms = fin
     panel._update_diagnostics()
     panel._images_spin.setValue(4)
     panel._on_interpolate()
     return dlg
 
 
-def test_frame_preview_data_editability(qtbot):
-    model = _example_model()
-    dlg = _interpolated_dialog(model)
+def test_frame_preview_data_editability(qtbot, example_model,
+                                        vacancy_hop_pair):
+    model = example_model
+    dlg = _interpolated_dialog(model, vacancy_hop_pair[1])
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
 
@@ -656,9 +664,10 @@ def test_frame_preview_data_editability(qtbot):
     assert len(bonds2) > 0                 # auto-detected
 
 
-def test_frame_apply_move_updates_frame_only(qtbot):
-    model = _example_model()
-    dlg = _interpolated_dialog(model)
+def test_frame_apply_move_updates_frame_only(qtbot, example_model,
+                                             vacancy_hop_pair):
+    model = example_model
+    dlg = _interpolated_dialog(model, vacancy_hop_pair[1])
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
     model_positions = model.atoms.positions.copy()
@@ -673,9 +682,10 @@ def test_frame_apply_move_updates_frame_only(qtbot):
     assert np.allclose(model.atoms.positions, model_positions)
 
 
-def test_frame_bond_delete_survives_redetect_and_add_restores(qtbot):
-    model = _example_model()
-    dlg = _interpolated_dialog(model)
+def test_frame_bond_delete_survives_redetect_and_add_restores(
+        qtbot, example_model, vacancy_hop_pair):
+    model = example_model
+    dlg = _interpolated_dialog(model, vacancy_hop_pair[1])
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
     idx = 2
@@ -696,9 +706,9 @@ def test_frame_bond_delete_survives_redetect_and_add_restores(qtbot):
     assert any((b.i, b.j) == pair for b in panel.frame_preview_data(idx)[3])
 
 
-def test_frame_undo_redo(qtbot):
-    model = _example_model()
-    dlg = _interpolated_dialog(model)
+def test_frame_undo_redo(qtbot, example_model, vacancy_hop_pair):
+    model = example_model
+    dlg = _interpolated_dialog(model, vacancy_hop_pair[1])
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
     idx = 2
@@ -717,12 +727,13 @@ def test_frame_undo_redo(qtbot):
     assert panel.frame_undo(0) is False
 
 
-def test_frame_edits_persist_to_written_poscar(qtbot, tmp_path, monkeypatch):
+def test_frame_edits_persist_to_written_poscar(qtbot, tmp_path, monkeypatch,
+                                               example_model, vacancy_hop_pair):
     from ase.io import read as ase_read
 
-    model = _example_model()
+    model = example_model
     info = _record(monkeypatch, "information")
-    dlg = _interpolated_dialog(model)
+    dlg = _interpolated_dialog(model, vacancy_hop_pair[1])
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
 
@@ -748,14 +759,16 @@ def test_frame_edits_persist_to_written_poscar(qtbot, tmp_path, monkeypatch):
     assert np.allclose(moved, delta, atol=1e-6)
 
 
-def test_reinterpolate_asks_before_discarding_edits(qtbot, monkeypatch):
-    model = _example_model()
+def test_reinterpolate_asks_before_discarding_edits(qtbot, monkeypatch,
+                                                    example_model,
+                                                    vacancy_hop_pair):
+    model = example_model
     questions: list = []
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QMessageBox.question",
         staticmethod(lambda *a, **k: questions.append(a) or QMessageBox.No),
     )
-    dlg = _interpolated_dialog(model)
+    dlg = _interpolated_dialog(model, vacancy_hop_pair[1])
     qtbot.addWidget(dlg)
     panel = dlg._poscar_panel
 
@@ -774,14 +787,15 @@ def test_reinterpolate_asks_before_discarding_edits(qtbot, monkeypatch):
     assert panel.has_frame_edits() is False  # regenerated, state cleared
 
 
-def test_main_window_routes_frame_edits(qtbot):
+def test_main_window_routes_frame_edits(qtbot, example_model,
+                                        vacancy_hop_pair):
     """Real MainWindow: frame edits land in the frame, never the model."""
     from vaspen.ui.main_window import MainWindow
     from vaspen.ui.tools import ToolMode
 
     win = MainWindow()
     qtbot.addWidget(win)
-    model = _example_model()
+    model = example_model
     win._structure.load_atoms(model.atoms, None)
     model_positions = win._structure.atoms.positions.copy()
 
@@ -791,7 +805,7 @@ def test_main_window_routes_frame_edits(qtbot):
     qtbot.addWidget(dlg)
     win._generate_dialog = dlg
     panel = dlg._poscar_panel
-    panel._final_atoms = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    panel._final_atoms = vacancy_hop_pair[1]
     panel._update_diagnostics()
     panel._images_spin.setValue(4)
     panel._on_interpolate()
@@ -848,20 +862,20 @@ def _record_question(monkeypatch, answer) -> list:
     return calls
 
 
-def test_browse_with_frame_edits_asks_before_discarding(qtbot, tmp_path, monkeypatch):
+def test_browse_with_frame_edits_asks_before_discarding(
+        qtbot, tmp_path, monkeypatch, example_model, vacancy_hop_pair):
     """Changing endpoints after manual frame edits must ask — and keep
     the edits (plus the cleared preview reset) when the user declines."""
     from vaspen.ui.generate_all_dialog import PoscarPanel
 
-    model = _example_model()
+    model = example_model
     previews: list = []
     panel = PoscarPanel(model, preview_callback=lambda atoms, *a: previews.append(atoms))
     qtbot.addWidget(panel)
 
     fin_dir = tmp_path / "final"
     fin_dir.mkdir(parents=True, exist_ok=True)
-    fin_path = _write_poscar(
-        FileIO.read(str(EXAMPLES / "final" / "POSCAR")), fin_dir / "POSCAR")
+    fin_path = _write_poscar(vacancy_hop_pair[1], fin_dir / "POSCAR")
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(fin_path), ""),
@@ -896,14 +910,14 @@ def test_frame_preview_data_out_of_range_returns_none(qtbot):
     assert panel.frame_preview_data(5) is None
 
 
-def test_write_failure_removes_partial_files(qtbot, tmp_path, monkeypatch):
+def test_write_failure_removes_partial_files(qtbot, tmp_path, monkeypatch,
+                                             example_model, vacancy_hop_pair):
     """A mid-write OSError must not leave a half-generated file set that
     reads as fully generated."""
-    model = _example_model()
+    model = example_model
     fin_dir = tmp_path / "final"
     fin_dir.mkdir(parents=True, exist_ok=True)
-    fin_path = _write_poscar(
-        FileIO.read(str(EXAMPLES / "final" / "POSCAR")), fin_dir / "POSCAR")
+    fin_path = _write_poscar(vacancy_hop_pair[1], fin_dir / "POSCAR")
     monkeypatch.setattr(
         "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
         lambda *a, **k: (str(fin_path), ""),
@@ -933,12 +947,12 @@ def test_write_failure_removes_partial_files(qtbot, tmp_path, monkeypatch):
     assert not (out / "01" / "POSCAR").exists()
 
 
-def test_retranslate_preserves_selections(qtbot):
+def test_retranslate_preserves_selections(qtbot, example_model):
     """Language-change events reach the non-modal dialog and its panels;
     combo selections survive the rebuild."""
     from PySide6.QtCore import QEvent
 
-    model = _example_model()
+    model = example_model
     dlg = GenerateAllDialog(model, default_task="neb")
     qtbot.addWidget(dlg)
     dlg._task_combo.setCurrentIndex(dlg._task_combo.findText("Band Structure"))

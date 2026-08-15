@@ -145,14 +145,13 @@ def test_h2_bond_detected():
     assert bonds[0].order == 1
 
 
-def test_fe_bcc_only_nearest_neighbors():
+def test_fe_bcc_only_nearest_neighbors(fe_bcc_2x2x2):
     """bcc Fe: only the 8 nearest neighbors per atom bond (64 pairs in
     the 2×2×2 cell) — the second shell at 2.87 Å must NOT bond even
     though it is inside the covalent tolerance."""
     from ase.geometry import get_distances
-    from ase.io import read
 
-    atoms = read("examples/Fe_bcc_2x2x2.vasp")
+    atoms = fe_bcc_2x2x2
     cell, pbc = _cell_pbc(atoms)
     bonds = find_bonds(
         np.asarray(atoms.get_positions(), dtype=float),

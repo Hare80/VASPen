@@ -268,18 +268,10 @@ def test_slab_vacuum_exact_and_centered():
 # Re-box Slab (standalone feature, Tools menu; 2026-08-15)
 
 
-def _cu111_slab() -> Atoms:
-    """36-atom 4-layer Cu(111) slab with vacuum (examples/Cu_111_slab.vasp)."""
-    from ase.io import read
-
-    from pathlib import Path
-    return read(Path(__file__).parent.parent / "examples" / "Cu_111_slab.vasp")
-
-
-def test_rebox_slab_contiguous_and_vacuum():
+def test_rebox_slab_contiguous_and_vacuum(cu111_slab):
     """rebox_slab: contiguous 4-layer slab, exact vacuum, centered,
     in-plane cell untouched."""
-    out = rebox_slab(_cu111_slab(), 15.0)
+    out = rebox_slab(cu111_slab, 15.0)
     assert len(out) == 36
     z = np.sort(out.positions[:, 2])
     levels = np.unique(np.round(z, 3))
@@ -290,17 +282,17 @@ def test_rebox_slab_contiguous_and_vacuum():
     assert (z.max() - z.min()) + 15.0 == pytest.approx(cell[2, 2], abs=1e-6)
     assert (z.min() + z.max()) / 2 == pytest.approx(cell[2, 2] / 2, abs=1e-6)
     # in-plane cell untouched by the re-box
-    assert np.allclose(cell[:2], np.asarray(_cu111_slab().get_cell().array)[:2],
+    assert np.allclose(cell[:2], np.asarray(cu111_slab.get_cell().array)[:2],
                        atol=1e-6)
 
 
-def test_rebox_slab_preserves_atom_set():
+def test_rebox_slab_preserves_atom_set(cu111_slab):
     """Re-boxing only translates atoms along c — the structure (minimum-
     image distance multiset, invariant to lattice translations and rigid
     shifts) is identical to the input."""
     from ase.geometry import get_distances
 
-    inp = _cu111_slab()
+    inp = cu111_slab
     out = rebox_slab(inp, 15.0)
     cell = np.asarray(inp.get_cell().array)
     pbc = inp.get_pbc()
@@ -309,14 +301,14 @@ def test_rebox_slab_preserves_atom_set():
     assert np.allclose(np.sort(din.ravel()), np.sort(dout.ravel()), atol=1e-4)
 
 
-def test_rebox_slab_keeps_atom_order():
+def test_rebox_slab_keeps_atom_order(cu111_slab):
     """The atom order is preserved 1:1 (fixed flags / magmoms map)."""
-    inp = _cu111_slab()
+    inp = cu111_slab
     out = rebox_slab(inp, 15.0)
     assert out.get_chemical_symbols() == inp.get_chemical_symbols()
 
 
-def test_rebox_slab_rejects_non_periodic_and_bad_vacuum():
+def test_rebox_slab_rejects_non_periodic_and_bad_vacuum(cu111_slab):
     """Core-layer contract: translatable ValueError, never raw numpy
     errors (a molecule used to leak a LinAlgError from the scaled-
     position solve; code review 2026-08-15)."""
@@ -325,7 +317,7 @@ def test_rebox_slab_rejects_non_periodic_and_bad_vacuum():
     with pytest.raises(ValueError):
         rebox_slab(mol, 15.0)
     with pytest.raises(ValueError):
-        rebox_slab(_cu111_slab(), 0.0)
+        rebox_slab(cu111_slab, 0.0)
 
 
 # ----------------------------------------------------------------------
@@ -403,14 +395,14 @@ def test_iter_slabs_priority_yields_each_index_once(srtio3):
     assert sequence(initial=0) == [0, 1, 2, 3]
 
 
-def test_unwrap_layers_folds_wrapped_slab():
+def test_unwrap_layers_folds_wrapped_slab(cu111_slab):
     """Atoms pushed across the periodic c boundary fold back into one
     contiguous block; the structure is unchanged (mic distances)."""
     from ase.geometry import get_distances
 
     from vaspen.core.surface import _unwrap_layers
 
-    inp = _cu111_slab()
+    inp = cu111_slab
     wrapped = inp.copy()
     frac = wrapped.get_scaled_positions()
     frac[0:5, 2] += 1.0  # push five atoms of the bottom layer across c

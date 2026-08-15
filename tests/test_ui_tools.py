@@ -1134,20 +1134,19 @@ def test_move_preview_bonds_follow_atoms(window):
     assert len(view._bond_verts) == len(before)  # same vertex count
 
 
-def test_bond_bake_uses_current_structure_cell(window):
+def test_bond_bake_uses_current_structure_cell(window, benzene_molecule,
+                                               fe_bcc_2x2x2):
     """Regression: loading a periodic structure AFTER a molecule must
     bake the bond geometry with the NEW cell/pbc. Stale molecule
     cell/pbc drew Fe bonds as minimum-image-less sticks across the
     whole box (only Detect Bonds — a second set_structure — fixed it)."""
-    from ase.io import read
-
     from vaspen.core.bonds import find_bonds
 
     view = window._viewport
-    view.set_structure(read("examples/benzene.xyz"))  # molecule first
+    view.set_structure(benzene_molecule)  # molecule first
     assert view._pbc == (False, False, False)
 
-    fe = read("examples/Fe_bcc_2x2x2.vasp")
+    fe = fe_bcc_2x2x2
     bonds = find_bonds(
         np.asarray(fe.get_positions(), dtype=float),
         list(fe.get_chemical_symbols()),

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 from ase import Atoms
@@ -18,10 +16,6 @@ from vaspen.core.neb import (
     suggest_n_images,
     ws_minimal_image,
 )
-from vaspen.core.file_io import FileIO
-
-REPO = Path(__file__).resolve().parent.parent
-EXAMPLES = REPO / "examples" / "neb_vacancy_hop"
 
 
 def _cubic(atoms: Atoms, a: float = 10.0) -> Atoms:
@@ -88,15 +82,10 @@ def test_neb_distance_wraps_across_boundary():
     assert neb_distance(a, b) == pytest.approx(1.0)
 
 
-def test_neb_distance_vacancy_hop_example():
-    """The committed example: fcc Cu vacancy hop, a/√2 = 2.5562 Å.
-
-    Cross-checked against the classic reference implementation (exact
-    match to ~1e-15): the metric reproduces the published value for
-    the same input files.
-    """
-    ini = FileIO.read(str(EXAMPLES / "initial" / "POSCAR"))
-    fin = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+def test_neb_distance_vacancy_hop(vacancy_hop_pair):
+    """fcc Cu vacancy hop, a/√2 = 2.5562 Å (the 2×2×2 cell minus the
+    (0, ½, ½) corner; the (0, 0, ½) neighbor hops in)."""
+    ini, fin = vacancy_hop_pair
     a = 3.615
     assert neb_distance(ini, fin) == pytest.approx(a / np.sqrt(2), rel=1e-6)
     assert suggest_n_images(neb_distance(ini, fin)) == 4
@@ -239,17 +228,16 @@ def test_interpolate_neb_strips_constraints():
         assert f.constraints == []
 
 
-def test_interpolate_neb_matches_reference_implementation():
-    """Reference comparison for the committed example.
+def test_interpolate_neb_matches_reference_implementation(vacancy_hop_pair):
+    """Reference comparison for the fcc Cu vacancy hop (a = 3.615 Å).
 
     The classic reference tool (run externally during development)
     produces frames 00-05 whose fractional coordinates agree with
     interpolate_neb(init, final, 4) to ~6e-15 (float precision), and
-    its distance metric prints 2.55619101398937 Å for these files —
+    its distance metric prints 2.55619101398937 Å for this structure —
     identical to neb_distance. This test pins the behavior.
     """
-    ini = FileIO.read(str(EXAMPLES / "initial" / "POSCAR"))
-    fin = FileIO.read(str(EXAMPLES / "final" / "POSCAR"))
+    ini, fin = vacancy_hop_pair
     frames = interpolate_neb(ini, fin, 4)
     assert len(frames) == 6
     assert neb_distance(ini, fin) == pytest.approx(2.55619101398937, rel=1e-12)
@@ -259,53 +247,14 @@ def test_interpolate_neb_matches_reference_implementation():
 # IDPP interpolation
 # ----------------------------------------------------------------------
 
-ETHANE = REPO / "examples" / "neb_ethane_rotation"
-
-
-def _ethane_pair():
-    """Ethane in a 10 Å box; final = one methyl rotated 120° (the
-    linear path collides H atoms — IDPP's classic demo case)."""
-    from ase.build import molecule
-
-    eth = molecule("C2H6")
-    pos = eth.positions
-    c_idx = [i for i, s in enumerate(eth.get_chemical_symbols()) if s == "C"]
-    c0, c1 = c_idx
-    axis = pos[c1] - pos[c0]
-    axis /= np.linalg.norm(axis)
-    h_idx = [i for i, s in enumerate(eth.get_chemical_symbols()) if s == "H"]
-    methyl0 = [i for i in h_idx
-               if np.linalg.norm(pos[i] - pos[c0]) < np.linalg.norm(pos[i] - pos[c1])]
-
-    def rotate_about_axis(points, origin, axis, angle_deg):
-        a = angle_deg * np.pi / 180
-        K = np.array([[0, -axis[2], axis[1]],
-                      [axis[2], 0, -axis[0]],
-                      [-axis[1], axis[0], 0]])
-        R = np.eye(3) + np.sin(a) * K + (1 - np.cos(a)) * (K @ K)
-        return (points - origin) @ R.T + origin
-
-    def in_box(atoms, a=10.0):
-        atoms.cell = [a, a, a]
-        atoms.pbc = True
-        atoms.center()
-        return atoms
-
-    ini = in_box(eth.copy())
-    fin = eth.copy()
-    for i in [c0] + methyl0:
-        fin.positions[i] = rotate_about_axis(fin.positions[i], pos[c0], axis, 120.0)
-    return ini, in_box(fin)
-
-
 def _min_pair_distance(atoms: Atoms) -> float:
     d = atoms.get_all_distances(mic=True)
     np.fill_diagonal(d, np.inf)
     return float(d.min())
 
 
-def test_interpolate_idpp_frame_count_and_endpoints():
-    ini, fin = _ethane_pair()
+def test_interpolate_idpp_frame_count_and_endpoints(ethane_pair):
+    ini, fin = ethane_pair
     frames = interpolate_idpp(ini, fin, 4)
     assert len(frames) == 6
     assert np.allclose(frames[0].positions, ini.positions)
@@ -315,10 +264,11 @@ def test_interpolate_idpp_frame_count_and_endpoints():
         assert f.constraints == []
 
 
-def test_interpolate_idpp_avoids_collisions():
+def test_interpolate_idpp_avoids_collisions(ethane_pair):
     """Linear interpolation collides the rotating hydrogens; IDPP
     keeps every interatomic distance physical."""
-    ini, fin = _ethane_pair()
+    ini, fin = ethane_pair
+    assert len(ini) == 8
     linear = interpolate_neb(ini, fin, 5)
     idpp = interpolate_idpp(ini, fin, 5)
 
@@ -326,10 +276,10 @@ def test_interpolate_idpp_avoids_collisions():
     assert min(_min_pair_distance(f) for f in idpp) > 0.9      # physical
 
 
-def test_interpolate_idpp_uniform_distance_steps():
+def test_interpolate_idpp_uniform_distance_steps(ethane_pair):
     """IDPP evens out the distance-matrix change between adjacent
     images (its defining property); linear does not."""
-    ini, fin = _ethane_pair()
+    ini, fin = ethane_pair
     linear = interpolate_neb(ini, fin, 5)
     idpp = interpolate_idpp(ini, fin, 5)
 
@@ -354,32 +304,18 @@ def test_interpolate_idpp_validation():
         interpolate_idpp(a, bad_cell, 2)
 
 
-def test_idpp_wraps_frames_into_cell():
+def test_idpp_wraps_frames_into_cell(ethane_pair):
     """IDPP relaxes in Cartesian space — frames must come back into
     the cell."""
-    ini, fin = _ethane_pair()
+    ini, fin = ethane_pair
     for f in interpolate_idpp(ini, fin, 3):
         frac = f.get_scaled_positions(wrap=False)
         assert np.all((frac >= 0.0) & (frac < 1.0))
 
 
-def test_ethane_example_files_regression():
-    """The committed example reproduces the collision-free IDPP path."""
-    ini = FileIO.read(str(ETHANE / "initial" / "POSCAR"))
-    fin = FileIO.read(str(ETHANE / "final" / "POSCAR"))
-    assert len(ini) == 8
-    linear = interpolate_neb(ini, fin, 5)
-    idpp = interpolate_idpp(ini, fin, 5)
-    assert min(_min_pair_distance(f) for f in linear) < 0.75
-    assert min(_min_pair_distance(f) for f in idpp) > 0.9
-
-
 # ----------------------------------------------------------------------
 # Frozen atoms in interpolation
 # ----------------------------------------------------------------------
-
-FROZEN = REPO / "examples" / "neb_frozen"
-
 
 def test_constraints_to_fixed_flags_conversion():
     from ase.constraints import FixAtoms, FixScaled
@@ -393,10 +329,10 @@ def test_constraints_to_fixed_flags_conversion():
     assert not flags[2].any()
 
 
-def test_interpolate_frozen_atoms_stay_put_linear():
+def test_interpolate_frozen_atoms_stay_put_linear(ethane_pair):
     from ase.constraints import FixAtoms
 
-    ini, fin = _ethane_pair()
+    ini, fin = ethane_pair
     mask = np.zeros(len(ini), dtype=bool)
     mask[0] = True  # freeze the first carbon
     frames = interpolate_neb(ini, fin, 4, frozen_mask=mask)
@@ -406,8 +342,8 @@ def test_interpolate_frozen_atoms_stay_put_linear():
     assert any(isinstance(c, FixAtoms) for f in frames for c in f.constraints)
 
 
-def test_interpolate_frozen_atoms_stay_put_idpp():
-    ini, fin = _ethane_pair()
+def test_interpolate_frozen_atoms_stay_put_idpp(ethane_pair):
+    ini, fin = ethane_pair
     mask = np.zeros(len(ini), dtype=bool)
     mask[0] = True
     frames = interpolate_idpp(ini, fin, 4, frozen_mask=mask)
@@ -415,8 +351,8 @@ def test_interpolate_frozen_atoms_stay_put_idpp():
         assert np.allclose(f.positions[0], ini.positions[0])
 
 
-def test_interpolate_frozen_contradiction_raises():
-    ini, fin = _ethane_pair()
+def test_interpolate_frozen_contradiction_raises(ethane_pair):
+    ini, fin = ethane_pair
     mask = np.zeros(len(ini), dtype=bool)
     mask[0] = True
     fin.positions[0] += [1.0, 0.0, 0.0]  # frozen atom moved
@@ -433,10 +369,9 @@ def test_interpolate_frozen_mask_shape_check():
         interpolate_neb(a, b, 1, frozen_mask=np.array([True]))
 
 
-def test_frozen_example_pass_block():
-    """The committed pass/block example pair."""
-    pi = FileIO.read(str(FROZEN / "pass" / "initial" / "POSCAR"))
-    pf = FileIO.read(str(FROZEN / "pass" / "final" / "POSCAR"))
+def test_frozen_pass_block(frozen_pass_block_pair):
+    """The pass/block frozen-atom pair: 6 frozen + 1 free atom."""
+    pi, pf, bi, bf = frozen_pass_block_pair
     mask = constraints_to_fixed_flags(pi).all(axis=1)
     assert mask.sum() == 6
     for frames in (interpolate_neb(pi, pf, 4, frozen_mask=mask),
@@ -444,8 +379,6 @@ def test_frozen_example_pass_block():
         for f in frames:
             assert np.allclose(f.positions[mask], pi.positions[mask])
 
-    bi = FileIO.read(str(FROZEN / "block" / "initial" / "POSCAR"))
-    bf = FileIO.read(str(FROZEN / "block" / "final" / "POSCAR"))
     with pytest.raises(ValueError, match="Frozen atoms"):
         interpolate_neb(bi, bf, 4,
                         frozen_mask=constraints_to_fixed_flags(bi).all(axis=1))
@@ -455,11 +388,11 @@ def test_frozen_example_pass_block():
 # Code-review regression tests (2026-08-14)
 # ----------------------------------------------------------------------
 
-def test_frozen_wrapped_equivalent_site_not_blocked():
+def test_frozen_wrapped_equivalent_site_not_blocked(ethane_pair):
     """The same periodic site written with a different lattice
     translation at the two ends (unwrapped CONTCAR coordinates) must not
     count as frozen-atom movement."""
-    ini, fin = _ethane_pair()
+    ini, fin = ethane_pair
     mask = np.zeros(len(ini), dtype=bool)
     mask[0] = True
     # Shift the frozen atom by exactly one lattice vector — same site.

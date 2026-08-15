@@ -915,6 +915,12 @@ Default functional: PBE. Pseudopotential library root path is configured by the 
 
 ## 9. Testing Strategy
 
+**Structure independence (settled 2026-08-16):** tests build their own
+structures in code — shared builders live as pytest fixtures in
+`tests/conftest.py` (NEB demo pairs, slab, molecules, bulks). The test
+suite must **never read files from `examples/`** — that folder is
+user-facing and freely editable/deletable without affecting tests.
+
 ### 9.1 Unit Tests (pytest)
 
 All modules in `core/` and `utils/` must have corresponding tests:

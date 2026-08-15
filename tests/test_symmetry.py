@@ -116,7 +116,7 @@ def test_analyze_cubic_rocksalt():
 # ----------------------------------------------------------------------
 
 def _cu_conventional() -> Atoms:
-    """Cu fcc conventional cell (4 atoms, a=3.61 Å) — examples/Cu_bulk.vasp."""
+    """Cu fcc conventional cell (4 atoms, a=3.61 Å)."""
     a = 3.61
     return Atoms(
         "Cu4",
@@ -140,22 +140,17 @@ def test_symmetrize_primitive_cu_standard_orientation():
     assert np.allclose(params[:3], 3.61 / np.sqrt(2), atol=1e-3)
     assert np.allclose(params[3:], 60.0, atol=1e-3)
     # standard presentation: a ∥ x, b in the xy-plane, c completes
-    # the rhombohedral cell with a positive z-component (the same
-    # presentation as VESTA and examples/Cu_bulk_primitive.vasp —
-    # c itself is NOT along z for a 60° rhombohedron)
+    # the rhombohedral cell with a positive z-component (c itself is
+    # NOT along z for a 60° rhombohedron)
     assert np.allclose(cell[0, 1:], 0.0, atol=1e-6)
     assert abs(cell[1, 2]) < 1e-6
     assert cell[0, 0] > 0 and cell[1, 1] > 0 and cell[2, 2] > 0
 
 
-def test_symmetrize_primitive_matches_reference_file():
-    """Loose reference check against examples/Cu_bulk_primitive.vasp."""
-    from pathlib import Path
-
-    from ase.io import read
-
-    ref = read(Path(__file__).parent.parent / "examples"
-               / "Cu_bulk_primitive.vasp")
+def test_symmetrize_primitive_matches_reference_file(cu_primitive_standard):
+    """Loose reference check against the standard-orientation primitive
+    (a = 3.61/√2, 60° rhombohedron, 1 atom)."""
+    ref = cu_primitive_standard
     atoms = symmetrize(_cu_conventional(), cell_type="primitive")
     assert len(ref) == 1
     assert np.allclose(np.sort(np.asarray(ref.get_cell().array), axis=0),
@@ -172,16 +167,13 @@ def test_symmetrize_conventional_unchanged_for_cu():
     assert np.allclose(atoms.get_cell().array, np.eye(3) * 3.61, atol=1e-6)
 
 
-def test_symmetrize_bcc_supercell_primitive_vs_conventional(tmp_path):
+def test_symmetrize_bcc_supercell_primitive_vs_conventional(
+        tmp_path, fe_bcc_2x2x2):
     """Fe bcc 2×2×2 (16 atoms): conventional → 2 atoms bcc,
     primitive → 1 atom with a = a_conv·√3/2."""
-    from pathlib import Path
-
     from ase.geometry import cell_to_cellpar
-    from ase.io import read
 
-    fe = read(Path(__file__).parent.parent / "examples"
-              / "Fe_bcc_2x2x2.vasp")
+    fe = fe_bcc_2x2x2
     conv = symmetrize(fe, cell_type="conventional")
     prim = symmetrize(fe, cell_type="primitive")
     assert conv is not None and len(conv) == 2

@@ -1306,18 +1306,12 @@ def test_surface_dialog_disordered_accept_warns(qtbot, monkeypatch,
     assert not dlg.result_structure.has_disorder
 
 
-def test_rebox_dialog_sets_result_and_vacuum(qtbot):
+def test_rebox_dialog_sets_result_and_vacuum(qtbot, cu111_slab):
     """ReBoxDialog stores the re-boxed atoms on OK."""
-    from pathlib import Path
-
-    from ase.io import read
-
     from vaspen.ui.rebox_dialog import ReBoxDialog
 
-    slab_in = read(Path(__file__).parent.parent / "examples"
-                   / "Cu_111_slab.vasp")
     model = StructureModel()
-    model.load_atoms(slab_in)
+    model.load_atoms(cu111_slab)
     dlg = ReBoxDialog(model)
     qtbot.addWidget(dlg)
     dlg._vacuum_spin.setValue(20.0)
