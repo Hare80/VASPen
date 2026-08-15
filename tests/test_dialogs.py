@@ -1197,7 +1197,8 @@ def test_surface_dialog_compute_runs_off_gui_thread(qtbot, srtio3, monkeypatch):
 
 def test_surface_dialog_rapid_param_changes_serialize(qtbot, srtio3, monkeypatch):
     """A parameter change arriving mid-compute must not be lost or race
-    the running task — it is queued and chained on completion."""
+    the running task — the old task is cancelled cooperatively and the
+    new computation starts immediately (cancel+restart)."""
     monkeypatch.setattr(
         "vaspen.ui.surface_dialog.slab_count", _fake_slab_count)
     monkeypatch.setattr(
@@ -1324,6 +1325,85 @@ def test_rebox_dialog_disordered_warns(qtbot, monkeypatch, disordered_atoms):
     assert dlg.result_atoms is not None
 
 
+def test_surface_dialog_close_cancels_worker(qtbot, srtio3, monkeypatch):
+    """reject() must stop the pool task cooperatively — without it the
+    worker computes every remaining termination into a dead dialog
+    (seconds of wasted pymatgen work, code review 2026-08-15)."""
+    seq = _SequencedSlabs(srtio3.copy(), n=4, delay=0.1)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq.count)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq.gen)
+    dlg = SurfaceDialog(StructureModel(srtio3), _FakeViewport())
+    qtbot.addWidget(dlg)
+    qtbot.waitUntil(lambda: dlg._termination_combo.count() == 4)
+    qtbot.waitUntil(lambda: len(seq.yielded) >= 1)
+    assert seq.order is not None and not seq.order.cancelled
+
+    dlg.reject()  # the user closes the dialog mid-compute
+    assert seq.order.cancelled
+    qtbot.wait(400)  # well past the remaining 3 × 0.1 s items
+    assert len(seq.yielded) < 4  # the worker stopped, not finished
+
+
+def test_surface_dialog_accept_cancels_worker(qtbot, srtio3, monkeypatch):
+    """Accepting the slab also stops the task — the same leak class."""
+    seq = _SequencedSlabs(srtio3.copy(), n=4, delay=0.1)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq.count)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq.gen)
+    dlg = SurfaceDialog(StructureModel(srtio3), _FakeViewport())
+    qtbot.addWidget(dlg)
+    qtbot.waitUntil(lambda: any(dlg._slab_infos))  # one slab is enough
+    dlg._on_accept()
+    assert dlg.result_structure is not None
+    assert seq.order.cancelled
+
+
+def test_surface_dialog_fallback_path_labels(qtbot, srtio3, monkeypatch):
+    """Whole-list fallback (slab_count unavailable → no total signal):
+    every item label carries the final denominator — earlier items are
+    re-labelled as the list grows (no stale "1/1" next to "2/2")."""
+    import time
+
+    from vaspen.core.surface import SlabInfo
+
+    def gen(atoms, miller, layers, vacuum, order=None):
+        for k in range(3):
+            time.sleep(0.05)
+            yield k, SlabInfo(atoms=atoms.copy(), top_composition=f"L{k}",
+                              bottom_composition="X", broken_bonds=0,
+                              n_atoms=len(atoms))
+
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count",
+                        lambda *a, **k: None)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", gen)
+    dlg = SurfaceDialog(StructureModel(srtio3), _FakeViewport())
+    qtbot.addWidget(dlg)
+    qtbot.waitUntil(lambda: not dlg._busy)
+    assert dlg._termination_combo.count() == 3
+    for i in range(3):
+        assert dlg._termination_combo.itemText(i).startswith(f"{i + 1}/3")
+    assert dlg._ok_button.isEnabled()
+
+
+def test_surface_dialog_retranslate_keeps_compute_status(qtbot, srtio3,
+                                                         monkeypatch):
+    """A language switch mid-compute must not wipe the "Computing
+    slab…" status (the retranslate only refreshes the info labels when
+    a preview is actually displayed)."""
+    from PySide6.QtCore import QEvent
+
+    seq = _SequencedSlabs(srtio3.copy(), n=2, delay=0.3)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq.count)
+    monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq.gen)
+    dlg = SurfaceDialog(StructureModel(srtio3), _FakeViewport())
+    qtbot.addWidget(dlg)
+    qtbot.waitUntil(lambda: dlg._termination_combo.count() == 2)
+    assert not any(dlg._slab_infos)  # nothing computed yet
+    dlg.changeEvent(QEvent(QEvent.Type.LanguageChange))
+    assert dlg._status_label.text()  # "Computing slab…" survived
+    _wait_slabs(qtbot, dlg, dlg._viewport, 1)
+    assert all(dlg._slab_infos)
+
+
 def test_surface_dialog_bulk_hint(qtbot, srtio3):
     """The cleave dialog states it is for bulk structures and points to
     Tools → Re-box Slab for vacuum-carrying inputs."""
@@ -1443,8 +1523,10 @@ def test_surface_dialog_param_change_during_load_is_immediate(qtbot, srtio3,
 
 def test_surface_dialog_destroyed_mid_compute_no_crash(qtbot, srtio3,
                                                        monkeypatch):
-    """Closing the dialog while a task is still running must not blow up
-    in the worker (the holder is gone — the task stops notifying)."""
+    """Destroying the dialog while a task is still running must not
+    blow up in the worker — emissions into the dead dialog are
+    discarded (reject() cancels the task cooperatively first; the
+    direct-destroy path is covered by the _notify guard)."""
     seq = _SequencedSlabs(srtio3.copy(), n=4, delay=0.1)
     monkeypatch.setattr("vaspen.ui.surface_dialog.slab_count", seq.count)
     monkeypatch.setattr("vaspen.ui.surface_dialog.iter_slabs", seq.gen)

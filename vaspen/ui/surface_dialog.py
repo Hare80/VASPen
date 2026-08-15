@@ -105,9 +105,9 @@ class _SlabTask(QRunnable):
 
     @staticmethod
     def _notify(signal, *args) -> bool:
-        """Emit a signal, or return False when the dialog (and its
-        holder) was destroyed while the task was running — a cancelled
-        task can outlive the dialog briefly; nothing left to notify."""
+        """Emit a signal, or return False when the holder was destroyed
+        while the task was running (defensive — nothing left to
+        notify)."""
         try:
             signal.emit(*args)
             return True
@@ -371,13 +371,21 @@ class SurfaceDialog(QDialog):
         if index >= len(self._slab_infos):
             self._slab_infos.append(info)  # whole-list fallback (no total)
             self._termination_combo.setEnabled(True)
-            self._termination_combo.addItem(
-                self.tr("{i}/{n} — top: {top}, bottom: {bottom}").format(
-                    i=len(self._slab_infos),
-                    n=len(self._slab_infos),
-                    top=_subscript_formula(info.top_composition),
-                    bottom=_subscript_formula(info.bottom_composition),
-                ))
+            # the total is unknown here — re-label ALL items with the
+            # growing denominator so earlier entries do not stay
+            # "1/1" once a second item arrives
+            n = len(self._slab_infos)
+            self._termination_combo.addItem("")
+            for i in range(n):
+                self._termination_combo.setItemText(
+                    i,
+                    self.tr("{i}/{n} — top: {top}, bottom: {bottom}").format(
+                        i=i + 1, n=n,
+                        top=_subscript_formula(
+                            self._slab_infos[i].top_composition),
+                        bottom=_subscript_formula(
+                            self._slab_infos[i].bottom_composition),
+                    ))
         else:
             self._slab_infos[index] = info
             self._termination_combo.setItemText(
@@ -551,16 +559,31 @@ class SurfaceDialog(QDialog):
             )
             return
         self.result_structure = StructureModel(atoms.copy())
+        self._cancel_compute()
         self.accept()
 
     def reject(self) -> None:
         """Restore the viewport to the real model state before closing."""
+        self._cancel_compute()
         self._viewport.set_structure(self._model.atoms, reset_view=False,
                                      bonds=self._model.bonds,
                                      fixed=self._model.fixed_flags)
         self._viewport.set_highlight(self._model.selected_indices)
         self._viewport.set_bond_highlight(self._model.selected_bonds)
         super().reject()
+
+    def _cancel_compute(self) -> None:
+        """Stop the pool task and discard its queued emissions.
+
+        Without this the worker computes every remaining termination
+        into a dead dialog after close/accept (its holder survives the
+        deferred delete for as long as the task runs — seconds of
+        pymatgen work). The generation bump also discards emissions
+        already queued between close and the deferred delete: a late
+        item must not re-push a preview over the restored model.
+        """
+        self._generation += 1
+        self._order.cancelled = True
 
     # ------------------------------------------------------------------
     # Language switching (non-modal/persistent → live retranslate)
@@ -598,4 +621,8 @@ class SurfaceDialog(QDialog):
             "dialog."))
         self._rebuild_termination_combo()
         self._set_hint(self._hint_state, self._hint_detail)
-        self._update_info_labels()
+        # only refresh the preview info when a preview is actually
+        # shown — mid-compute (no slab yet) this would wipe the
+        # "Computing terminations k/n…" status label
+        if self._displayed_atoms() is not None:
+            self._update_info_labels()
