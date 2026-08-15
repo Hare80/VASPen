@@ -166,10 +166,7 @@
             <source>Structure</source>
             <translation>结构</translation>
         </message>
-        <message>
-            <source>Open a file to view structure details.</source>
-            <translation>打开文件以查看结构详情。</translation>
-        </message>
+        
         <message>
             <source>New Structure</source>
             <translation>新建结构</translation>
@@ -224,40 +221,12 @@
             <source>Export Failed</source>
             <translation>导出失败</translation>
         </message>
-        <message>
-            <source>POTCAR Library Not Configured</source>
-            <translation>未配置 POTCAR 库</translation>
-        </message>
-        <message>
-            <source>POTCAR library path is not set. Generate without POTCAR?
-
-You can configure it in Edit → Preferences.</source>
-            <translation>未设置 POTCAR 库路径。是否不生成 POTCAR？
-
-可在 编辑 → 首选项 中配置。</translation>
-        </message>
-        <message>
-            <source>Choose Output Directory</source>
-            <translation>选择输出目录</translation>
-        </message>
-        <message>
-            <source>VASP input files generated in: {}</source>
-            <translation>VASP 输入文件已生成于：{}</translation>
-        </message>
-        <message>
-            <source>Success</source>
-            <translation>成功</translation>
-        </message>
-        <message>
-            <source>Generated files in:
-{}
-
-Files: {}</source>
-            <translation>已生成文件于：
-{}
-
-文件：{}</translation>
-        </message>
+        
+        
+        
+        
+        
+        
         <message>
             <source>Generation Failed</source>
             <translation>生成失败</translation>
@@ -290,14 +259,8 @@ Files: {}</source>
             <source>Edit the unit cell parameters with live preview</source>
             <translation>实时预览编辑晶胞参数</translation>
         </message>
-        <message>
-            <source>&amp;Transform...</source>
-            <translation>变换(&amp;T)...</translation>
-        </message>
-        <message>
-            <source>Translate, rotate or align atoms numerically</source>
-            <translation>数值平移、旋转或对齐原子</translation>
-        </message>
+        
+        
         <message>
             <source>Find &amp;Symmetry...</source>
             <translation>查找对称性(&amp;S)...</translation>
@@ -314,10 +277,7 @@ Files: {}</source>
             <source>Lattice editing requires a periodic structure (a full-rank cell with periodic boundary conditions).</source>
             <translation>编辑晶格需要周期结构（满秩晶胞且具有周期性边界条件）。</translation>
         </message>
-        <message>
-            <source>Transform applied.</source>
-            <translation>已应用变换。</translation>
-        </message>
+        
         <message>
             <source>Structure symmetrized.</source>
             <translation>已对称化结构。</translation>
@@ -454,10 +414,7 @@ Files: {}</source>
             <source>Bond created: {}–{}</source>
             <translation>已创建键：{}–{}</translation>
         </message>
-        <message>
-            <source>Bond removed: {}–{}</source>
-            <translation>已删除键：{}–{}</translation>
-        </message>
+        
         <message>
             <source>Bond {}–{} (order {})</source>
             <translation>键 {}–{}（键级 {}）</translation>
@@ -618,10 +575,7 @@ Files: {}</source>
             <source>Cannot move frozen atoms — unfreeze them first.</source>
             <translation>无法移动已冻结的原子——请先解冻。</translation>
         </message>
-        <message>
-            <source>Some atoms are frozen. Unfreeze them before transforming.</source>
-            <translation>存在已冻结的原子，请先解冻再进行变换。</translation>
-        </message>
+        
         <message>
             <source>Some atoms are frozen. Unfreeze them before symmetrizing.</source>
             <translation>存在已冻结的原子，请先解冻再查找对称性。</translation>
@@ -674,7 +628,19 @@ Files: {}</source>
             <source>Nothing to redo for this image.</source>
             <translation>该图像没有可重做的操作。</translation>
         </message>
-    <message><source>&amp;Re-box Slab...</source><translation>重新装盒(&amp;R)...</translation></message><message><source>Re-apply the vacuum of a structure that already carries it (e.g. a cut surface)</source><translation>重新施加已有结构的真空层(例如切面)</translation></message></context>
+    <message><source>&amp;Re-box Slab...</source><translation>重新装盒(&amp;R)...</translation></message><message><source>Re-apply the vacuum of a structure that already carries it (e.g. a cut surface)</source><translation>重新施加已有结构的真空层(例如切面)</translation></message><message><source>Re-box Slab</source><translation>重新装盒</translation></message><message><source>Re-boxing requires a periodic structure (a full-rank cell with periodic boundary conditions).</source><translation>重新装盒需要周期结构（满秩晶胞且具有周期性边界条件）。</translation></message><message><source>Slab re-boxed (vacuum along c).</source><translation>已重新装盒切面（真空沿 c 方向）。</translation></message><message><source>Creating a supercell</source><translation>创建超胞</translation></message><message><source>Load a bulk structure before cleaving a surface.</source><translation>解理表面前请先加载一个体相结构。</translation></message><message><source>No Structure</source><translation>没有结构</translation></message><message><source>Partial Occupancy</source><translation>部分占据</translation></message><message><source>Symmetry</source><translation>对称性</translation></message><message><source>This structure has partial occupancy (disorder).
+The VASP POSCAR format does not support fractional occupancy — the saved file will contain only the dominant species per site and the composition information will be lost.
+
+Continue saving?</source><translation>此结构含有部分占据(无序)。
+VASP POSCAR 格式不支持分数占据——保存的文件中每个位点仅保留主要元素，成分信息将丢失。
+
+是否继续保存？</translation></message><message><source>This structure has partial occupancy (disorder).
+{} will discard the fractional occupancy information.
+
+Continue?</source><translation>此结构含有部分占据(无序)。
+{}将丢弃分数占据信息。
+
+是否继续？</translation></message><message><source>Wrap in Periodic Cell</source><translation>包裹为周期性晶胞</translation></message></context>
     <context>
         <name>Viewport3D</name>
         <message>
@@ -1721,10 +1687,7 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
             <source>&amp;Symmetrize</source>
             <translation>对称化(&amp;S)</translation>
         </message>
-        <message>
-            <source>Standardize the cell and positions to the conventional cell</source>
-            <translation>将晶胞与位置标准化为常规晶胞</translation>
-        </message>
+        
         <message>
             <source>Could not symmetrize the structure.</source>
             <translation>无法对称化该结构。</translation>
@@ -2047,10 +2010,7 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
             <source>Load a bulk structure before cleaving a surface.</source>
             <translation>请先载入体相结构再解理表面。</translation>
         </message>
-        <message>
-            <source>Invalid Miller Indices</source>
-            <translation>米勒指数无效</translation>
-        </message>
+        
         <message>
             <source>At least one Miller index must be non-zero.</source>
             <translation>至少一个米勒指数必须非零。</translation>
@@ -2075,7 +2035,7 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
             <source>In-plane supercell size (a × b). The vacuum direction (c) is never expanded.</source>
             <translation>面内超胞尺寸（a × b）。真空层方向（c）不扩展。</translation>
         </message>
-    <message><source>Computing slab…</source><translation>正在计算切面…</translation></message><message><source>  (re-boxed — input already carried vacuum)</source><translation>  (已重新装盒——输入已带真空)</translation></message><message><source>Partial Occupancy</source><translation>部分占据(无序)</translation></message><message><source>This structure has partial occupancy (disorder).
+    <message><source>Computing slab…</source><translation>正在计算切面…</translation></message><message><source>Partial Occupancy</source><translation>部分占据(无序)</translation></message><message><source>This structure has partial occupancy (disorder).
 Cleaving will discard the fractional occupancy information.
 
 Continue?</source><translation>此结构含有部分占据(无序)。

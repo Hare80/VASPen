@@ -1490,7 +1490,7 @@ class MainWindow(QMainWindow):
 
         self.act_lang_en.setChecked(lang == "en")
         self.act_lang_zh.setChecked(lang == "zh")
-        self._set_status("中文" if lang == "zh" else "English")
+        self._set_status(self.tr("中文") if lang == "zh" else self.tr("English"))
 
     # ------------------------------------------------------------------
     # Help
