@@ -49,7 +49,7 @@ See [pyproject.toml](pyproject.toml) for full dependency list.
 
 ```bash
 # Clone and enter project
-git clone <repo-url> VASPen
+git clone https://github.com/Hare80/VASPen.git VASPen
 cd VASPen
 
 # Create virtual environment
@@ -95,6 +95,10 @@ VASPen/
 ├── pyproject.toml
 ├── README.md
 ├── CLAUDE.md               # Developer documentation
+├── docs/
+│   ├── user-guide-en.md    # User manual (English)
+│   ├── user-guide-zh.md    # User manual (Chinese)
+│   └── reviews/            # Internal code-review reports
 ├── vaspen/
 │   ├── main.py             # Entry point
 │   ├── ui/                 # PySide6 widgets
