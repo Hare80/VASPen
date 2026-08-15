@@ -168,6 +168,27 @@ def test_surface_compositions_coplanar_merge():
     assert _surface_compositions(atoms) == ("O2", "Ti")
 
 
+def test_surface_compositions_rumpled_mixed_face():
+    """A mixed surface plane rumpled < 0.1 Å is ONE layer, not two.
+
+    The tolerance floor (0.1 Å) merges genuine co-planar offsets — the
+    pure 0.49×min_gap factor only captured atoms rounding to the same
+    0.001 Å bucket and silently dropped the second species of a rumpled
+    mixed face (code review 2026-08-15).
+    """
+    atoms = Atoms(
+        "TiSrO",
+        cell=[[3.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 20.0]],
+        pbc=True,
+        positions=[
+            [1.5, 1.5, 0.0],    # Ti (bottom)
+            [1.5, 1.5, 18.0],   # Sr (top plane)
+            [1.0, 1.0, 18.03],  # O  (same top plane, rumpled 0.03 Å)
+        ],
+    )
+    assert _surface_compositions(atoms) == ("SrO", "Ti")
+
+
 def test_subscript_formula():
     assert _subscript_formula("TiO2") == "TiO₂"
     assert _subscript_formula("Ga2") == "Ga₂"
@@ -295,6 +316,18 @@ def test_rebox_slab_keeps_atom_order():
     assert out.get_chemical_symbols() == inp.get_chemical_symbols()
 
 
+def test_rebox_slab_rejects_non_periodic_and_bad_vacuum():
+    """Core-layer contract: translatable ValueError, never raw numpy
+    errors (a molecule used to leak a LinAlgError from the scaled-
+    position solve; code review 2026-08-15)."""
+    mol = Atoms("H2O", positions=[[0.0, 0.0, 0.0], [0.0, 0.96, 0.0],
+                                  [0.93, -0.24, 0.0]])
+    with pytest.raises(ValueError):
+        rebox_slab(mol, 15.0)
+    with pytest.raises(ValueError):
+        rebox_slab(_cu111_slab(), 0.0)
+
+
 # ----------------------------------------------------------------------
 # Incremental termination computation (2026-08-15, performance work)
 # ----------------------------------------------------------------------
@@ -333,6 +366,41 @@ def test_iter_slabs_matches_slabs_and_order_hint():
     assert second_idx == 1
     rest = [idx for idx, _info in gen]
     assert sorted(rest + [first_idx, second_idx]) == [0, 1]
+
+
+def test_iter_slabs_priority_yields_each_index_once(srtio3):
+    """A priority jump must never build the same slab twice.
+
+    Regression (code review 2026-08-15): the sequential cursor did not
+    know about priority-jumped indices and re-yielded them — e.g.
+    [0, 2, 1, 2, 3] for a 4-termination cell. Every index must be
+    yielded exactly once, in its canonical slot.
+    """
+    from vaspen.core.surface import _ComputeOrder, iter_slabs, slab_count
+
+    srtio3 = srtio3.repeat((2, 2, 2))
+    # (100) with layers=4: 4 terminations (empirical pin, pymatgen
+    # 2026.5.4 — same structure used to reproduce the bug)
+    assert slab_count(srtio3, (1, 0, 0), 4, 15.0) == 4
+
+    def sequence(initial: int = -1, jump_after: int | None = None,
+                 jump_to: int = -1) -> list[int]:
+        order = _ComputeOrder()
+        order.priority = initial
+        idxs: list[int] = []
+        for i, (idx, _info) in enumerate(
+                iter_slabs(srtio3, (1, 0, 0), 4, 15.0, order=order)):
+            idxs.append(idx)
+            if jump_after is not None and i == jump_after:
+                order.priority = jump_to
+        return idxs
+
+    # click index 2 right after the first item lands
+    assert sequence(jump_after=0, jump_to=2) == [0, 2, 1, 3]
+    # priority already set when the compute starts
+    assert sequence(initial=2) == [2, 0, 1, 3]
+    # priority naming the index the cursor would take anyway
+    assert sequence(initial=0) == [0, 1, 2, 3]
 
 
 def test_unwrap_layers_folds_wrapped_slab():

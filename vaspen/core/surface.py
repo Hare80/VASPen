@@ -78,6 +78,11 @@ def _reduce_in_plane(a: np.ndarray, b: np.ndarray,
                      abs(float(np.dot(w1, w2))))
             if best is None or score < best[0]:
                 best = (score, w1.copy(), w2.copy())
+    if best is None:
+        # unreachable for full-rank cells (the (b, a) pair always spans
+        # the lattice) — defensive, per the core-layer contract of
+        # translatable ValueErrors (no raw TypeErrors from internals)
+        raise ValueError("No in-plane basis pair spans the lattice.")
     _, v1, v2 = best
     return v1, v2
 
@@ -161,16 +166,18 @@ def _surface_compositions(atoms: Atoms) -> tuple[str, str]:
 
     Deterministic pure-numpy projection: positions are projected on
     the c-vector; a layer is everything within ``tol`` of the min/max
-    projected plane. The 0.49 factor keeps intra-double-layer planes
-    of zincblende (111) (~0.8 Å apart) distinct while merging
-    co-planar atoms.
+    projected plane. ``tol = min(1.0, max(0.49 × min plane gap,
+    0.1 Å))``: the 0.1 Å floor merges genuinely co-planar sub-planes
+    (a rumpled mixed face) while the 0.49 factor keeps the
+    intra-double-layer planes of zincblende (111) (~0.8 Å apart)
+    distinct.
     """
     c = np.asarray(atoms.get_cell()[2], dtype=float)
     c = c / np.linalg.norm(c)
     proj = np.asarray(atoms.get_positions()) @ c
     uniq = np.sort(np.unique(np.round(proj, 3)))
     gaps = np.diff(uniq)
-    tol = min(1.0, 0.49 * float(gaps.min())) if len(gaps) > 0 else 1.0
+    tol = min(1.0, max(0.49 * float(gaps.min()), 0.1)) if len(gaps) > 0 else 1.0
     symbols = atoms.get_chemical_symbols()
     top = Counter(sym for sym, p in zip(symbols, proj) if p > proj.max() - tol)
     bot = Counter(sym for sym, p in zip(symbols, proj) if p < proj.min() + tol)
@@ -255,7 +262,17 @@ def rebox_slab(atoms: Atoms, vacuum: float) -> Atoms:
     is untouched, the atom order and set are unchanged (fixed flags /
     magnetic moments map 1:1); only the c length and a rigid c-shift
     differ from the input.
+
+    Raises:
+        ValueError: If the cell is not full-rank with pbc (a molecule
+            cannot be re-boxed) or ``vacuum`` is not positive.
     """
+    if not (atoms.get_cell().rank == 3 and atoms.pbc.any()):
+        raise ValueError("Re-boxing requires a periodic structure "
+                         "(a full-rank cell with periodic boundary "
+                         "conditions).")
+    if not float(vacuum) > 0:
+        raise ValueError("Vacuum must be positive.")
     out = _unwrap_layers(atoms)
     cell = np.asarray(out.get_cell().array, dtype=float)
     c = cell[2]
@@ -420,136 +437,6 @@ def _possible_terminations(gen: SlabGenerator) -> list[float]:
     return _plane_data(gen)[2]
 
 
-def _slab_generator(atoms: Atoms, miller: tuple[int, int, int],
-                    layers: int, vacuum: float) -> SlabGenerator:
-    """The pymatgen SlabGenerator with the project's fixed settings.
-
-    ``center_slab=False``: pymatgen's centering does per-atom neighbor
-    searches (~10× slower than everything else combined, profiled) —
-    our `_standard_slab_cell` centers exactly anyway. Single place so
-    ``iter_slabs`` and ``slab_count`` stay in sync.
-    """
-    return SlabGenerator(
-        AseAtomsAdaptor.get_structure(atoms),
-        miller,
-        min_slab_size=layers * _d_hkl(atoms, miller),
-        min_vacuum_size=float(vacuum),
-        center_slab=False,
-    )
-
-
-def _proj_height(gen: SlabGenerator) -> float:
-    """The projection of the ouc c vector onto the surface normal.
-
-    The ouc c is only "as normal as possible" and is NOT parallel for
-    e.g. cubic (111), where proj_height = |c|/√3. Prefer pymatgen's
-    private value verbatim (exact match with its own clustering); fall
-    back to the same formula pymatgen's __init__ uses.
-    """
-    try:
-        return float(gen._proj_height)  # noqa: SLF001
-    except AttributeError:
-        normal = gen.parent.lattice.reciprocal_lattice.get_cartesian_coords(
-            gen.miller_index)
-        normal = normal / np.linalg.norm(normal)
-        return abs(float(
-            np.dot(normal, gen.oriented_unit_cell.lattice.matrix[2])))
-
-
-def _plane_data(gen: SlabGenerator) -> tuple[list[float], list[str], list[float]]:
-    """(plane positions, plane formulas, shifts) — instant, no slab built.
-
-    Ported from pymatgen ``SlabGenerator.get_slabs``' internal
-    ``gen_possible_terminations`` (pymatgen is MIT-licensed): cluster
-    the oriented-unit-cell z-coordinates with scipy's fcluster. The
-    planes are the wrapped cluster positions (clusters landing on the
-    same wrapped z are merged, their symbols combined into the plane
-    formula); the shifts are the midpoints between consecutive planes.
-    """
-    import itertools
-    import math
-
-    from scipy.cluster.hierarchy import fcluster, linkage
-    from scipy.spatial.distance import squareform
-
-    frac_coords = gen.oriented_unit_cell.frac_coords
-    n_atoms = len(frac_coords)
-    if n_atoms == 1:
-        # put the atom in the center
-        termination = frac_coords[0][2] + 0.5
-        z = termination - math.floor(termination)
-        return [z], [str(gen.oriented_unit_cell[0].specie)], [z]
-    proj_height = _proj_height(gen)
-    dist_matrix = np.zeros((n_atoms, n_atoms), dtype=np.float64)
-    for i, j in itertools.combinations(range(n_atoms), 2):
-        z_dist = frac_coords[i][2] - frac_coords[j][2]
-        z_dist = abs(z_dist - round(z_dist)) * proj_height
-        dist_matrix[i, j] = z_dist
-        dist_matrix[j, i] = z_dist
-    clusters = fcluster(linkage(squareform(dist_matrix)), 0.1,
-                        criterion="distance")
-    # one z and one composition per CLUSTER (pymatgen dedupes by cluster
-    # id too — merging by per-atom wrapped z would split clusters that
-    # straddle the periodic boundary into near-duplicate planes)
-    reps: dict[int, float] = {}
-    comps: dict[int, Counter] = {}
-    for idx, clst in enumerate(clusters):
-        reps[clst] = frac_coords[idx][2]
-        comps.setdefault(clst, Counter())[
-            str(gen.oriented_unit_cell[idx].specie)] += 1
-    planes: dict[float, Counter] = {}
-    for clst, z in reps.items():
-        planes.setdefault(z - math.floor(z), Counter()).update(comps[clst])
-    positions = sorted(planes)
-    formulas = [_layer_formula(planes[z]) for z in positions]
-    n_terms = len(positions)
-    terminations: list[float] = []
-    for idx in range(n_terms):
-        if idx == n_terms - 1:
-            # first-last pair closes the periodic boundary
-            termination = (positions[0] + 1 + positions[idx]) * 0.5
-        else:
-            termination = (positions[idx] + positions[idx + 1]) * 0.5
-        terminations.append(termination - math.floor(termination))
-    return positions, formulas, sorted(terminations)
-
-
-def _possible_terminations(gen: SlabGenerator) -> list[float]:
-    """The termination shift values of a generator (instant — no slab)."""
-    return _plane_data(gen)[2]
-
-
-def termination_labels(
-    atoms: Atoms,
-    miller: tuple[int, int, int],
-    layers: int = 4,
-    vacuum: float = 15.0,
-) -> list[tuple[str, str]]:
-    """``(top, bottom)`` composition formulas per termination — instant.
-
-    The labels depend only on which atomic planes the termination sits
-    between (bottom = the first plane above the shift; top = the last
-    plane within the slab height, with periodic wrapping) — pure
-    clustering math, no slab built. The output equals what
-    ``_surface_compositions`` reports for the actually-built slabs.
-    """
-    gen = _slab_generator(atoms, miller, layers, vacuum)
-    positions, formulas, shifts = _plane_data(gen)
-    if not shifts:
-        return []
-    # pymatgen's get_slab stacks ceil(min_slab_size/proj_height) COMPLETE
-    # ouc repeats — an integer — so the slab always contains every plane
-    # the same number of times: the bottom is the plane just above the
-    # shift, the top is the plane just below it (the region closes back
-    # onto the cut after a whole number of periods).
-    n = len(positions)
-    labels: list[tuple[str, str]] = []
-    for s in shifts:
-        bi = next((i for i in range(n) if positions[i] > s - 1e-12), 0)
-        labels.append((formulas[(bi - 1) % n], formulas[bi]))
-    return labels
-
-
 def slab_count(atoms: Atoms, miller: tuple[int, int, int],
                layers: int = 4, vacuum: float = 15.0) -> int | None:
     """Number of terminations — instant (no slab is built).
@@ -611,7 +498,11 @@ def iter_slabs(
         if order is not None and order.priority in pending:
             index = order.priority  # clicked item jumps the queue
         else:
-            index = next(sequential)
+            # advance the cursor past every already-computed index — a
+            # priority jump computes an index the sequential cursor has
+            # not reached yet, and yielding it again would build the
+            # slab twice
+            index = next(i for i in sequential if i in pending)
         slab = gen.get_slab(shifts[index], tol=0.1)
         yield index, _slab_info(slab, vacuum)
         pending.discard(index)

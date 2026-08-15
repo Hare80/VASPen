@@ -161,9 +161,9 @@ def find_bonds(
         List of :class:`Bond` (single order) in (i, j) pair order.
 
     Structures larger than ``MAX_AUTO_BOND_ATOMS`` return an empty list:
-    the O(N²) minimum-image distance matrix blows up first (ASE computes
-    all 27 lattice-image shifts at once — at 4800 atoms that allocation
-    alone is ~4.8 GB). Manual bonds still work per pair.
+    the O(N²) minimum-image distance matrix and pair loop blow up first
+    (measured ~1.9 s at 1000 atoms, ~0.4 s at 500). Manual bonds still
+    work per pair.
     """
     n = len(positions)
     if n == 0:
