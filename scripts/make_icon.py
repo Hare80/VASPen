@@ -78,8 +78,10 @@ def render_icon_set(source: Path, out_dir: Path) -> dict[int, Path]:
     # Square fallback for the window icon — NEVER the raw 3:2 art
     # (Qt would stretch it into the square icon slot).
     img.resize((256, 256), Image.LANCZOS).save(out_dir / "app.png")
-    # Pillow ≥9.1 writes PNG-compressed ICO entries (Vista+ reads them;
-    # PyInstaller embeds them fine).
+    # PNG-compressed ICO entries (Pillow default). PyInstaller
+    # re-encodes whatever it is given into PNG entries for the exe
+    # anyway (verified: BMP input produced a byte-identical exe icon),
+    # so this is purely the size-optimal choice for the bundled file.
     img.resize((256, 256), Image.LANCZOS).save(
         out_dir / "app.ico",
         format="ICO",

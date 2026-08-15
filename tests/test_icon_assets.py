@@ -57,8 +57,7 @@ def _ico_entries(path: Path) -> list[tuple[int, int]]:
 
 
 def _ico_payload_magics(path: Path) -> list[bytes]:
-    """First 4 bytes of every entry's payload (the PNG signature check
-    — ICO entries must be PNG-compressed, a settled choice)."""
+    """First 4 bytes of every entry's payload (the encoding check)."""
     data = path.read_bytes()
     count = struct.unpack_from("<H", data, 4)[0]
     magics = []
@@ -161,6 +160,29 @@ def test_aumid_constant():
     from vaspen.main import WINDOWS_APP_USER_MODEL_ID
 
     assert WINDOWS_APP_USER_MODEL_ID == "VASPen"
+
+
+def test_icons_dir_dev_mode(monkeypatch):
+    """Dev mode resolves icons next to the package, not via _MEIPASS."""
+    from vaspen.main import _icons_dir
+
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    assert _icons_dir() == ICON_DIR
+
+
+def test_icons_dir_frozen(tmp_path):
+    """Frozen (PyInstaller onedir) resolves via _MEIPASS + the package
+    layout — the entry script is flattened to _internal/main.py while
+    the data keeps vaspen/resources, so __file__-relative paths are
+    wrong there. (The exe shipped with a NULL window icon until this
+    was fixed.)"""
+    from vaspen.main import _icons_dir
+
+    setattr(sys, "_MEIPASS", str(tmp_path))  # monkeypatch needs it to exist
+    try:
+        assert _icons_dir() == tmp_path / "vaspen" / "resources" / "icons"
+    finally:
+        del sys._MEIPASS
 
 
 def test_main_window_icon_smoke(qapp, qtbot):

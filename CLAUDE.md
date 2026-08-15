@@ -686,7 +686,9 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   letterbox → resize → save). Outputs: `app_16/24/32/48/64/128/256.png`
   (24 added for Windows small-icon contexts), `app.png` (256×256
   **square** letterboxed fallback — never the raw 3:2 art, Qt would
-  stretch it), `app.ico` (7 sizes, PNG-compressed entries). The 1.5 MB
+  stretch it), `app.ico` (7 sizes, PNG-compressed entries — PyInstaller
+  re-encodes ICO input into PNG exe resources regardless, verified
+  byte-identical, so PNG is the size-optimal choice). The 1.5 MB
   source PNG rides along in the PyInstaller dist by design.
 - **Scope: application icon only** (window title bar, taskbar, exe
   file icon). No toolbar/menu/About icons.
@@ -701,6 +703,12 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   swallowed.
 - `build.py` fails loudly when `app.ico` is missing (run
   `python scripts/make_icon.py` first).
+- **Frozen layout gotcha**: PyInstaller onedir flattens the entry
+  script to `_internal/main.py` while bundled data keeps the package
+  layout (`_internal/vaspen/resources`) — `__file__`-relative paths
+  resolve wrong when frozen. Icon loading uses `_icons_dir()` in
+  main.py (sys._MEIPASS + package layout when frozen); any new
+  resource-path code must do the same.
 
 ---
 

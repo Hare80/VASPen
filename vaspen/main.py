@@ -25,6 +25,19 @@ from vaspen.utils.logger import logger, setup_logger
 WINDOWS_APP_USER_MODEL_ID = "VASPen"
 
 
+def _icons_dir() -> Path:
+    """Icons directory, valid in dev and in the frozen app.
+
+    PyInstaller onedir flattens the entry script to ``_internal/
+    main.py`` while the bundled data keeps the package layout
+    (``_internal/vaspen/resources``) — so a ``__file__``-relative
+    path is wrong when frozen; use the extraction dir instead.
+    """
+    if getattr(sys, "_MEIPASS", None):
+        return Path(sys._MEIPASS) / "vaspen" / "resources" / "icons"
+    return Path(__file__).parent / "resources" / "icons"
+
+
 def _load_app_icon(icons_dir: Path) -> QIcon:
     """Build a multi-size icon so Windows picks the crispiest match.
 
@@ -82,7 +95,7 @@ def main() -> int:
     _set_windows_app_id()
 
     # --- Icon (set before show; Qt propagates it to the HWND itself) ---
-    icons_dir = Path(__file__).parent / "resources" / "icons"
+    icons_dir = _icons_dir()
     icon = _load_app_icon(icons_dir)
     app.setWindowIcon(icon)
 
