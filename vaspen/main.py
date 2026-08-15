@@ -5,6 +5,7 @@ Launches the QApplication, main window, and event loop.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -33,9 +34,14 @@ def _icons_dir() -> Path:
     main.py`` while the bundled data keeps the package layout
     (``_internal/vaspen/resources``) — so a ``__file__``-relative
     path is wrong when frozen; use the extraction dir instead.
+    Nuitka never sets ``sys._MEIPASS`` — detect its ``__compiled__``
+    marker and resolve next to the executable (build.py's
+    ``--include-data-dir`` puts the data at ``<dist>/vaspen/resources``).
     """
     if getattr(sys, "_MEIPASS", None):
         return Path(sys._MEIPASS) / "vaspen" / "resources" / "icons"
+    if "__compiled__" in globals():
+        return Path(sys.argv[0]).resolve().parent / "vaspen" / "resources" / "icons"
     return Path(__file__).parent / "resources" / "icons"
 
 
@@ -88,7 +94,18 @@ def main() -> int:
     app.setOrganizationDomain("vaspen.dev")
 
     # --- Logger ---
-    logger = setup_logger()
+    # A windowed exe has no stderr — StreamHandler(None) writes
+    # nowhere and diagnostics (icon/AUMID failures) become
+    # unrecoverable. Log to a file under LOCALAPPDATA when frozen.
+    log_file = None
+    if getattr(sys, "_MEIPASS", None) is not None or "__compiled__" in globals():
+        log_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "VASPen"
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / "vaspen.log"
+        except OSError:
+            log_file = None
+    logger = setup_logger(log_file=log_file)
 
     # --- Windows taskbar identity (dev mode otherwise shows python.exe) ---
     # MUST run before the main window is created: Explorer reads the

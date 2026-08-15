@@ -757,9 +757,10 @@ class MainWindow(QMainWindow):
     def _on_new(self) -> None:
         """Create a new empty structure (for now, reset to empty)."""
         # TODO: Launch a "new structure" dialog (crystal builder, import molecule, etc.)
-        if self._structure.n_atoms > 0:
-            # Only ask when there is something to discard — on an
-            # empty state (the welcome page) the question is noise.
+        if self._structure.n_atoms > 0 or self._structure.is_dirty:
+            # Only ask when there is something to discard — atoms, or
+            # undo history (a structure whose atoms were all deleted
+            # is dirty and Ctrl+Z could still restore them).
             reply = QMessageBox.question(
                 self,
                 self.tr("New Structure"),
@@ -1383,8 +1384,11 @@ class MainWindow(QMainWindow):
         """Swap the GL background to the theme default when the user
         never customized it (still the other theme's default); custom
         backgrounds are untouched. Persisted so a restart stays
-        coherent."""
-        rs = self._config.render_settings
+        coherent. Derived from the LIVE viewport settings — the
+        persisted config may lag behind unpersisted live toggles
+        (View-menu cell/label switches), and pushing a stale snapshot
+        would silently re-enable them."""
+        rs = self._viewport.render_settings()
         new_rs = theme.sync_background_for_theme(rs, name)
         if new_rs is not rs:
             self._viewport.set_render_settings(new_rs)
@@ -2008,6 +2012,10 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self._cell_label.setText(self.tr("a=— b=— c=—"))
+        else:
+            # Empty model (welcome page / fresh New): drop the previous
+            # structure's cell parameters instead of leaving them stale.
+            self._cell_label.setText("")
 
     def _set_status(self, message: str) -> None:
         self._status_label.setText(message)

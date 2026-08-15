@@ -150,7 +150,7 @@ def test_load_app_icon_not_null(qapp):
     icon = _load_app_icon(ICON_DIR)
     assert not icon.isNull()
     sizes = {(s.width(), s.height()) for s in icon.availableSizes()}
-    for size in (16, 24, 64, 128, 256):
+    for size in (16, 24, 32, 48, 64, 128, 256):
         assert (size, size) in sizes, sizes
 
 

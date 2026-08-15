@@ -31,10 +31,16 @@ def _tr(text: str) -> str:
     return QCoreApplication.translate("FileIO", text)
 
 
-# Map extensions → display name for file dialogs
+# Map extensions → display name for file dialogs. Every registered
+# extension must have an entry — the fallback renders the raw
+# extension uppercase ("EXTXYZ") in the dialog (pinned by
+# tests/test_i18n.py::test_fileio_context_sources_are_known_values).
 EXTENSION_DISPLAY_NAMES: dict[str, str] = {
     ".cif": "CIF — Crystallographic Information File",
     ".xyz": "XYZ — Extended XYZ",
+    ".extxyz": "Extended XYZ",
+    ".traj": "ASE Trajectory",
+    ".db": "ASE Database",
     ".vasp": "POSCAR / CONTCAR (VASP)",
     ".poscar": "POSCAR (VASP)",
     ".contcar": "CONTCAR (VASP)",

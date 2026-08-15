@@ -16,8 +16,9 @@ QDockWidget::title {
     background: #26262e;
     border: 1px solid #3a3a46;
     padding: 5px 8px;
-    titlebar-close-icon: none;
-    titlebar-normal-icon: none;
+    /* Close/float icons: the docks are closable by default and no
+       View-menu toggle exists — removing the icons would make the
+       docks impossible to hide. */
 }
 
 QMenuBar {

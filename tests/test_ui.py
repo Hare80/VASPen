@@ -7,7 +7,7 @@ import pytest
 from ase import Atoms
 from ase.io import read as ase_read
 from ase.io import write as ase_write
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from vaspen.core import file_io as fi
@@ -135,6 +135,78 @@ def test_welcome_browse_opens_file_dialog(window, monkeypatch):
         "PySide6.QtWidgets.QFileDialog.getOpenFileName", _fake_dialog)
     window._on_open()
     assert calls == [1]
+
+
+def test_delete_all_atoms_returns_to_welcome_and_undo_restores(
+        window, monkeypatch):
+    """§7.10: the welcome page comes back when the model is emptied
+    (structure_modified + n_atoms==0); undo restores the viewport."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(fi.FileIO, "read", classmethod(lambda cls, p: atoms))
+    window._open_file("fake.xyz")
+    assert window._central_stack.currentWidget() is window._viewport
+    window._structure.delete_atoms([0, 1])
+    assert window._central_stack.currentWidget() is window._welcome_page
+    assert window._structure.is_dirty
+    window._structure.undo()
+    assert window._central_stack.currentWidget() is window._viewport
+
+
+def test_clear_recent_refreshes_welcome_list(window, monkeypatch):
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(fi.FileIO, "read", classmethod(lambda cls, p: atoms))
+    window._open_file("fake.xyz")
+    assert window._welcome_page._recent_list.count() == 1
+    window._clear_recent()
+    assert window._welcome_page._recent_list.count() == 0
+    assert window._welcome_page._recent_list.isHidden()
+
+
+def test_dirty_empty_state_new_asks_confirm(window, monkeypatch):
+    """Atoms deleted but undo history non-empty = something to
+    discard: New must confirm even though n_atoms == 0."""
+    atoms = Atoms("H2", positions=[[0, 0, 0], [0.74, 0, 0]], cell=[10, 10, 10])
+    monkeypatch.setattr(fi.FileIO, "read", classmethod(lambda cls, p: atoms))
+    window._open_file("fake.xyz")
+    window._structure.delete_atoms([0, 1])
+    asked = []
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QMessageBox.question",
+        lambda *a, **k: asked.append(1) or QMessageBox.No,
+    )
+    window._on_new()
+    assert asked == [1]  # confirm shown; answer No → history survives
+    assert window._structure.is_dirty
+
+
+def test_welcome_selection_survives_recent_refresh(window, monkeypatch):
+    """Recents refresh live (language switch, open, save) — the user's
+    selection must not be silently dropped."""
+    window._welcome_page.set_recent_files(["D:/vasp/a.vasp", "D:/vasp/b.vasp"])
+    window._welcome_page._recent_list.setCurrentRow(1)
+    assert window._welcome_page.selected_file() == "D:/vasp/b.vasp"
+    window._welcome_page.set_recent_files(
+        ["D:/vasp/c.vasp", "D:/vasp/b.vasp"])
+    assert window._welcome_page.selected_file() == "D:/vasp/b.vasp"
+    assert window._welcome_page._open_btn.isEnabled()
+
+
+def test_welcome_retranslates_with_real_translator(window, qapp):
+    """The LanguageChange broadcast must actually retranslate (a test
+    without an installed translator cannot detect a missing setText)."""
+    from PySide6.QtCore import QTranslator
+
+    translator = QTranslator()
+    assert translator.load(str(Path(__file__).parent.parent / "vaspen"
+                               / "resources" / "i18n" / "vaspen_zh.qm"))
+    qapp.installTranslator(translator)
+    try:
+        qapp.sendEvent(window._welcome_page, QEvent(QEvent.Type.LanguageChange))
+        assert window._welcome_page._new_btn.text() == "新建结构..."
+        assert window._welcome_page._open_btn.text() == "打开"
+        assert window._welcome_page._browse_btn.text() == "浏览..."
+    finally:
+        qapp.removeTranslator(translator)
 
 
 def test_language_switch_is_live_and_roundtrips(window):

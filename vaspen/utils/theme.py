@@ -63,11 +63,14 @@ def is_dark() -> bool:
 def _palette(
     window: str, base: str, text: str, button: str, button_text: str,
     highlight: str, border_mid: str, disabled: str, input_base: str,
-    bright_text: str,
+    bright_text: str, light: str, dark: str, shadow: str,
 ) -> QPalette:
     """Build a Fusion palette. All three ColorGroups are set (the
     Disabled group is mandatory — Fusion otherwise renders disabled
-    text at full contrast)."""
+    text at full contrast). Light…Shadow roles must be set per theme —
+    Fusion draws scrollbars and bevel primitives from them, and their
+    system fallback is light-theme-colored (white scrollbar grooves in
+    the dark theme)."""
     pal = QPalette()
     roles = {
         QPalette.ColorRole.Window: window,
@@ -85,6 +88,10 @@ def _palette(
         QPalette.ColorRole.ToolTipText: text,
         QPalette.ColorRole.PlaceholderText: disabled,
         QPalette.ColorRole.Mid: border_mid,
+        QPalette.ColorRole.Light: light,
+        QPalette.ColorRole.Midlight: button,  # between button and light
+        QPalette.ColorRole.Dark: dark,
+        QPalette.ColorRole.Shadow: shadow,
     }
     for role, color in roles.items():
         for group in (QPalette.ColorGroup.Active,
@@ -112,14 +119,16 @@ _PALETTES = {
         window="#f0f0f0", base="#ffffff", text="#1a1a1a",
         button="#e8e8e8", button_text="#1a1a1a", highlight="#0078d4",
         border_mid="#dcdcdc", disabled="#8a8a8a", input_base="#ffffff",
-        bright_text="#c00000",
+        bright_text="#c00000", light="#ffffff", dark="#a0a0a0",
+        shadow="#808080",
     ),
     "dark": _palette(
         # Window matches the GL dark background default (#1e1e24).
         window="#1e1e24", base="#26262e", text="#e8e8ee",
         button="#2e2e38", button_text="#e8e8ee", highlight="#3179b8",
         border_mid="#2a2a33", disabled="#6f6f7a", input_base="#16161c",
-        bright_text="#ff5555",
+        bright_text="#ff5555", light="#3a3a46", dark="#16161c",
+        shadow="#0d0d12",
     ),
 }
 
@@ -133,13 +142,12 @@ def build_palette(name: str) -> QPalette:
 # Application
 # ----------------------------------------------------------------------
 
-def apply_theme(app, theme_name: str, themes_dir_: Path | None = None) -> None:
+def apply_theme(app, theme_name: str) -> None:
     """Apply a theme app-wide (Fusion style + palette + stylesheet).
 
     Args:
         app: The QApplication.
         theme_name: "light" or "dark".
-        themes_dir_: Override for the QSS directory (tests only).
 
     Raises:
         ValueError: If theme_name is not in THEMES.
@@ -151,10 +159,7 @@ def apply_theme(app, theme_name: str, themes_dir_: Path | None = None) -> None:
     # its own), so style → palette → stylesheet.
     app.setStyle("Fusion")
     app.setPalette(build_palette(theme_name))
-    if themes_dir_ is not None:
-        app.setStyleSheet((themes_dir_ / f"{theme_name}.qss").read_text("utf-8"))
-    else:
-        app.setStyleSheet(load_qss(theme_name))
+    app.setStyleSheet(load_qss(theme_name))
     _current = theme_name
 
 

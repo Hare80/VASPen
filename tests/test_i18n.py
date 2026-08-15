@@ -239,10 +239,13 @@ def test_compiled_zh_qm_resolves_rebox_strings():
 def test_en_ts_is_a_full_mirror_of_zh_ts():
     """en.ts is GENERATED from zh.ts (scripts/sync_en_ts.py): every
     message's translation equals its source — en IS the source
-    language, so the file must never be hand-edited or drift."""
-    root = ET.parse(I18N / "vaspen_en.ts").getroot()
+    language, so the file must never be hand-edited or drift. Both
+    directions: a hand-added zh entry without re-running the
+    regenerator must also fail."""
+    en_root = ET.parse(I18N / "vaspen_en.ts").getroot()
+    zh_root = ET.parse(I18N / "vaspen_zh.ts").getroot()
     broken = []
-    for ctx in root.findall("context"):
+    for ctx in en_root.findall("context"):
         name = ctx.find("name").text
         for msg in ctx.findall("message"):
             source = msg.find("source")
@@ -254,15 +257,68 @@ def test_en_ts_is_a_full_mirror_of_zh_ts():
                 broken.append(
                     f"{name}: {source.text!r} -> "
                     f"{translation.text if translation is not None else None!r}")
+    missing_in_en = []
+    for ctx in zh_root.findall("context"):
+        name = ctx.find("name").text
+        zh_sources = {_norm(m.find("source").text)
+                      for m in ctx.findall("message")
+                      if m.find("source") is not None
+                      and m.find("source").text is not None}
+        en_sources = {_norm(m.find("source").text)
+                      for m in en_root.findall(f".//context[name='{name}']/message")
+                      if m.find("source") is not None
+                      and m.find("source").text is not None}
+        for src in zh_sources - en_sources:
+            missing_in_en.append(f"{name}: {src!r}")
     assert not broken, "\n".join(broken)
+    assert not missing_in_en, "\n".join(missing_in_en)
+
+
+def test_no_literal_backslash_n_in_ts_sources():
+    """A .ts source that stores a literal backslash-n instead of a real
+    newline never matches the code's tr("...\\n...") literal at runtime
+    (QTranslator exact-matches strings) — the string ships English in
+    the zh UI while the parity tests (which normalize both sides) stay
+    green. Three SurfaceDialog sources shipped with this bug."""
+    broken = []
+    for ts_name in ("vaspen_zh.ts", "vaspen_en.ts"):
+        root = ET.parse(I18N / ts_name).getroot()
+        for ctx in root.findall("context"):
+            for msg in ctx.findall("message"):
+                source = msg.find("source")
+                if source is not None and source.text and "\\n" in source.text:
+                    broken.append(
+                        f"{ts_name} {ctx.find('name').text}: {source.text!r}")
+    assert not broken, "\n".join(broken)
+
+
+def test_compiled_zh_qm_resolves_every_zh_entry():
+    """The compiled .qm must cover EVERY zh.ts source — the old
+    4-string spot check let stale .qm files slip through."""
+    translator = QTranslator()
+    assert translator.load(str(I18N / "vaspen_zh.qm"))
+    unresolved = []
+    root = ET.parse(I18N / "vaspen_zh.ts").getroot()
+    for ctx in root.findall("context"):
+        name = ctx.find("name").text
+        for msg in ctx.findall("message"):
+            source = msg.find("source")
+            if source is None or source.text is None:
+                continue
+            translated = translator.translate(name, source.text)
+            if not translated:
+                unresolved.append(f"{name}: {source.text!r}")
+    assert not unresolved, "\n".join(unresolved)
 
 
 def test_fileio_context_sources_are_known_values():
     """FileIO strings are translated via ``_tr(dict_value)`` — the ast
-    walk cannot see them, so the context is hand-maintained. Pin that
-    every .ts FileIO source comes from EXTENSION_DISPLAY_NAMES or a
-    static ``_tr`` literal (a stale entry here would silently ship an
-    obsolete format name)."""
+    walk cannot see them, so the context is hand-maintained. Pin BOTH
+    directions: every .ts FileIO source comes from
+    EXTENSION_DISPLAY_NAMES or a static ``_tr`` literal (a stale entry
+    here would silently ship an obsolete format name), and every
+    display name + static literal exists in both .ts files (a new
+    format without an entry renders its raw extension in the dialog)."""
     import vaspen.core.file_io as file_io
 
     static = set()
@@ -278,5 +334,31 @@ def test_fileio_context_sources_are_known_values():
     known = {_norm(s) for s in set(file_io.EXTENSION_DISPLAY_NAMES.values())
              | static}
     for ts_name, messages in (("zh.ts", ZH), ("en.ts", EN)):
-        unknown = {_norm(s) for s in messages.get("FileIO", set())} - known
-        assert not unknown, f"{ts_name} FileIO: {sorted(unknown)}"
+        fileio_sources = messages.get("FileIO", set())
+        unknown = {_norm(s) for s in fileio_sources} - known
+        missing = known - {_norm(s) for s in fileio_sources}
+        assert not unknown, f"{ts_name} FileIO unknown: {sorted(unknown)}"
+        assert not missing, f"{ts_name} FileIO missing: {sorted(missing)}"
+
+
+def test_sync_en_ts_is_idempotent_and_bootstraps(tmp_path):
+    """The regenerator must be byte-stable on its own output and able
+    to create en.ts from scratch (missing/empty file — a fresh clone
+    can only regenerate via this script)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "sync_en_ts",
+        Path(__file__).parent.parent / "scripts" / "sync_en_ts.py")
+    sync = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sync)
+
+    zh_text = (I18N / "vaspen_zh.ts").read_text("utf-8")
+
+    # Bootstrap: empty en.ts input → full valid mirror document.
+    generated = sync.mirror(zh_text, "")
+    assert "<TS" in generated and "</TS>" in generated
+    assert sync._verify_mirror(generated) == []
+
+    # Idempotence: mirroring the generated output again is byte-equal.
+    assert sync.mirror(zh_text, generated) == generated

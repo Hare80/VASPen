@@ -30,6 +30,13 @@ EN = I18N / "vaspen_en.ts"
 
 _CTX_RE = re.compile(r"<context>.*?</context>", re.S)
 _NAME_RE = re.compile(r"<name>(.*?)</name>", re.S)
+#: Minimal en.ts document used to bootstrap the mirror when en.ts is
+#: missing/empty (a fresh clone must be able to regenerate it).
+_BOOTSTRAP = (
+    "<?xml version='1.0' encoding='utf-8'?>\n"
+    '<TS version="2.1" language="en_US" sourcelanguage="en_US">\n'
+    "</TS>\n"
+)
 #: Any-position match (zh.ts has single-line runs of several <message>
 #: blocks on one line — a line-anchored regex would miss them).
 _MSG_RE = re.compile(r"<message[^>]*>.*?</message>", re.S)
@@ -143,6 +150,10 @@ def mirror(zh_text: str, en_text: str) -> str:
     if missing:
         tail = out[-1]
         ts_pos = tail.find("</TS>")
+        if ts_pos == -1:
+            # Empty/missing en.ts — synthesize the document skeleton.
+            tail = _BOOTSTRAP
+            ts_pos = tail.find("</TS>")
         rendered = "\n".join(
             _render_context(name, zh_sources[name]) for name in missing)
         out[-1] = tail[:ts_pos] + rendered + "\n" + tail[ts_pos:]
@@ -174,15 +185,25 @@ def main(argv: list[str] | None = None) -> int:
     if not ZH.exists():
         print(f"zh.ts not found: {ZH}", file=sys.stderr)
         return 1
-    en_text = EN.read_text("utf-8") if EN.exists() else ""
+    en_text = EN.read_text("utf-8") if EN.exists() else _BOOTSTRAP
     generated = mirror(ZH.read_text("utf-8"), en_text)
-    broken = _verify_mirror(generated)
+    # Preserve en.ts's own line endings (CRLF on this machine's
+    # checkout; regenerating on Linux must not flip the whole file).
+    if "\r\n" in en_text:
+        generated = generated.replace("\n", "\r\n")
+    try:
+        broken = _verify_mirror(generated)
+    except ET.ParseError as exc:
+        print(f"generated en.ts does not parse: {exc}", file=sys.stderr)
+        return 1
     if broken:
         print("mirror verification failed:", file=sys.stderr)
         for entry in broken:
             print(f"  {entry}", file=sys.stderr)
         return 1
-    EN.write_text(generated, "utf-8")
+    # write_bytes: no newline translation (write_text would double the
+    # CRs of CRLF content on Windows).
+    EN.write_bytes(generated.encode("utf-8"))
     n_messages = len(_MSG_RE.findall(generated))
     print(f"en.ts regenerated from zh.ts ({n_messages} messages) -> {EN}")
     return 0

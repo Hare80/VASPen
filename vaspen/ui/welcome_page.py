@@ -130,13 +130,19 @@ class WelcomePage(QWidget):
 
     def set_recent_files(self, files: list[str]) -> None:
         """Fill the recent list (filename + full-path tooltip). An
-        empty list hides the list and shows the hint label."""
+        empty list hides the list and shows the hint label. A prior
+        selection is preserved by path (refreshes happen live — e.g.
+        on language switch — and must not silently drop the user's
+        selection)."""
+        selected = self.selected_file()
         self._recent_list.clear()
         for fp in files:
             item = QListWidgetItem(Path(fp).name)
             item.setToolTip(fp)
             item.setData(Qt.ItemDataRole.UserRole, fp)
             self._recent_list.addItem(item)
+            if selected is not None and fp == selected:
+                self._recent_list.setCurrentItem(item)
         has_files = bool(files)
         self._recent_list.setVisible(has_files)
         self._no_recent_label.setVisible(not has_files)

@@ -1569,6 +1569,18 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
       <translation>Gaussian Cube</translation>
     </message>
     <message>
+      <source>Extended XYZ</source>
+      <translation>Extended XYZ</translation>
+    </message>
+    <message>
+      <source>ASE Trajectory</source>
+      <translation>ASE Trajectory</translation>
+    </message>
+    <message>
+      <source>ASE Database</source>
+      <translation>ASE Database</translation>
+    </message>
+    <message>
       <source>Cannot save a non-periodic structure in {} format: a unit cell is required.</source>
       <translation>Cannot save a non-periodic structure in {} format: a unit cell is required.</translation>
     </message>
@@ -2099,16 +2111,20 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
       <translation>Layers:</translation>
     </message>
     <message>
-      <source>Number of atomic layers in the slab.\nMore layers = thicker slab, more computational cost.</source>
-      <translation>Number of atomic layers in the slab.\nMore layers = thicker slab, more computational cost.</translation>
+      <source>Number of atomic layers in the slab.
+More layers = thicker slab, more computational cost.</source>
+      <translation>Number of atomic layers in the slab.
+More layers = thicker slab, more computational cost.</translation>
     </message>
     <message>
       <source>Vacuum:</source>
       <translation>Vacuum:</translation>
     </message>
     <message>
-      <source>Vacuum thickness added above the slab.\nStandard: 10–15 Å for surface calculations.</source>
-      <translation>Vacuum thickness added above the slab.\nStandard: 10–15 Å for surface calculations.</translation>
+      <source>Vacuum thickness added above the slab.
+Standard: 10–15 Å for surface calculations.</source>
+      <translation>Vacuum thickness added above the slab.
+Standard: 10–15 Å for surface calculations.</translation>
     </message>
     <message>
       <source>Termination</source>
@@ -2157,8 +2173,10 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
       <translation>Could not create slab.</translation>
     </message>
     <message>
-      <source>Could not create slab:\n{}</source>
-      <translation>Could not create slab:\n{}</translation>
+      <source>Could not create slab:
+{}</source>
+      <translation>Could not create slab:
+{}</translation>
     </message>
     <message>
       <source>Supercell (a×b):</source>

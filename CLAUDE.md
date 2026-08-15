@@ -738,10 +738,13 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   package layout is intact when frozen; only the entry script
   flattens — do not move the resolution into main.py).
 - **The two QSS files are structural mirrors** (same selector list,
-  mirrored values) — edit both. No font rules, no scrollbar rules
-  (palette Light…Shadow roles drive Fusion scrollbars). `:default`
-  borders stay 1px (widening shifts dialog layouts). `QMenu::item`
-  padding keeps 24px left for checkable indicators.
+  mirrored values; pinned by a selector-parity test) — edit both. No
+  font rules, no scrollbar rules (the palette Light…Shadow roles ARE
+  set per theme and drive Fusion scrollbars). `:default` borders stay
+  1px (widening shifts dialog layouts). `QMenu::item` padding keeps
+  24px left for checkable indicators. Dock title bars keep their
+  DEFAULT close/float icons (no View-menu toggle exists — removing
+  the icons would make the docks impossible to hide).
 - **No new hardcoded widget colors.** The three old hardcoded hint
   colors were replaced by `setProperty("hintKind", "error"|"warn")`
   + `QLabel[hintKind=…]` rules in both themes (property selectors
@@ -754,8 +757,11 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   OTHER theme's preset default (white ↔ `#1e1e24`), switching themes
   swaps it to the new default — and persists it
   (`MainWindow._sync_background_to_theme`, also run once at startup).
-  Custom backgrounds are never touched. Gradient presets are user
-  choices and never swapped.
+  The swap derives from the **LIVE viewport settings**, not the
+  persisted config (live View-menu toggles like Show Cell are not
+  persisted — pushing a stale snapshot would silently re-enable
+  them). Custom backgrounds are never touched. Gradient presets are
+  user choices and never swapped.
 - The structure-tree element column uses
   `element_text_color(sym, dark=is_dark())` (bright colors clamped
   down for light panels, dark colors lifted for dark panels);
@@ -792,9 +798,10 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   shows the welcome page iff `self._structure.n_atoms == 0` — NEVER on
   viewport buffers, which previews (slab/NEB frames) replace
   temporarily. Called from `_on_structure_loaded`,
-  `_on_structure_modified` (all atoms can be deleted), `_on_new`
-  (the only path back to an empty model — it emits no signal) and
-  once at the end of `__init__`.
+  `_on_structure_modified` (all atoms can be deleted) and once at the
+  end of `__init__`. `_on_new` sets index 1 INLINE (the helper would
+  select the welcome page for an empty model — New is an explicit
+  empty session, not a return to the welcome page).
 - **The viewport's own empty-state overlay** ("Open a structure file
   to begin…") is KEPT — still needed when the viewport shows a
   temporary/empty preview scene; it simply never paints while hidden

@@ -249,7 +249,11 @@ def element_text_color(
     if dark:
         if luminance < 0.5:
             factor = 0.5 / luminance
-            base = tuple(c * factor for c in base)
+            # Scaling a dark color up can push a channel past 1.0
+            # (e.g. Jmol O = (1.0, 0.05, 0.05)) — clamp, or the
+            # QColor(int(c*255)) caller gets values >255 and builds
+            # an INVALID color (black labels on the dark panel).
+            base = tuple(min(1.0, c * factor) for c in base)
     elif luminance > 0.62:
         factor = 0.62 / luminance
         base = tuple(c * factor for c in base)

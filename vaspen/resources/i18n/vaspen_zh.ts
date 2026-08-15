@@ -1511,6 +1511,18 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
             <translation>Gaussian Cube</translation>
         </message>
         <message>
+            <source>Extended XYZ</source>
+            <translation>扩展 XYZ</translation>
+        </message>
+        <message>
+            <source>ASE Trajectory</source>
+            <translation>ASE 轨迹</translation>
+        </message>
+        <message>
+            <source>ASE Database</source>
+            <translation>ASE 数据库</translation>
+        </message>
+        <message>
             <source>Cannot save a non-periodic structure in {} format: a unit cell is required.</source>
             <translation>无法以 {} 格式保存非周期性结构：需要晶胞。</translation>
         </message>
@@ -2024,7 +2036,8 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
             <translation>层数：</translation>
         </message>
         <message>
-            <source>Number of atomic layers in the slab.\nMore layers = thicker slab, more computational cost.</source>
+            <source>Number of atomic layers in the slab.
+More layers = thicker slab, more computational cost.</source>
             <translation>平板中的原子层数。层数越多，平板越厚，计算成本越高。</translation>
         </message>
         <message>
@@ -2032,7 +2045,8 @@ a = {:.3f} Å   b = {:.3f} Å   c = {:.3f} Å
             <translation>真空层：</translation>
         </message>
         <message>
-            <source>Vacuum thickness added above the slab.\nStandard: 10–15 Å for surface calculations.</source>
+            <source>Vacuum thickness added above the slab.
+Standard: 10–15 Å for surface calculations.</source>
             <translation>平板上方添加的真空层厚度。表面计算通常使用 10–15 Å。</translation>
         </message>
         <message>
@@ -2083,8 +2097,10 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
             <translation>无法创建切面。</translation>
         </message>
         <message>
-            <source>Could not create slab:\n{}</source>
-            <translation>无法创建切面：\n{}</translation>
+            <source>Could not create slab:
+{}</source>
+            <translation>无法创建切面：
+{}</translation>
         </message>
         <message>
             <source>Supercell (a×b):</source>

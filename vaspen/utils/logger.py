@@ -23,23 +23,23 @@ def setup_logger(
     logger = logging.getLogger(name)
     logger.setLevel(level)
 
-    # Avoid duplicate handlers on repeated calls
-    if logger.handlers:
-        return logger
-
     fmt = logging.Formatter(
         "[%(asctime)s] %(levelname)-8s %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(fmt)
-    logger.addHandler(console_handler)
+    # Console handler (once; repeated calls must not duplicate it)
+    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(fmt)
+        logger.addHandler(console_handler)
 
-    # File handler (optional)
-    if log_file is not None:
+    # File handler (added on request even if the console handler
+    # already exists — main() re-invokes setup_logger with a file
+    # destination after the module-level default call)
+    if log_file is not None and not any(
+            isinstance(h, logging.FileHandler) for h in logger.handlers):
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(level)
         file_handler.setFormatter(fmt)

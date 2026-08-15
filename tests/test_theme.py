@@ -103,6 +103,39 @@ def test_element_text_color_dark_variant_brightens_dark_elements():
     assert element_text_color("H", dark=True) == element_color("H")
 
 
+def test_element_text_color_channels_never_overflow():
+    """Scaling a dark color UP can push a channel past 1.0 (Jmol O =
+    (1.0, 0.05, 0.05)) — the caller builds QColor(int(c*255)), and
+    >255 makes the color INVALID (black labels in the dark theme)."""
+    from ase.data import chemical_symbols
+
+    for sym in chemical_symbols[1:]:  # skip the X placeholder
+        for dark in (False, True):
+            color = element_text_color(sym, dark=dark)
+            assert all(0.0 <= c <= 1.0 for c in color), (sym, dark, color)
+
+
+def test_qss_files_mirror_selector_lists():
+    """§7.9: the two QSS files are structural mirrors — the selector
+    list (per rule, whitespace-normalized) must be identical so future
+    edits keep both themes in sync."""
+    import re
+
+    def _selectors(text: str) -> list[str]:
+        out = []
+        for block in re.split(r"\}", text):
+            head = block.split("{")[0]
+            head = re.sub(r"/\*.*?\*/", "", head, flags=re.S)
+            head = head.strip()
+            if head:
+                out.append(re.sub(r"\s+", " ", head))
+        return sorted(out)
+
+    light = (themes_dir() / "light.qss").read_text("utf-8")
+    dark = (themes_dir() / "dark.qss").read_text("utf-8")
+    assert _selectors(light) == _selectors(dark)
+
+
 def _render_settings(bg):
     rs = RenderSettings.default()
     rs.background_color = bg

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vaspen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-platform GUI for VASP first-principles calculations — structure modeling, input file generation, and job management."
 readme = "README.md"
 license = {text = "MIT"}
