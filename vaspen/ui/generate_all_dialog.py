@@ -188,7 +188,8 @@ class PoscarPanel(QWidget):
         layout.addWidget(self._info_label)
         self._warn_label = QLabel("")
         self._warn_label.setWordWrap(True)
-        self._warn_label.setStyleSheet("color: #b06000;")
+        # Theme-aware via QLabel[hintKind="warn"] in the app QSS.
+        self._warn_label.setProperty("hintKind", "warn")
         layout.addWidget(self._warn_label)
 
         # Interpolation algorithm (linear is the default; IDPP avoids

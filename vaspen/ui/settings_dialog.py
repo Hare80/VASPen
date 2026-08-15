@@ -46,6 +46,10 @@ class SettingsDialog(QDialog):
         self._language_combo.addItems(["English", "中文"])
         gen_form.addRow(self.tr("Language:"), self._language_combo)
 
+        self._theme_combo = MenuButton()
+        self._theme_combo.addItems([self.tr("Light"), self.tr("Dark")])
+        gen_form.addRow(self.tr("Theme:"), self._theme_combo)
+
         self._calc_type_combo = MenuButton()
         self._calc_type_combo.addItems([
             self.tr("SCF (Static)"),
@@ -120,6 +124,8 @@ class SettingsDialog(QDialog):
         lang = self._config.language
         self._language_combo.setCurrentIndex(0 if lang == "en" else 1)
 
+        self._theme_combo.setCurrentIndex(0 if self._config.theme == "light" else 1)
+
         calc_map = {"scf": 0, "opt": 1, "band": 2, "dos": 3, "optical": 4, "neb": 5}
         self._calc_type_combo.setCurrentIndex(
             calc_map.get(self._config.default_calc_type, 0)
@@ -133,6 +139,7 @@ class SettingsDialog(QDialog):
 
     def _on_accept(self) -> None:
         self._config.language = "en" if self._language_combo.currentIndex() == 0 else "zh"
+        self._config.theme = ("light", "dark")[self._theme_combo.currentIndex()]
         calc_keys = ["scf", "opt", "band", "dos", "optical", "neb"]
         self._config.default_calc_type = calc_keys[self._calc_type_combo.currentIndex()]
         self._config.poscar_coords_direct = (

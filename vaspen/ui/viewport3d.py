@@ -232,17 +232,25 @@ def _edge_color(color: tuple[float, float, float]) -> tuple[float, float, float]
     return tuple(c * EDGE_DARKEN for c in color)
 
 
-def element_text_color(symbol: str) -> tuple[float, float, float]:
-    """Element color darkened for TEXT on light panels.
+def element_text_color(
+    symbol: str, dark: bool = False,
+) -> tuple[float, float, float]:
+    """Element color adjusted for TEXT on a table panel.
 
     The Jmol scheme has many near-white entries (H is pure white) that
-    are invisible as foreground text on a light table background. Scale
-    light colors down (preserving hue) so every element label has
-    contrast; dark colors pass through unchanged.
+    are invisible as foreground text on a light table background. For
+    light panels scale bright colors down (preserving hue) so every
+    element label has contrast; dark colors pass through unchanged.
+    For dark panels the mirror image: dark colors are scaled UP to a
+    readable luminance and bright colors pass through.
     """
     base = element_color(symbol)
     luminance = 0.299 * base[0] + 0.587 * base[1] + 0.114 * base[2]
-    if luminance > 0.62:
+    if dark:
+        if luminance < 0.5:
+            factor = 0.5 / luminance
+            base = tuple(c * factor for c in base)
+    elif luminance > 0.62:
         factor = 0.62 / luminance
         base = tuple(c * factor for c in base)
     return base

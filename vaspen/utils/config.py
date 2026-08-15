@@ -62,6 +62,21 @@ class AppConfig:
         self.set("language", value)
 
     @property
+    def theme(self) -> str:
+        """UI theme name ("light" / "dark" — see vaspen.utils.theme).
+
+        Corrupt stored values fall back to the default (light). The
+        literal tuple keeps this module free of QtGui imports (the
+        theme module imports Qt).
+        """
+        value = self.get("theme", "light")
+        return value if value in ("light", "dark") else "light"
+
+    @theme.setter
+    def theme(self, value: str) -> None:
+        self.set("theme", value if value in ("light", "dark") else "light")
+
+    @property
     def potcar_library_path(self) -> str:
         return self.get("potcar_library_path", "")
 

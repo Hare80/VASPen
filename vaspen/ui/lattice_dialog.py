@@ -81,7 +81,8 @@ class LatticeDialog(QDialog):
 
         self._hint = QLabel("")
         self._hint.setWordWrap(True)
-        self._hint.setStyleSheet("color: #b00020;")
+        # Theme-aware via QLabel[hintKind="error"] in the app QSS.
+        self._hint.setProperty("hintKind", "error")
         layout.addWidget(self._hint)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)

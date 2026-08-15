@@ -67,11 +67,13 @@ VASPen/
 │   │   │   ├── vaspen_en.ts   # English source translations
 │   │   │   └── vaspen_zh.ts   # Chinese translations
 │   │   ├── templates/          # Default input file templates
+│   │   ├── themes/             # light.qss + dark.qss — Fusion theme stylesheets (§7.9)
 │   │   └── icons/              # App icon set — PNG + ICO (regenerate via scripts/make_icon.py)
 │   └── utils/
 │       ├── __init__.py
 │       ├── config.py           # AppConfig — QSettings wrapper
-│       └── logger.py           # Centralized logging
+│       ├── logger.py           # Centralized logging
+│       └── theme.py            # QSS theming engine (Fusion + palette + QSS, §7.9)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_structure.py
@@ -81,6 +83,7 @@ VASPen/
 │   ├── test_neb.py
 │   ├── test_dialogs.py
 │   ├── test_ui.py
+│   ├── test_theme.py
 │   ├── test_i18n.py
 │   └── test_icon_assets.py     # icon letterbox zero-crop + asset pins
 └── scripts/
@@ -716,6 +719,55 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   main.py (sys._MEIPASS + package layout when frozen); any new
   resource-path code must do the same.
 
+## 7.9 QSS Theming Policy (settled 2026-08-15 — do not re-litigate)
+
+- **Two themes, "light" and "dark"** (no system-follow — user choice).
+  Default light. **Both run on Qt "Fusion" style + QPalette +
+  app-level QSS** (`vaspen/resources/themes/{light,dark}.qss`) — the
+  light theme deliberately approximates the previous native Windows
+  look; the user accepted that light is no longer the native style.
+- **The engine is `vaspen/utils/theme.py`**: `apply_theme(app, name)`
+  = setStyle("Fusion") → setPalette (all three ColorGroups, Disabled
+  mandatory) → setStyleSheet, then records `current_theme()`.
+  `main.py` applies the persisted theme before the window exists;
+  `MainWindow._on_preferences` re-applies after the Settings dialog
+  (live switch, no restart — same pattern as language).
+  `themes_dir()` is `__file__`-relative **inside theme.py** (the
+  package layout is intact when frozen; only the entry script
+  flattens — do not move the resolution into main.py).
+- **The two QSS files are structural mirrors** (same selector list,
+  mirrored values) — edit both. No font rules, no scrollbar rules
+  (palette Light…Shadow roles drive Fusion scrollbars). `:default`
+  borders stay 1px (widening shifts dialog layouts). `QMenu::item`
+  padding keeps 24px left for checkable indicators.
+- **No new hardcoded widget colors.** The three old hardcoded hint
+  colors were replaced by `setProperty("hintKind", "error"|"warn")`
+  + `QLabel[hintKind=…]` rules in both themes (property selectors
+  re-evaluate on live switch). Two per-widget stylesheets remain by
+  design: periodic-table element buttons (pastel fills + explicit
+  dark `color: rgb(28,28,28)` — the dark palette's near-white
+  ButtonText would be unreadable) and the display-options color
+  swatches (textless, border works in both themes).
+- **GL viewport coherence**: when the render background is still the
+  OTHER theme's preset default (white ↔ `#1e1e24`), switching themes
+  swaps it to the new default — and persists it
+  (`MainWindow._sync_background_to_theme`, also run once at startup).
+  Custom backgrounds are never touched. Gradient presets are user
+  choices and never swapped.
+- The structure-tree element column uses
+  `element_text_color(sym, dark=is_dark())` (bright colors clamped
+  down for light panels, dark colors lifted for dark panels);
+  `_apply_theme` refreshes the panel after switching.
+- Settings UI: Theme row in the Settings dialog (MenuButton, like
+  every dropdown), persisted via `AppConfig.theme` (string, clamps
+  to light on corrupt values — the config module stays Qt-free).
+- i18n applies: new tr() strings go through the §11.2 workflow
+  (hand-edit zh.ts → sync_en_ts.py → lrelease → test_i18n).
+- Tests: `tests/test_theme.py` pins the engine (palette effects,
+  background-swap semantics, element-color variants, config
+  clamping); every theme-mutating test restores "light" — the
+  QApplication is session-wide.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -951,7 +1003,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 ### v0.2 — Polish (Sprint 4)
 - [x] App icon (letterboxed full source art — never cropped; title bar / taskbar / exe; §7.8.2)
 - [x] i18n (en/zh)
-- [ ] QSS theming
+- [x] QSS theming (light/dark, Fusion + QSS, live switch; §7.9)
 - [ ] Welcome page with recent files
 - [x] Drag-and-drop file opening (MainWindow-level, any URL, first file)
 

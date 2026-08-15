@@ -2181,6 +2181,18 @@ This is the standard VASP pseudopotential directory layout.</source>
             <source>NEB</source>
             <translation>NEB</translation>
         </message>
+        <message>
+            <source>Theme:</source>
+            <translation>主题：</translation>
+        </message>
+        <message>
+            <source>Light</source>
+            <translation>浅色</translation>
+        </message>
+        <message>
+            <source>Dark</source>
+            <translation>深色</translation>
+        </message>
     </context>
     <context>
         <name>StructureModel</name>

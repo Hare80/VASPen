@@ -1,0 +1,195 @@
+/* VASPen dark theme — Fusion style + palette (#1e1e24 chrome, matches
+ * the GL dark background default). Mirrors light.qss selector-for-
+ * selector; keep the two files in sync when editing (CLAUDE.md §7.9).
+ * No font rules, no scrollbar rules (palette-driven). */
+
+QMainWindow::separator {
+    background: #3a3a46;
+    width: 2px;
+    height: 2px;
+}
+
+QDockWidget {
+    color: #e8e8ee;
+}
+QDockWidget::title {
+    background: #26262e;
+    border: 1px solid #3a3a46;
+    padding: 5px 8px;
+    titlebar-close-icon: none;
+    titlebar-normal-icon: none;
+}
+
+QMenuBar {
+    background: #1e1e24;
+    border-bottom: 1px solid #33333e;
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 4px 10px;
+}
+QMenuBar::item:selected {
+    background: #2e2e38;
+}
+
+QMenu {
+    background: #26262e;
+    border: 1px solid #3a3a46;
+}
+QMenu::item {
+    padding: 5px 28px 5px 24px; /* 24px left: checkable-item indicators */
+}
+QMenu::item:selected {
+    background: #3179b8;
+    color: #ffffff;
+}
+QMenu::item:disabled {
+    color: #6f6f7a;
+}
+QMenu::separator {
+    height: 1px;
+    background: #33333e;
+    margin: 4px 8px;
+}
+
+QToolBar {
+    background: #1e1e24;
+    border-bottom: 1px solid #33333e;
+    padding: 2px;
+}
+QToolBar QToolButton {
+    background: transparent;
+    border: none;
+    padding: 3px 6px;
+}
+QToolBar QToolButton:hover {
+    background: #2e2e38;
+}
+QToolBar QToolButton:pressed, QToolBar QToolButton:checked {
+    background: #3a3a46;
+}
+
+/* Instant-popup choosers (MenuButton + view-direction buttons). */
+QToolButton[popupMode="1"] {
+    background: #2e2e38;
+    border: 1px solid #44444f;
+    border-radius: 3px;
+    padding: 2px 10px 2px 8px;
+}
+QToolButton[popupMode="1"]:pressed {
+    background: #41414c;
+}
+
+/* The edit-toolbar flow container: keep its buttons flat (the id
+ * selector beats the popupMode attribute selector). */
+QWidget#edit_toolbar QToolButton {
+    background: transparent;
+    border: none;
+    padding: 3px 6px;
+}
+QWidget#edit_toolbar QToolButton:hover {
+    background: #2e2e38;
+}
+QWidget#edit_toolbar QToolButton:pressed, QWidget#edit_toolbar QToolButton:checked {
+    background: #3a3a46;
+}
+
+QStatusBar {
+    background: #1e1e24;
+    border-top: 1px solid #33333e;
+}
+QStatusBar::item {
+    border: none;
+}
+
+QGroupBox {
+    border: 1px solid #3a3a46;
+    border-radius: 4px;
+    margin-top: 12px;
+    padding-top: 4px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 3px;
+}
+
+QPushButton {
+    background: #2e2e38;
+    border: 1px solid #44444f;
+    border-radius: 3px;
+    padding: 4px 12px;
+}
+QPushButton:hover {
+    background: #383842;
+}
+QPushButton:pressed {
+    background: #41414c;
+}
+QPushButton:disabled {
+    color: #6f6f7a;
+}
+QPushButton:default {
+    border: 1px solid #3179b8; /* never widen — layout shift */
+}
+
+QLineEdit, QSpinBox, QDoubleSpinBox {
+    background: #16161c;
+    border: 1px solid #3a3a46;
+    border-radius: 3px;
+    padding: 3px 5px;
+}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #3179b8;
+}
+
+QTableWidget {
+    background: #26262e;
+    gridline-color: #3a3a46;
+}
+QTableWidget::item:selected {
+    background: #2f4a66;
+    color: #e8e8ee;
+}
+QHeaderView::section {
+    background: #2e2e38;
+    border: none;
+    border-bottom: 1px solid #3a3a46;
+    border-right: 1px solid #33333e;
+    padding: 4px 6px;
+}
+
+QTabWidget::pane {
+    border: 1px solid #3a3a46;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #2e2e38;
+    border: 1px solid #3a3a46;
+    padding: 5px 14px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background: #26262e;
+    border-bottom-color: #26262e;
+}
+
+QListWidget::item:selected {
+    background: #2f4a66;
+    color: #e8e8ee;
+}
+
+QToolTip {
+    background: #2e2e38;
+    color: #e8e8ee;
+    border: 1px solid #55555f;
+}
+
+/* Hint labels (hintKind property — lighter than the light-theme
+ * colors so they stay legible on the dark panels). */
+QLabel[hintKind="error"] {
+    color: #ff7a7a;
+}
+QLabel[hintKind="warn"] {
+    color: #ffa94d;
+}

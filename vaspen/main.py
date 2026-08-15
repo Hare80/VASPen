@@ -15,6 +15,7 @@ from PySide6.QtGui import QIcon
 from vaspen.ui.main_window import MainWindow
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger, setup_logger
+from vaspen.utils.theme import apply_theme
 
 #: Windows taskbar identity — deliberately NOT versioned, so taskbar
 #: grouping stays stable across upgrades. Must be set BEFORE the first
@@ -99,8 +100,11 @@ def main() -> int:
     icon = _load_app_icon(icons_dir)
     app.setWindowIcon(icon)
 
-    # --- Main Window (loads translations itself; switchable live) ---
+    # --- Theme (Fusion + QSS; switchable live from Settings) ---
     config = AppConfig()
+    apply_theme(app, config.theme)
+
+    # --- Main Window (loads translations itself; switchable live) ---
     lang = config.language
     window = MainWindow()
     window.setWindowIcon(icon)

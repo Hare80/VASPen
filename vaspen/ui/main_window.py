@@ -39,6 +39,7 @@ from vaspen.ui.tools import ToolMode, confirm_disorder_loss
 from vaspen.ui.viewport3d import Viewport3D
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger
+from vaspen.utils import theme
 
 # Characters that are invalid in Windows filenames.
 _INVALID_FILENAME_CHARS = '<>:"/\\|?*'
@@ -99,6 +100,9 @@ class MainWindow(QMainWindow):
         # their initial values from the viewport settings — the old
         # hardcoded states would clobber the user's saved preferences).
         self._viewport.set_render_settings(self._config.render_settings)
+        # Theme coherence: a default-background render setting follows
+        # the theme (custom backgrounds are left untouched).
+        self._sync_background_to_theme(theme.current_theme())
         self._create_edit_toolbar()
         self._create_dock_widgets()
         self._connect_signals()
@@ -456,6 +460,9 @@ class MainWindow(QMainWindow):
         from vaspen.ui.flow_layout import FlowLayout
 
         container = QWidget(self)
+        # Id selector for the theme QSS: keeps these buttons flat
+        # (overrides the popupMode="1" bordered-chooser rule).
+        container.setObjectName("edit_toolbar")
         flow = FlowLayout(container, margin=0, h_spacing=2, v_spacing=2)
         self._edit_buttons: list[QToolButton] = []
 
@@ -1318,6 +1325,29 @@ class MainWindow(QMainWindow):
         # Apply any language change immediately (no restart needed);
         # _switch_language is a no-op when the language is unchanged.
         self._switch_language(self._config.language)
+        # Same for the theme: live switch, no-op when unchanged.
+        self._apply_theme(self._config.theme)
+
+    def _apply_theme(self, name: str) -> None:
+        """Apply a theme app-wide (no restart), keep the GL background
+        coherent and re-tint the element column."""
+        if name == theme.current_theme():
+            return
+        theme.apply_theme(QApplication.instance(), name)
+        self._sync_background_to_theme(name)
+        self._structure_tree.refresh()  # element-symbol column colors
+
+    def _sync_background_to_theme(self, name: str) -> None:
+        """Swap the GL background to the theme default when the user
+        never customized it (still the other theme's default); custom
+        backgrounds are untouched. Persisted so a restart stays
+        coherent."""
+        rs = self._config.render_settings
+        new_rs = theme.sync_background_for_theme(rs, name)
+        if new_rs is not rs:
+            self._viewport.set_render_settings(new_rs)
+            self._config.render_settings = new_rs
+            self._config.sync()
 
     # ------------------------------------------------------------------
     # Language switching

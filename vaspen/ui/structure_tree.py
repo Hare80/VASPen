@@ -38,6 +38,7 @@ from vaspen.core.builder import StructureBuilder
 from vaspen.core.structure import StructureModel
 from vaspen.ui.viewport3d import element_text_color
 from vaspen.utils.logger import logger
+from vaspen.utils.theme import is_dark
 
 
 def composition_text(
@@ -208,9 +209,10 @@ class StructureTreePanel(QWidget):
 
                 el_item = QTableWidgetItem(sym)
                 # editable: double-click to change the element (validated
-                # in _on_cell_changed); text color is darkened for
-                # contrast on the light panel (white H would be invisible)
-                base = element_text_color(sym)
+                # in _on_cell_changed); text color is adjusted for
+                # contrast on the current theme's panel (white H would
+                # be invisible on light, near-black on dark)
+                base = element_text_color(sym, dark=is_dark())
                 el_item.setForeground(QColor(
                     int(base[0] * 255), int(base[1] * 255), int(base[2] * 255)
                 ))

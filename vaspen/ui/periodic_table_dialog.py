@@ -87,7 +87,7 @@ class PeriodicTableDialog(QDialog):
             btn.setStyleSheet(
                 f"QToolButton {{ background-color: "
                 f"rgb({int(r * 255)}, {int(g * 255)}, {int(b * 255)}); "
-                f"border: 1px solid #888; }}")
+                f"border: 1px solid #888; color: rgb(28, 28, 28); }}")
             btn.clicked.connect(lambda checked=False, s=sym: self._on_element(s))
             row, col = _ELEMENT_POSITIONS[sym]
             grid.addWidget(btn, row, col)

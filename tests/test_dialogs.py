@@ -800,6 +800,34 @@ def test_settings_dialog_poscar_coords_accept_persists(qtbot):
 
 
 # ----------------------------------------------------------------------
+# Settings dialog — theme
+# ----------------------------------------------------------------------
+
+def test_settings_dialog_theme_default_light(qtbot):
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._theme_combo.currentIndex() == 0
+
+
+def test_settings_dialog_theme_loads_config(qtbot):
+    config = AppConfig()
+    config.theme = "dark"
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._theme_combo.currentIndex() == 1
+
+
+def test_settings_dialog_theme_accept_persists(qtbot):
+    config = AppConfig()
+    config.theme = "light"
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    dlg._theme_combo.setCurrentIndex(1)  # Dark
+    dlg._on_accept()
+    assert config.theme == "dark"
+
+
+# ----------------------------------------------------------------------
 # Every dialog dropdown is a MenuButton (QComboBox popups ghost here)
 # ----------------------------------------------------------------------
 
@@ -817,7 +845,7 @@ def test_dialog_dropdowns_are_menu_buttons(qtbot, periodic_model, srtio3):
     dlg = SettingsDialog()
     qtbot.addWidget(dlg)
     checkables += [dlg._language_combo, dlg._calc_type_combo,
-                   dlg._poscar_coords_combo]
+                   dlg._poscar_coords_combo, dlg._theme_combo]
     dlg.close()
 
     dlg = IncarEditorDialog()

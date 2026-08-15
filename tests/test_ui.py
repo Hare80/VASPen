@@ -71,6 +71,43 @@ def test_language_switch_is_live_and_roundtrips(window):
     assert window.act_open.text() == "&Open..."
 
 
+def test_live_theme_switch_rethemes_app_and_viewport(
+        window, qapp, monkeypatch):
+    """Settings Accept → theme applied app-wide, GL background follows
+    the default swap, and the choice persists (mirrors the live
+    language-switch pattern)."""
+    from PySide6.QtWidgets import QApplication
+
+    from vaspen.core.render_settings import BACKGROUND_DARK
+    from vaspen.utils import theme as theme_mod
+    from vaspen.utils.config import AppConfig
+
+    class _FakeSettingsDialog:
+        def __init__(self, parent=None):
+            pass
+
+        def exec(self):
+            AppConfig().theme = "dark"
+            return QDialog.DialogCode.Accepted
+
+    # _on_preferences imports SettingsDialog inside the function, so
+    # patching the module attribute catches it at call time.
+    monkeypatch.setattr(
+        "vaspen.ui.settings_dialog.SettingsDialog", _FakeSettingsDialog)
+    try:
+        theme_mod.apply_theme(qapp, "light")
+        window._on_preferences()
+        assert theme_mod.is_dark()
+        assert "#1e1e24" in QApplication.instance().styleSheet()
+        assert window._viewport.render_settings().background_color \
+            == BACKGROUND_DARK
+        assert AppConfig().render_settings.background_color \
+            == BACKGROUND_DARK  # persisted
+        assert AppConfig().theme == "dark"
+    finally:
+        theme_mod.apply_theme(qapp, "light")
+
+
 def test_open_file_builds_scene_once(window, monkeypatch):
     """Regression: _open_file used to emit structure_modified AND
     structure_loaded, rebuilding the viewport twice."""
