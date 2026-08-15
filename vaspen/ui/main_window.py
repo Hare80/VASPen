@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         self._sync_background_to_theme(theme.current_theme())
         self._create_edit_toolbar()
         self._create_dock_widgets()
+        self._add_dock_toggle_actions()
         self._connect_signals()
         self._update_welcome_visibility()
         self._restore_window_state()
@@ -709,6 +710,17 @@ class MainWindow(QMainWindow):
         self._atom_props = AtomPropertiesPanel(self._structure)
         self._dock_props.setWidget(self._atom_props)
         self.addDockWidget(Qt.RightDockWidgetArea, self._dock_props)
+
+    def _add_dock_toggle_actions(self) -> None:
+        """View-menu checkables for the three docks (created after the
+        menu bar, so appended here). The docks are closable via their
+        title-bar X — without these toggles a closed dock could never
+        be re-opened."""
+        self._menu_view.addSeparator()
+        for dock in (self._dock_structure, self._dock_measure, self._dock_props):
+            act = dock.toggleViewAction()
+            act.setText(dock.windowTitle())
+            self._menu_view.addAction(act)
 
     # ------------------------------------------------------------------
     # Signal wiring
@@ -1504,6 +1516,10 @@ class MainWindow(QMainWindow):
         self._dock_structure.setWindowTitle(self.tr("Structure"))
         self._dock_measure.setWindowTitle(self.tr("Measurements"))
         self._dock_props.setWindowTitle(self.tr("Properties"))
+        # toggleViewAction texts do NOT follow windowTitle changes —
+        # re-sync them for the live language switch.
+        for dock in (self._dock_structure, self._dock_measure, self._dock_props):
+            dock.toggleViewAction().setText(dock.windowTitle())
         self._status_label.setText(self.tr("Ready"))
         for mode, (text, tip) in {
             ToolMode.SELECT: (self.tr("Select"),

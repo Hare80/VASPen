@@ -191,6 +191,46 @@ def test_welcome_selection_survives_recent_refresh(window, monkeypatch):
     assert window._welcome_page._open_btn.isEnabled()
 
 
+def test_view_menu_has_dock_toggle_actions(window, qtbot):
+    """The three docks are closable via their title-bar X — the View
+    menu must carry matching checkables or a closed dock could never
+    be re-opened."""
+    window.show()  # dock visibility only exists in a shown window
+    qtbot.waitUntil(lambda: window.isVisible())
+    acts = [
+        window._dock_structure.toggleViewAction(),
+        window._dock_measure.toggleViewAction(),
+        window._dock_props.toggleViewAction(),
+    ]
+    for act in acts:
+        assert act in window._menu_view.actions()
+        assert act.isChecked()  # all docks visible at startup
+
+
+def test_dock_close_and_retoggle_roundtrip(window, qtbot):
+    window.show()
+    qtbot.waitUntil(lambda: window.isVisible())
+    window._dock_structure.close()
+    act = window._dock_structure.toggleViewAction()
+    assert not window._dock_structure.isVisible()
+    assert not act.isChecked()
+    act.trigger()
+    assert window._dock_structure.isVisible()
+    assert act.isChecked()
+
+
+def test_dock_toggle_texts_follow_language_switch(window):
+    window._switch_language("zh")
+    try:
+        assert (window._dock_structure.toggleViewAction().text()
+                == window._dock_structure.windowTitle())
+        assert window._dock_structure.windowTitle() == "结构"
+    finally:
+        window._switch_language("en")
+    assert (window._dock_structure.toggleViewAction().text()
+            == "Structure")
+
+
 def test_welcome_retranslates_with_real_translator(window, qapp):
     """The LanguageChange broadcast must actually retranslate (a test
     without an installed translator cannot detect a missing setText)."""

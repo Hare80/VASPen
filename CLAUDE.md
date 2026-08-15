@@ -743,8 +743,11 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
   set per theme and drive Fusion scrollbars). `:default` borders stay
   1px (widening shifts dialog layouts). `QMenu::item` padding keeps
   24px left for checkable indicators. Dock title bars keep their
-  DEFAULT close/float icons (no View-menu toggle exists — removing
-  the icons would make the docks impossible to hide).
+  DEFAULT close/float icons, and the View menu carries a
+  `toggleViewAction` checkable per dock (`_add_dock_toggle_actions`)
+  so a closed dock can always be re-opened; the toggle texts are
+  re-synced from the dock titles in `_retranslate_ui` (Qt does not
+  follow windowTitle changes).
 - **No new hardcoded widget colors.** The three old hardcoded hint
   colors were replaced by `setProperty("hintKind", "error"|"warn")`
   + `QLabel[hintKind=…]` rules in both themes (property selectors
