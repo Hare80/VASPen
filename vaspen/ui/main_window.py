@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from vaspen import __version__
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
 from vaspen.ui.generate_all_dialog import GenerateAllDialog
@@ -1584,11 +1585,11 @@ class MainWindow(QMainWindow):
             self,
             self.tr("About VASPen"),
             self.tr(
-                "<h2>VASPen v0.1.0</h2>"
+                "<h2>VASPen v%1</h2>"
                 "<p>A cross-platform GUI for VASP first-principles calculations.</p>"
                 "<p><b>Built with:</b> PySide6, ASE, pymatgen, Qt native OpenGL</p>"
                 "<p>Free and open source (MIT License).</p>"
-            ),
+            ).arg(__version__),
         )
 
     # ------------------------------------------------------------------

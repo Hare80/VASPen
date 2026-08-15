@@ -278,8 +278,8 @@
       <translation>About VASPen</translation>
     </message>
     <message>
-      <source>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;A cross-platform GUI for VASP first-principles calculations.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Built with:&lt;/b&gt; PySide6, ASE, pymatgen, Qt native OpenGL&lt;/p&gt;&lt;p&gt;Free and open source (MIT License).&lt;/p&gt;</source>
-      <translation>&lt;h2&gt;VASPen v0.1.0&lt;/h2&gt;&lt;p&gt;A cross-platform GUI for VASP first-principles calculations.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Built with:&lt;/b&gt; PySide6, ASE, pymatgen, Qt native OpenGL&lt;/p&gt;&lt;p&gt;Free and open source (MIT License).&lt;/p&gt;</translation>
+      <source>&lt;h2&gt;VASPen v%1&lt;/h2&gt;&lt;p&gt;A cross-platform GUI for VASP first-principles calculations.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Built with:&lt;/b&gt; PySide6, ASE, pymatgen, Qt native OpenGL&lt;/p&gt;&lt;p&gt;Free and open source (MIT License).&lt;/p&gt;</source>
+      <translation>&lt;h2&gt;VASPen v%1&lt;/h2&gt;&lt;p&gt;A cross-platform GUI for VASP first-principles calculations.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Built with:&lt;/b&gt; PySide6, ASE, pymatgen, Qt native OpenGL&lt;/p&gt;&lt;p&gt;Free and open source (MIT License).&lt;/p&gt;</translation>
     </message>
     <message>
       <source>(No recent files)</source>

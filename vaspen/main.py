@@ -13,6 +13,7 @@ from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
+from vaspen import __version__
 from vaspen.ui.main_window import MainWindow
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger, setup_logger
@@ -89,7 +90,7 @@ def main() -> int:
     # --- Application ---
     app = QApplication(sys.argv)
     app.setApplicationName("VASPen")
-    app.setApplicationVersion("0.2.0")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("VASPen")
     app.setOrganizationDomain("vaspen.dev")
 
