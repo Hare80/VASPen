@@ -61,7 +61,7 @@ def test_all_tools_registered_with_unique_names():
                      "list_slab_terminations", "cut_surface", "rebox_slab",
                      "suggest_band_path", "estimate_k_mesh",
                      "list_incar_presets", "generate_inputs", "neb_check",
-                     "neb_setup"):
+                     "neb_setup", "render_preview", "run_python"):
         assert expected in names
 
 
@@ -419,6 +419,74 @@ def test_neb_setup_method_guard(tmp_path, vacancy_hop_pair):
 
 
 # ----------------------------------------------------------------------
+# Visualization / escape hatch
+# ----------------------------------------------------------------------
+
+
+def test_render_preview_returns_png_for_all_views(tmp_path):
+    path = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(path, format="vasp")
+    mcp_server.open_structure(str(path))
+    for view in ("auto", "x", "y", "z", "a", "b", "c"):
+        image = mcp_server.render_preview(view=view, max_px=300)
+        assert image.data[:4] == b"\x89PNG"
+        content = image.to_image_content()
+        assert content.type == "image"
+        assert content.mime_type == "image/png"
+
+
+def test_render_preview_molecule_and_guards(tmp_path, water_molecule):
+    path = tmp_path / "h2o.xyz"
+    water_molecule.write(path)
+    mcp_server.open_structure(str(path))
+    image = mcp_server.render_preview()  # auto → z for molecules
+    assert image.data[:4] == b"\x89PNG"
+    with pytest.raises(ToolError, match="[Pp]eriodic"):
+        mcp_server.render_preview(view="a")
+    with pytest.raises(ToolError, match="view must be"):
+        mcp_server.render_preview(view="diagonal")
+
+
+def test_run_python_evaluates_and_reports(tmp_path, si_bulk):
+    _open(si_bulk, tmp_path)
+    assert mcp_server.run_python("1 + 1")["result"] == 2
+    assert mcp_server.run_python("model.n_atoms")["result"] == 2
+    captured = mcp_server.run_python("print('hi'); model.n_atoms * 2")
+    assert captured["stdout"] == "hi\n"
+    assert captured["result"] == 4
+    # mutations through the model are visible to the summary
+    result = mcp_server.run_python("model.set_magmom([0], 2.0)\n"
+                                   "model.any_magmom")
+    assert result["result"] == True  # noqa: E712
+    assert result["summary"]["has_magmoms"] is True
+    # numpy types degrade to repr
+    result = mcp_server.run_python("np.zeros(3)")
+    assert isinstance(result["result"], str)
+
+
+def test_run_python_error_mapping(tmp_path, si_bulk, monkeypatch):
+    _open(si_bulk, tmp_path)
+    with pytest.raises(ToolError, match="NameError"):
+        mcp_server.run_python("undefined_name_xyz")
+    with pytest.raises(ToolError, match="SyntaxError"):
+        mcp_server.run_python("def broken(:")
+    # model is None without a structure — the escape hatch surfaces
+    # the raw exception type by design (the AI can self-correct).
+    monkeypatch.setattr(mcp_server, "SESSION", ServerSession())
+    with pytest.raises(ToolError, match="AttributeError"):
+        mcp_server.run_python("model.n_atoms")
+
+
+def test_run_python_can_be_disabled(tmp_path, si_bulk):
+    from vaspen.utils.config import AppConfig
+
+    _open(si_bulk, tmp_path)
+    AppConfig().mcp_allow_run_python = False  # isolated_config scope
+    with pytest.raises(ToolError, match="disabled"):
+        mcp_server.run_python("1")
+
+
+# ----------------------------------------------------------------------
 # End-to-end over real stdio (protocol wiring, not tool logic)
 # ----------------------------------------------------------------------
 
@@ -480,6 +548,51 @@ def test_stdio_subprocess_protocol():
         uris = {str(r["uri"]) for r in resources["result"]["resources"]}
         assert "vaspen://formats" in uris
         assert "vaspen://incar-presets" in uris
+    finally:
+        proc.stdin.close()
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_stdio_subprocess_image_content(tmp_path):
+    """Over the wire, render_preview must deliver native image content
+    (not base64-in-text) after open_structure."""
+    repo_root = str(Path(__file__).resolve().parent.parent)
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    si = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(si, format="vasp")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "vaspen.mcp_server"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+        cwd=repo_root, env=env,
+    )
+
+    def send(obj):
+        proc.stdin.write(json.dumps(obj) + "\n")
+        proc.stdin.flush()
+
+    def recv(timeout=90.0):
+        return json.loads(proc.stdout.readline())
+
+    try:
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                         "clientInfo": {"name": "vaspen-tests", "version": "0"}}})
+        recv()
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        send({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+              "params": {"name": "open_structure",
+                         "arguments": {"path": str(si)}}})
+        assert recv()["result"]["content"][0]["type"] == "text"
+        send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+              "params": {"name": "render_preview",
+                         "arguments": {"view": "z", "max_px": 300}}})
+        content = recv()["result"]["content"][0]
+        assert content["type"] == "image"
+        assert content["mimeType"] == "image/png"
     finally:
         proc.stdin.close()
         try:

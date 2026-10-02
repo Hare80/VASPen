@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from vaspen import __version__
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
+from vaspen.ui.file_watch import FileChangeMonitor
 from vaspen.ui.generate_all_dialog import GenerateAllDialog
 from vaspen.ui.menu_button import MenuButton
 from vaspen.ui.structure_tree import StructureTreePanel
@@ -78,6 +79,12 @@ class MainWindow(QMainWindow):
         # routed to the frame instead of the model while set.
         self._frame_edit: dict | None = None
         self._frame_selection: set[int] = set()
+        # External file-change detection (§7.12): watched while the
+        # model has a filepath; _reload_keep_camera carries the smart
+        # camera decision into _on_structure_loaded during a reload.
+        self._file_monitor = FileChangeMonitor(self)
+        self._file_monitor.file_changed.connect(self._on_file_changed_on_disk)
+        self._reload_keep_camera = False
 
         # Translator — owned by the window so the language can switch live
         self._translator = QTranslator(self)
@@ -932,6 +939,7 @@ class MainWindow(QMainWindow):
                         and not self._confirm_disorder_poscar_save()):
                     return
                 self._structure.save(fp, direct=self._config.poscar_coords_direct)
+                self._sync_file_watcher()  # fresh baseline: our own write
                 self._set_status(self.tr("Saved: {}").format(fp))
             except Exception as e:
                 QMessageBox.critical(self, self.tr("Save Failed"), str(e))
@@ -977,9 +985,71 @@ class MainWindow(QMainWindow):
                 self._config.add_recent_file(filepath)
                 self._config.last_directory = str(Path(filepath).parent)
                 self._update_recent_ui()
+                self._sync_file_watcher()  # fresh baseline: our own write
                 self._set_status(self.tr("Saved: {}").format(filepath))
             except Exception as e:
                 QMessageBox.critical(self, self.tr("Save Failed"), str(e))
+
+    # -- External file changes (§7.12) ----------------------------------
+
+    def _sync_file_watcher(self) -> None:
+        """Point the file monitor at the model's current filepath.
+
+        Called wherever the filepath changes: open (structure_loaded),
+        the derived-structure reset_filepath sites, New (empty model),
+        and after a successful save (fresh baseline — the GUI's own
+        write must not prompt).
+        """
+        fp = self._structure.filepath
+        if fp:
+            self._file_monitor.watch(fp)
+        else:
+            self._file_monitor.clear()
+
+    def _on_file_changed_on_disk(self, path: str) -> None:
+        """The watched file changed on disk (external edit / MCP write).
+
+        Godot-style policy (settled §7.12): a clean model reloads
+        silently; unsaved changes trigger a confirm — reloading
+        discards them, ignoring keeps memory and re-bases the monitor
+        so only FUTURE changes fire again.
+        """
+        if path != self._structure.filepath or self._structure.n_atoms == 0:
+            return  # stale signal — defensive
+        try:
+            new_atoms = FileIO.read(path)
+        except Exception as e:
+            # Most likely a mid-write state; do not touch the model —
+            # the next settled write re-fires the monitor.
+            logger.exception("Reload failed: %s", path)
+            self._set_status(self.tr("Reload failed: {}").format(str(e)))
+            return
+        if self._structure.is_dirty:
+            reply = QMessageBox.question(
+                self,
+                self.tr("File Changed on Disk"),
+                self.tr(
+                    "{}\n\nhas been modified on disk. Reload and "
+                    "discard your unsaved changes?").format(path),
+            )
+            if reply != QMessageBox.Yes:
+                self._file_monitor.rebase()
+                return
+        # Smart camera (settled): same composition, count and cell →
+        # the geometry is only nudged (e.g. an MCP edit) — keep the
+        # user's view; anything else re-fits.
+        same_geometry = (
+            len(new_atoms) == self._structure.n_atoms
+            and new_atoms.get_chemical_formula()
+            == self._structure.atoms.get_chemical_formula()
+            and np.allclose(np.asarray(new_atoms.get_cell().array),
+                            np.asarray(self._structure.cell)))
+        self._reload_keep_camera = same_geometry
+        try:
+            self._structure.load_atoms(new_atoms, path)
+        finally:
+            self._reload_keep_camera = False
+        self._set_status(self.tr("Reloaded from disk: {}").format(path))
 
     def _on_export_poscar(self) -> None:
         """Export current structure as a POSCAR file."""
@@ -1175,6 +1245,7 @@ class MainWindow(QMainWindow):
         if dlg.result_structure is not None:
             self._structure.replace_atoms(dlg.result_structure.atoms)
             self._structure.reset_filepath()  # never silently overwrite the bulk file
+            self._sync_file_watcher()
             self._set_status(self.tr("Cleaved surface applied."))
 
     def _on_surface_dialog_finished(self, dlg) -> None:
@@ -1276,6 +1347,7 @@ class MainWindow(QMainWindow):
                 return
             StructureBuilder.make_supercell(self._structure, dlg.factors)
             self._structure.reset_filepath()  # derived structure → Save As
+            self._sync_file_watcher()
             self._set_status(self.tr("Supercell {}×{}×{} created.").format(*dlg.factors))
 
     def _on_wrap_periodic(self) -> None:
@@ -1336,6 +1408,7 @@ class MainWindow(QMainWindow):
                 fixed_flags=self._structure.fixed_flags,
                 magmoms=self._structure.magmoms)
             self._structure.reset_filepath()  # derived structure → Save As
+            self._sync_file_watcher()
             self._set_status(self.tr("Slab re-boxed (vacuum along c)."))
 
     def _on_edit_lattice(self) -> None:
@@ -1368,6 +1441,7 @@ class MainWindow(QMainWindow):
             # replace_atoms: one undo step; bonds/selection reset (new indices)
             self._structure.replace_atoms(dlg.result_atoms)
             self._structure.reset_filepath()  # derived structure → Save As
+            self._sync_file_watcher()
             self._set_status(self.tr("Structure symmetrized."))
 
     # ------------------------------------------------------------------
@@ -1661,13 +1735,17 @@ class MainWindow(QMainWindow):
         # Measurements belong to the PREVIOUS structure — their atom IDs
         # would silently resolve to unrelated atoms of the new one.
         self._measurement_manager.clear()
+        # reset_view=False only during an external-file reload whose
+        # geometry is unchanged (smart camera, §7.12) — normal opens fit.
         self._viewport.set_structure(self._structure.atoms,
+                                     reset_view=not self._reload_keep_camera,
                                      bonds=self._structure.bonds,
                                      fixed=self._structure.fixed_flags)
         self._sync_auto_bonds_action()
         self._update_welcome_visibility()
         self._update_status_bar()
         self._update_edit_actions()
+        self._sync_file_watcher()
         # Loading clears the selection without emitting selection_changed —
         # re-sync selection-dependent action states here.
         self.act_freeze.setEnabled(False)

@@ -152,6 +152,23 @@ class AppConfig:
         self.set("poscar_coords_direct", bool(value))
 
     @property
+    def mcp_allow_run_python(self) -> bool:
+        """Whether the MCP server's run_python tool may execute code.
+
+        Default True — the server runs locally with the user's own
+        privileges, the same trust level the AI client already has for
+        file access (settled 2026-10-02). Cautious users can disable it
+        in the Settings dialog.
+        """
+        # QSettings on Windows returns bools as the string "false" —
+        # bool("false") is True, so compare the string form.
+        return str(self.get("mcp_allow_run_python", True)).lower() in ("true", "1")
+
+    @mcp_allow_run_python.setter
+    def mcp_allow_run_python(self, value: bool) -> None:
+        self.set("mcp_allow_run_python", bool(value))
+
+    @property
     def recent_files(self) -> list[str]:
         return self.get("recent_files", []) or []
 

@@ -104,6 +104,25 @@ class SettingsDialog(QDialog):
         potcar_group.setLayout(potcar_form)
         layout.addWidget(potcar_group)
 
+        # ── MCP server ──
+        mcp_group = QGroupBox(self.tr("MCP Server (AI clients)"))
+        mcp_form = QFormLayout()
+
+        self._mcp_run_python_check = QCheckBox(self.tr(
+            "Allow code execution (run_python)"))
+        mcp_form.addRow(self.tr("AI code execution:"), self._mcp_run_python_check)
+
+        mcp_note = QLabel(self.tr(
+            "run_python lets an AI client run Python against the "
+            "loaded structure (same privileges as VASPen itself). "
+            "Disable it to restrict the MCP server to the fixed tools."
+        ))
+        mcp_note.setWordWrap(True)
+        mcp_form.addRow("", mcp_note)
+
+        mcp_group.setLayout(mcp_form)
+        layout.addWidget(mcp_group)
+
         # ── Buttons ──
         layout.addStretch()
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -136,6 +155,7 @@ class SettingsDialog(QDialog):
         )
 
         self._potcar_path_edit.setText(self._config.potcar_library_path)
+        self._mcp_run_python_check.setChecked(self._config.mcp_allow_run_python)
 
     def _on_accept(self) -> None:
         self._config.language = "en" if self._language_combo.currentIndex() == 0 else "zh"
@@ -146,5 +166,6 @@ class SettingsDialog(QDialog):
             self._poscar_coords_combo.currentIndex() == 0
         )
         self._config.potcar_library_path = self._potcar_path_edit.text()
+        self._config.mcp_allow_run_python = self._mcp_run_python_check.isChecked()
         self._config.sync()
         self.accept()

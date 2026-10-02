@@ -827,6 +827,26 @@ def test_settings_dialog_theme_accept_persists(qtbot):
     assert config.theme == "dark"
 
 
+def test_settings_dialog_run_python_default_checked(qtbot):
+    """Unset config leaves the MCP code-execution toggle ON (settled
+    2026-10-02: same trust level as the AI client's file access)."""
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._mcp_run_python_check.isChecked()
+
+
+def test_settings_dialog_run_python_persists(qtbot):
+    config = AppConfig()
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    dlg._mcp_run_python_check.setChecked(False)
+    dlg._on_accept()
+    assert config.mcp_allow_run_python is False
+    dlg2 = SettingsDialog()
+    qtbot.addWidget(dlg2)
+    assert dlg2._mcp_run_python_check.isChecked() is False
+
+
 # ----------------------------------------------------------------------
 # Every dialog dropdown is a MenuButton (QComboBox popups ghost here)
 # ----------------------------------------------------------------------

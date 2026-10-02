@@ -16,7 +16,10 @@ the generic "Error executing tool …", which hides the real message.
 
 from __future__ import annotations
 
+import ast
+import contextlib
 import functools
+import io
 import json
 import logging
 import time
@@ -24,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ase import Atoms
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from vaspen import __version__
@@ -68,6 +71,10 @@ _TOOLS: list = []
 MAX_LIST_ATOMS = 1000
 MAX_BONDS = 1000
 MAX_LISTED_SLABS = 50
+
+# Persistent namespace for run_python (survives across calls within the
+# session, like a console); "model" is refreshed on every call.
+_RUN_NAMESPACE: dict | None = None
 
 
 def mcp_tool(fn):
@@ -912,6 +919,136 @@ def neb_setup(initial_path: str, final_path: str, out_dir: str,
         }
         if potcar_note:
             response["potcar_note"] = potcar_note
+        return response
+
+
+# ----------------------------------------------------------------------
+# Visualization
+# ----------------------------------------------------------------------
+
+
+@mcp_tool
+def render_preview(view: str = "auto", max_px: int = 800) -> Image:
+    """Render the current structure as a ball-and-stick image (2D
+    orthographic projection) so you can visually verify geometry after
+    edits, surface cuts or supercells.
+
+    Args:
+        view: Projection direction — "x", "y" or "z" (world axes;
+            molecules and crystals), "a", "b" or "c" (look along a cell
+            vector, periodic structures only) or "auto" (c for
+            periodic, z for molecules).
+        max_px: Maximum canvas edge in pixels (square, 100 dpi).
+    """
+    with SESSION.lock:
+        model = SESSION.require_model()
+        if view not in ("auto", "x", "y", "z", "a", "b", "c"):
+            raise ValueError(
+                'view must be one of "auto", "x", "y", "z", "a", "b", "c".')
+        # Lazy import: keeps matplotlib out of the tool-listing path.
+        from vaspen.mcp_server.render import render_png
+
+        png = render_png(model.atoms, view=view, max_px=int(max_px))
+        return Image(data=png, format="png")
+
+
+# ----------------------------------------------------------------------
+# Escape hatch
+# ----------------------------------------------------------------------
+
+
+def _run_namespace() -> dict:
+    """The run_python namespace: heavy names built once, per-call state
+    (model/session) refreshed every call."""
+    global _RUN_NAMESPACE
+    if _RUN_NAMESPACE is None:
+        import ase as _ase
+        import numpy as np
+
+        from vaspen.core import neb as _neb
+        from vaspen.core import symmetry as _symmetry
+        from vaspen.core import transform as _transform
+        from vaspen.core import vasp_input as _vasp_input
+        from vaspen.core import measure as _measure_mod
+        from vaspen.core.builder import StructureBuilder as _StructureBuilder
+        from vaspen.core.file_io import FileIO as _FileIO
+        from vaspen.core.surface import SurfaceCutter as _SurfaceCutter
+        from vaspen.core.surface import rebox_slab as _rebox_slab_fn
+
+        _RUN_NAMESPACE = {
+            "np": np,
+            "numpy": np,
+            "ase": _ase,
+            "Atoms": _ase.Atoms,
+            "FileIO": _FileIO,
+            "builder": _StructureBuilder,
+            "StructureBuilder": _StructureBuilder,
+            "SurfaceCutter": _SurfaceCutter,
+            "rebox_slab": _rebox_slab_fn,
+            "symmetry": _symmetry,
+            "transform": _transform,
+            "neb": _neb,
+            "measure": _measure_mod,
+            "vasp_input": _vasp_input,
+        }
+    ns = dict(_RUN_NAMESPACE)
+    ns["session"] = SESSION
+    ns["model"] = SESSION.model
+    return ns
+
+
+@mcp_tool
+def run_python(code: str) -> dict:
+    """Execute Python against the current session — the escape hatch
+    for anything the dedicated tools do not cover (the full vaspen.core
+    API and numpy/ASE are available).
+
+    Predefined names: session (the ServerSession), model (the current
+    StructureModel — refreshed on every call; mutate it through its
+    methods and every other tool sees the change), np/numpy, ase, Atoms,
+    FileIO, StructureBuilder, SurfaceCutter, rebox_slab, symmetry,
+    transform, neb, measure, vasp_input. print() output is captured;
+    the value of the LAST expression is returned as "result" (e.g. end
+    with `model.n_atoms` to read a value).
+
+    Args:
+        code: Python source to execute.
+    """
+    if not AppConfig().mcp_allow_run_python:
+        raise ValueError(
+            "run_python is disabled — enable 'Allow code execution "
+            "(run_python)' in the VASPen Settings dialog.")
+    with SESSION.lock:
+        ns = _run_namespace()
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                tree = ast.parse(code, mode="exec")
+                result: Any = None
+                if tree.body and isinstance(tree.body[-1], ast.Expr):
+                    last = tree.body.pop()
+                    exec(compile(tree, "<run_python>", "exec"), ns)  # noqa: S102
+                    result = eval(  # noqa: S307
+                        compile(ast.Expression(last.value),
+                                "<run_python>", "eval"), ns)
+                else:
+                    exec(compile(tree, "<run_python>", "exec"), ns)  # noqa: S102
+        except SyntaxError as exc:
+            raise ToolError(
+                f"SyntaxError: {exc.msg} (line {exc.lineno})") from exc
+        except Exception as exc:
+            # User-code errors are expected outcomes here — surface the
+            # exception type and message so the AI can self-correct.
+            raise ToolError(f"{type(exc).__name__}: {exc}") from exc
+        response: dict[str, Any] = {
+            "ok": True,
+            "stdout": buf.getvalue(),
+            "result": result if isinstance(
+                result, (bool, int, float, str, list, dict, type(None)))
+            else repr(result),
+        }
+        if SESSION.model is not None and SESSION.model.n_atoms:
+            response["summary"] = _structure_summary(SESSION.model)
         return response
 
 

@@ -202,6 +202,26 @@
             <translation>已保存：{}</translation>
         </message>
         <message>
+            <source>File Changed on Disk</source>
+            <translation>文件已在磁盘上修改</translation>
+        </message>
+        <message>
+            <source>{}
+
+has been modified on disk. Reload and discard your unsaved changes?</source>
+            <translation>{}
+
+已在磁盘上被外部程序修改。重新加载并放弃未保存的修改吗？</translation>
+        </message>
+        <message>
+            <source>Reloaded from disk: {}</source>
+            <translation>已从磁盘重新加载：{}</translation>
+        </message>
+        <message>
+            <source>Reload failed: {}</source>
+            <translation>重新加载失败：{}</translation>
+        </message>
+        <message>
             <source>Save Failed</source>
             <translation>保存失败</translation>
         </message>
@@ -2116,6 +2136,22 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
         <message>
             <source>Preferences</source>
             <translation>偏好设置</translation>
+        </message>
+        <message>
+            <source>MCP Server (AI clients)</source>
+            <translation>MCP 服务器（AI 客户端）</translation>
+        </message>
+        <message>
+            <source>Allow code execution (run_python)</source>
+            <translation>允许执行代码（run_python）</translation>
+        </message>
+        <message>
+            <source>AI code execution:</source>
+            <translation>AI 代码执行：</translation>
+        </message>
+        <message>
+            <source>run_python lets an AI client run Python against the loaded structure (same privileges as VASPen itself). Disable it to restrict the MCP server to the fixed tools.</source>
+            <translation>run_python 允许 AI 客户端对当前加载的结构运行 Python（权限与 VASPen 自身相同）。关闭后 MCP 服务器只能使用固定工具集。</translation>
         </message>
         <message>
             <source>General</source>

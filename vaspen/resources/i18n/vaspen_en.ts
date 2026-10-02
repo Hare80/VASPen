@@ -202,6 +202,26 @@
       <translation>Saved: {}</translation>
     </message>
     <message>
+      <source>File Changed on Disk</source>
+      <translation>File Changed on Disk</translation>
+    </message>
+    <message>
+      <source>{}
+
+has been modified on disk. Reload and discard your unsaved changes?</source>
+      <translation>{}
+
+has been modified on disk. Reload and discard your unsaved changes?</translation>
+    </message>
+    <message>
+      <source>Reloaded from disk: {}</source>
+      <translation>Reloaded from disk: {}</translation>
+    </message>
+    <message>
+      <source>Reload failed: {}</source>
+      <translation>Reload failed: {}</translation>
+    </message>
+    <message>
       <source>Save Failed</source>
       <translation>Save Failed</translation>
     </message>
@@ -2212,6 +2232,22 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
     <message>
       <source>Preferences</source>
       <translation>Preferences</translation>
+    </message>
+    <message>
+      <source>MCP Server (AI clients)</source>
+      <translation>MCP Server (AI clients)</translation>
+    </message>
+    <message>
+      <source>Allow code execution (run_python)</source>
+      <translation>Allow code execution (run_python)</translation>
+    </message>
+    <message>
+      <source>AI code execution:</source>
+      <translation>AI code execution:</translation>
+    </message>
+    <message>
+      <source>run_python lets an AI client run Python against the loaded structure (same privileges as VASPen itself). Disable it to restrict the MCP server to the fixed tools.</source>
+      <translation>run_python lets an AI client run Python against the loaded structure (same privileges as VASPen itself). Disable it to restrict the MCP server to the fixed tools.</translation>
     </message>
     <message>
       <source>General</source>
