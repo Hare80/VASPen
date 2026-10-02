@@ -29,7 +29,8 @@ Linux users run from source (Quick Start below).
 - **One-click input generation** — generate all four VASP input files at once
 - **NEB workflow** — Linear & IDPP interpolation, frozen-atom handling, per-frame editing, standard VASP image layout
 - **Measurements** — distances, angles, dihedrals in the 3D viewport
-- **MCP server** — headless `vaspen-mcp` stdio server exposing the full toolkit to AI clients (Claude Desktop, ZCode, Cursor, …)
+- **External file changes** — the GUI detects when the loaded file is modified on disk (editor, script, or the MCP server) and offers a reload
+- **MCP server** — headless `vaspen-mcp` stdio server exposing the full toolkit to AI clients (Claude Desktop, ZCode, Cursor, …), including structure rendering and a code-execution escape hatch
 - **i18n** — English and Chinese interface (switchable live)
 - **Theming** — light/dark themes with live switching
 - **Welcome page** — recent files (click selects, double-click opens) and drag-and-drop opening
@@ -93,11 +94,13 @@ If you already have such a library, point VASPen to the same directory.
 
 VASPen ships a headless [Model Context Protocol](https://modelcontextprotocol.io)
 server that exposes its structure engine and VASP input generation to AI
-assistants — 23 tools covering file open/save, structure analysis
+assistants — 25 tools covering file open/save, structure analysis
 (symmetry, bonds, measurements), supercells, surface cutting, NEB
-preparation and one-shot INCAR/KPOINTS/POSCAR/POTCAR generation. The
-pseudopotential library path configured in the GUI preferences is
-shared with the server.
+preparation and one-shot INCAR/KPOINTS/POSCAR/POTCAR generation, plus a
+`render_preview` tool (the AI can see the structure it is working on)
+and a Settings-gated `run_python` escape hatch for anything the fixed
+tools do not cover. The pseudopotential library path configured in the
+GUI preferences is shared with the server.
 
 **From source (Windows & Linux):**
 

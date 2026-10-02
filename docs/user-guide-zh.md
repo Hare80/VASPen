@@ -70,6 +70,10 @@ v0.3.0 是首个打包发布的 Windows 版本。VASPen 免费开源(MIT 许可)
 | **工具** | 解理表面、超胞、包裹为周期晶胞、重新装箱、编辑晶格、查找对称性 |
 | **帮助** | 关于 VASPen、关于 Qt |
 
+**外部修改自动重载**:加载文件后,VASPen 会在磁盘上监视该文件。若其他
+程序(文本编辑器、脚本、或 VASPen MCP 服务器)修改了它,视图会自动重载;
+若你有未保存的修改,VASPen 会先询问——重载会丢弃这些修改。
+
 ### 工具栏
 
 - **主工具栏**:新建、打开、保存、生成全部、解理表面、超胞、重置视图。
@@ -420,6 +424,8 @@ Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
 | 对称性与表面 | symmetrize_cell、list_slab_terminations、cut_surface、rebox_slab |
 | VASP 输入 | list_incar_presets、generate_inputs |
 | NEB | neb_check、neb_setup |
+| 可视化 | render_preview——生成球棍模型图片,AI 可以直接查看 |
+| 逃生舱 | run_python——对当前结构执行 Python(可在设置中关闭) |
 
 典型指令:*"打开 TiO2_rutile.vasp,告诉我空间群,然后在 ./vasp-run 生成
 一套 k 间距 0.03 的 SCF 输入文件"*——助手会自行调用相应工具并汇报结果。
@@ -433,6 +439,8 @@ Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
 - 需要确认的操作与 GUI 的确认对话框一一对应:AI 必须显式传
   `allow_disorder_loss`(丢弃部分占位)或 `force`(忽略 NEB 原子顺序
   警告)等确认参数,不会有静默的破坏性操作。
+- 当服务器写入的文件正被 GUI 打开时,GUI 会察觉并重载(有未保存修改时
+  会先询问)——见"菜单"一节的自动重载说明。
 
 ## 19. 许可与致谢
 

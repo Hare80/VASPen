@@ -54,6 +54,7 @@ VASPen/
 │   │   ├── periodic_wrap_dialog.py  # Vacuum padding dialog before saving molecules to periodic formats
 │   │   ├── measurement.py            # Measurement manager + dock panel (right side)
 │   │   ├── display_options_dialog.py # Render settings dialog (live preview)
+│   │   ├── file_watch.py            # FileChangeMonitor — external file-change detection (§7.12)
 │   │   ├── welcome_page.py           # Empty-state landing page (recent files + quick actions, §7.10)
 │   │   └── tools.py                  # Viewport interaction tools (select/move/rotate/add/delete/bond/measure)
 │   ├── core/
@@ -73,6 +74,7 @@ VASPen/
 │   ├── mcp_server/             # Headless MCP server for AI clients (§7.11)
 │   │   ├── server.py           # Tool surface — thin adapters over core/
 │   │   ├── session.py          # ServerSession — current structure + lock
+│   │   ├── render.py           # render_preview — ASE/matplotlib 2D projection (Agg)
 │   │   ├── main.py             # `vaspen-mcp` entry (stdio, UTF-8 framing)
 │   │   └── __main__.py         # python -m vaspen.mcp_server / PyInstaller entry
 │   └── utils/
@@ -108,6 +110,7 @@ VASPen/
 │   ├── test_transform.py
 │   ├── test_viewport_geometry.py
 │   ├── test_welcome_page.py
+│   ├── test_file_watch.py      # external file-change detection (§7.12)
 │   ├── test_icon_assets.py      # icon letterbox zero-crop + asset pins
 │   └── test_mcp_server.py      # MCP tools + stdio protocol E2E (§7.11)
 └── scripts/
@@ -941,6 +944,63 @@ directly over stdio. Purely additive: the UI layer is untouched, and
   speaks initialize/tools-list/tools-call/resources-list JSON-RPC over
   real stdio — deliberately not using SDK test helpers, to keep the
   protocol wiring pinned independently of the SDK's API churn.
+- **render_preview** (added 2026-10-02): `vaspen/mcp_server/render.py`
+  renders ASE's matplotlib ball-and-stick 2D orthographic projection
+  with the Agg backend (set at module import, before any pyplot use)
+  and the tool returns the SDK's native `Image` → MCP image content.
+  The GL viewport is deliberately NOT used — no headless-GL risk, and
+  the mcp_server-does-not-import-ui rule stands. Views: x/y/z world
+  axes; a/b/c align a cell vector with z (scipy `Rotation.align_vectors`
+  inverted); auto = c for periodic, z for molecules. matplotlib is a
+  declared dependency of the `mcp` extra group (direct import).
+- **run_python** (added 2026-10-02): the escape hatch, modeled on
+  Blender MCP's `execute_blender_code` — arbitrary Python against a
+  PERSISTENT namespace (survives calls within the session) with
+  `session`/`model` (refreshed every call), `np/ase/Atoms/FileIO/
+  StructureBuilder/SurfaceCutter/rebox_slab/symmetry/transform/neb/
+  measure/vasp_input` predefined. The last expression is evaluated
+  separately (ast) and returned as `result` (primitives pass through,
+  anything else degrades to `repr`); print() is captured; a structure
+  summary rides along when a model is loaded. User-code exceptions
+  surface as `TypeName: message` ToolErrors (by design — the AI
+  self-corrects). Gated by `AppConfig.mcp_allow_run_python` (default
+  True — same trust level as the AI client's file access; the
+  Settings dialog has the toggle). 25 tools in total.
+
+### 7.12 External file-change detection (settled 2026-10-02 — do not re-litigate)
+
+The GUI watches its loaded file and reloads when the file changes on
+disk behind its back (external edit, script, **the MCP server**) —
+Godot-editor-style behavior. This closes the two-writers hazard: the
+GUI's Ctrl+S used to silently overwrite any external modification of
+the loaded file.
+
+- **`vaspen/ui/file_watch.py` — `FileChangeMonitor(QObject)`**: wraps
+  QFileSystemWatcher + a 400 ms debounce QTimer + an mtime+size
+  BASELINE. Raw watcher events are too noisy (editors write in
+  bursts, some delete+recreate); only a genuine baseline difference
+  after the churn settles emits `file_changed(path)`. Delete+recreate
+  re-adds the dropped watch path; a file missing at evaluate time
+  stays silent (transient mid-write — the recreated write re-fires).
+- **Baseline discipline**: `watch(path)` = fresh baseline (open /
+  save / reload — the GUI's own writes therefore never prompt);
+  `rebase()` = adopt current disk state (user chose "Ignore" — future
+  changes still fire); `clear()` = detached.
+- **Sync points**: `_sync_file_watcher()` is called from
+  `_on_structure_loaded` (covers open/New/reload), the FOUR
+  `reset_filepath()` sites (surface cleave, supercell, re-box,
+  symmetry — derived structures detach the watcher), and after
+  `_on_save`/`_on_save_as`. The reload handler also bails on parse
+  failure (mid-write) without touching the model.
+- **Reload policy**: clean model → SILENT auto-reload + status-bar
+  note; dirty model → `QMessageBox.question` (Yes = reload and
+  discard local changes / No = ignore + rebase).
+- **Smart camera**: reload keeps the user's camera when composition,
+  atom count and cell are ALL unchanged (the MCP-tweak loop); any
+  difference re-fits. Carried into `_on_structure_loaded` via the
+  `_reload_keep_camera` flag (`set_structure(reset_view=...)`).
+- i18n: the new MainWindow strings went through the §11.2 workflow
+  (hand-edited zh.ts → sync_en_ts.py → lrelease).
 
 ---
 
@@ -1209,8 +1269,10 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] User documentation
 
 ### v0.4 — AI integration
-- [x] Headless MCP server (`vaspen-mcp`, 23 tools over the core layer, §7.11)
+- [x] Headless MCP server (`vaspen-mcp`, 25 tools over the core layer, §7.11)
 - [x] `scripts/build.py --with-mcp` optional console exe in the release zip
+- [x] render_preview (2D projection → MCP image content) + run_python escape hatch (Settings-gated)
+- [x] GUI external file-change detection with reload prompt (§7.12)
 
 ### v1.0+ — Future
 - [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6

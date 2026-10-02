@@ -80,6 +80,12 @@ Notes:
 | **Tools** | Cleave Surface, Supercell, Wrap in Periodic Cell, Re-box Slab, Edit Lattice, Find Symmetry |
 | **Help** | About VASPen, About Qt |
 
+**Reload on external changes:** while a file is loaded, VASPen watches
+it on disk. If another program modifies it (a text editor, a script,
+or the VASPen MCP server), the view reloads automatically — if you
+have unsaved changes, VASPen asks first, because reloading discards
+them.
+
 ### Toolbars
 
 - **Main toolbar**: New, Open, Save, Generate All, Cleave Surface,
@@ -495,6 +501,8 @@ For a source install, `"command": "vaspen-mcp"` usually suffices.
 | Symmetry & surfaces | symmetrize_cell, list_slab_terminations, cut_surface, rebox_slab |
 | VASP inputs | list_incar_presets, generate_inputs |
 | NEB | neb_check, neb_setup |
+| Visualization | render_preview — a ball-and-stick image the AI can look at |
+| Escape hatch | run_python — execute Python against the loaded structure (Settings-gated) |
 
 A typical prompt: *"Open TiO2_rutile.vasp, tell me the space group, then
 generate an SCF input set with a 0.03 k-spacing into ./vasp-run"* — the
@@ -511,6 +519,9 @@ assistant calls the tools itself and reports the results.
   pass explicit confirm flags for discarding partial occupancies
   (`allow_disorder_loss`) or continuing despite a NEB atom-order
   warning (`force`), so nothing destructive happens silently.
+- When the server writes to a file that is currently open in the
+  VASPen GUI, the GUI notices and reloads (asking first if you have
+  unsaved changes) — see the reload note in the Menus section.
 
 ## 19. License & Credits
 
