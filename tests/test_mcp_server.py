@@ -21,6 +21,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from vaspen.core.file_io import FileIO
 from vaspen.mcp_server import server as mcp_server
+from vaspen.mcp_server import tools as mcp_tools
 from vaspen.mcp_server.session import ServerSession
 
 
@@ -29,7 +30,7 @@ def fresh_session(monkeypatch):
     """Every test starts with an empty session (the module-level one
     is process-global and would otherwise leak structures across
     tests)."""
-    monkeypatch.setattr(mcp_server, "SESSION", ServerSession())
+    monkeypatch.setattr(mcp_tools, "SESSION", ServerSession())
 
 
 def _open(atoms, tmp_path, name="struct.vasp"):
@@ -472,7 +473,7 @@ def test_run_python_error_mapping(tmp_path, si_bulk, monkeypatch):
         mcp_server.run_python("def broken(:")
     # model is None without a structure — the escape hatch surfaces
     # the raw exception type by design (the AI can self-correct).
-    monkeypatch.setattr(mcp_server, "SESSION", ServerSession())
+    monkeypatch.setattr(mcp_tools, "SESSION", ServerSession())
     with pytest.raises(ToolError, match="AttributeError"):
         mcp_server.run_python("model.n_atoms")
 

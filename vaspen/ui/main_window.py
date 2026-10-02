@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from vaspen import __version__
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
+from vaspen.ui.bridge_server import BridgeServer
 from vaspen.ui.file_watch import FileChangeMonitor
 from vaspen.ui.generate_all_dialog import GenerateAllDialog
 from vaspen.ui.menu_button import MenuButton
@@ -119,6 +120,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._update_welcome_visibility()
         self._restore_window_state()
+        self._start_live_bridge()
 
     # ------------------------------------------------------------------
     # Actions
@@ -1694,10 +1696,27 @@ class MainWindow(QMainWindow):
             self.restoreState(state)
 
     def closeEvent(self, event) -> None:
+        if self._bridge is not None:
+            self._bridge.stop()
         self._config.window_geometry = self.saveGeometry()
         self._config.window_state = self.saveState()
         self._config.sync()
         super().closeEvent(event)
+
+    def _start_live_bridge(self) -> None:
+        """Host the MCP live bridge (§7.13): AI tools act on this
+        window's structure while it is open. Failures degrade to a
+        status note — the proxy falls back to headless execution."""
+        self._bridge: BridgeServer | None = None
+        if not self._config.mcp_live_bridge:
+            return
+        try:
+            self._bridge = BridgeServer(self)
+            self._bridge.start()
+        except Exception as e:
+            self._bridge = None
+            logger.exception("MCP live bridge failed to start")
+            self._set_status(self.tr("MCP bridge failed: {}").format(str(e)))
 
     def _update_recent_menu(self) -> None:
         self._recent_menu.clear()

@@ -41,11 +41,15 @@ def isolated_config(monkeypatch):
     """Bind AppConfig to a throwaway QSettings scope for every test.
 
     Prevents tests from reading/writing the developer's real VASPen
-    settings (language, recent files, window geometry).
+    settings (language, recent files, window geometry). The live bridge
+    defaults OFF in the suite — only tests/test_bridge.py opts in, so
+    ordinary window tests never spawn listeners or rebind the global
+    MCP tool session.
     """
     cfg = AppConfig.__new__(AppConfig)
     cfg._settings = QSettings("VASPen", "VASPen-tests")
     cfg._settings.clear()
+    cfg._settings.setValue("mcp_live_bridge", "false")
     monkeypatch.setattr(AppConfig, "_instance", cfg)
     yield
     cfg._settings.clear()

@@ -169,6 +169,41 @@ class AppConfig:
         self.set("mcp_allow_run_python", bool(value))
 
     @property
+    def mcp_live_bridge(self) -> bool:
+        """Whether the GUI hosts the MCP live bridge (AI tools act on
+        the window's open structure). Default True — loopback-only with
+        a per-session token (settled 2026-10-02); disable in Settings.
+        """
+        # QSettings on Windows returns bools as the string "false" —
+        # bool("false") is True, so compare the string form.
+        return str(self.get("mcp_live_bridge", True)).lower() in ("true", "1")
+
+    @mcp_live_bridge.setter
+    def mcp_live_bridge(self, value: bool) -> None:
+        self.set("mcp_live_bridge", bool(value))
+
+    @property
+    def bridge_port(self) -> int:
+        """Live-bridge port the GUI last bound (0 = none published)."""
+        try:
+            return int(self.get("bridge_port", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @bridge_port.setter
+    def bridge_port(self, value: int) -> None:
+        self.set("bridge_port", int(value))
+
+    @property
+    def bridge_token(self) -> str:
+        """Per-session bridge token (empty = none published)."""
+        return str(self.get("bridge_token", "") or "")
+
+    @bridge_token.setter
+    def bridge_token(self, value: str) -> None:
+        self.set("bridge_token", str(value))
+
+    @property
     def recent_files(self) -> list[str]:
         return self.get("recent_files", []) or []
 

@@ -222,6 +222,22 @@ has been modified on disk. Reload and discard your unsaved changes?</source>
             <translation>重新加载失败：{}</translation>
         </message>
         <message>
+            <source>MCP bridge listening on port {}</source>
+            <translation>MCP 桥接已监听端口 {}</translation>
+        </message>
+        <message>
+            <source>MCP bridge failed: {}</source>
+            <translation>MCP 桥接启动失败：{}</translation>
+        </message>
+        <message>
+            <source>MCP: {} (running)</source>
+            <translation>MCP：{}（执行中）</translation>
+        </message>
+        <message>
+            <source>MCP: {} (done)</source>
+            <translation>MCP：{}（完成）</translation>
+        </message>
+        <message>
             <source>Save Failed</source>
             <translation>保存失败</translation>
         </message>
@@ -2144,6 +2160,18 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
         <message>
             <source>Allow code execution (run_python)</source>
             <translation>允许执行代码（run_python）</translation>
+        </message>
+        <message>
+            <source>Enable live bridge (AI works on the open structure)</source>
+            <translation>启用实时桥接（AI 直接操作已打开的结构）</translation>
+        </message>
+        <message>
+            <source>Live bridge:</source>
+            <translation>实时桥接：</translation>
+        </message>
+        <message>
+            <source>While enabled, MCP tools act on this window's structure in real time (localhost only, protected by a per-session token). Disable to let the AI work only on files.</source>
+            <translation>启用后,MCP 工具实时作用于本窗口的结构(仅限本机回环,由一次性令牌保护)。关闭后 AI 只能操作文件。</translation>
         </message>
         <message>
             <source>AI code execution:</source>

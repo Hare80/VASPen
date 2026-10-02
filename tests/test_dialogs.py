@@ -847,6 +847,25 @@ def test_settings_dialog_run_python_persists(qtbot):
     assert dlg2._mcp_run_python_check.isChecked() is False
 
 
+def test_settings_dialog_live_bridge_default_checked(qtbot):
+    """Unset config leaves the live-bridge toggle ON (settled 2026-10-02)."""
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    assert dlg._mcp_live_bridge_check.isChecked()
+
+
+def test_settings_dialog_live_bridge_persists(qtbot):
+    config = AppConfig()
+    dlg = SettingsDialog()
+    qtbot.addWidget(dlg)
+    dlg._mcp_live_bridge_check.setChecked(False)
+    dlg._on_accept()
+    assert config.mcp_live_bridge is False
+    dlg2 = SettingsDialog()
+    qtbot.addWidget(dlg2)
+    assert dlg2._mcp_live_bridge_check.isChecked() is False
+
+
 # ----------------------------------------------------------------------
 # Every dialog dropdown is a MenuButton (QComboBox popups ghost here)
 # ----------------------------------------------------------------------

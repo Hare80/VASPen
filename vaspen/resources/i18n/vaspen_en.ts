@@ -222,6 +222,22 @@ has been modified on disk. Reload and discard your unsaved changes?</translation
       <translation>Reload failed: {}</translation>
     </message>
     <message>
+      <source>MCP bridge listening on port {}</source>
+      <translation>MCP bridge listening on port {}</translation>
+    </message>
+    <message>
+      <source>MCP bridge failed: {}</source>
+      <translation>MCP bridge failed: {}</translation>
+    </message>
+    <message>
+      <source>MCP: {} (running)</source>
+      <translation>MCP: {} (running)</translation>
+    </message>
+    <message>
+      <source>MCP: {} (done)</source>
+      <translation>MCP: {} (done)</translation>
+    </message>
+    <message>
       <source>Save Failed</source>
       <translation>Save Failed</translation>
     </message>
@@ -2240,6 +2256,18 @@ Preview: the main view shows the cut slab; rotate/zoom to inspect it. Structure 
     <message>
       <source>Allow code execution (run_python)</source>
       <translation>Allow code execution (run_python)</translation>
+    </message>
+    <message>
+      <source>Enable live bridge (AI works on the open structure)</source>
+      <translation>Enable live bridge (AI works on the open structure)</translation>
+    </message>
+    <message>
+      <source>Live bridge:</source>
+      <translation>Live bridge:</translation>
+    </message>
+    <message>
+      <source>While enabled, MCP tools act on this window's structure in real time (localhost only, protected by a per-session token). Disable to let the AI work only on files.</source>
+      <translation>While enabled, MCP tools act on this window's structure in real time (localhost only, protected by a per-session token). Disable to let the AI work only on files.</translation>
     </message>
     <message>
       <source>AI code execution:</source>

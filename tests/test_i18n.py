@@ -38,6 +38,9 @@ I18N = Path(__file__).parent.parent / "vaspen" / "resources" / "i18n"
 #: with an explicit "MainWindow" context, which is checked too.
 CHECKED_MODULES = (
     ("vaspen/ui/main_window.py", "MainWindow"),
+    # bridge_server borrows the window's tr() (MainWindow context) for
+    # its status strings — same convention as ui/tools.py.
+    ("vaspen/ui/bridge_server.py", "MainWindow"),
     ("vaspen/ui/surface_dialog.py", "SurfaceDialog"),
     ("vaspen/ui/rebox_dialog.py", "ReBoxDialog"),
     ("vaspen/ui/symmetry_dialog.py", "SymmetryDialog"),

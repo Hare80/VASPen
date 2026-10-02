@@ -112,6 +112,10 @@ class SettingsDialog(QDialog):
             "Allow code execution (run_python)"))
         mcp_form.addRow(self.tr("AI code execution:"), self._mcp_run_python_check)
 
+        self._mcp_live_bridge_check = QCheckBox(self.tr(
+            "Enable live bridge (AI works on the open structure)"))
+        mcp_form.addRow(self.tr("Live bridge:"), self._mcp_live_bridge_check)
+
         mcp_note = QLabel(self.tr(
             "run_python lets an AI client run Python against the "
             "loaded structure (same privileges as VASPen itself). "
@@ -119,6 +123,14 @@ class SettingsDialog(QDialog):
         ))
         mcp_note.setWordWrap(True)
         mcp_form.addRow("", mcp_note)
+
+        bridge_note = QLabel(self.tr(
+            "While enabled, MCP tools act on this window's structure "
+            "in real time (localhost only, protected by a per-session "
+            "token). Disable to let the AI work only on files."
+        ))
+        bridge_note.setWordWrap(True)
+        mcp_form.addRow("", bridge_note)
 
         mcp_group.setLayout(mcp_form)
         layout.addWidget(mcp_group)
@@ -156,6 +168,7 @@ class SettingsDialog(QDialog):
 
         self._potcar_path_edit.setText(self._config.potcar_library_path)
         self._mcp_run_python_check.setChecked(self._config.mcp_allow_run_python)
+        self._mcp_live_bridge_check.setChecked(self._config.mcp_live_bridge)
 
     def _on_accept(self) -> None:
         self._config.language = "en" if self._language_combo.currentIndex() == 0 else "zh"
@@ -167,5 +180,6 @@ class SettingsDialog(QDialog):
         )
         self._config.potcar_library_path = self._potcar_path_edit.text()
         self._config.mcp_allow_run_python = self._mcp_run_python_check.isChecked()
+        self._config.mcp_live_bridge = self._mcp_live_bridge_check.isChecked()
         self._config.sync()
         self.accept()
