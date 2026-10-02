@@ -16,3 +16,6 @@ htmlcov/
 
 # Claude Code local data
 .claude/
+
+# ZCode local data
+.zcode/

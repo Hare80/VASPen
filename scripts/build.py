@@ -3,6 +3,7 @@
 Usage:
     python scripts/build.py              # PyInstaller (quick dev build)
     python scripts/build.py --smoke      # PyInstaller + launch smoke test
+    python scripts/build.py --with-mcp   # also build the vaspen-mcp CLI exe
     python scripts/build.py --nuitka     # Nuitka (optimized, release)
 """
 
@@ -12,12 +13,14 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 RESOURCES = ROOT / "vaspen" / "resources"
 BUILD_DIR = ROOT / "build"
 DIST_APP = ROOT / "dist" / "VASPen"
+DIST_MCP = ROOT / "dist" / "vaspen-mcp"
 
 #: Files copied into dist/VASPen/ after the build so the release zip is
 #: self-contained (MIT requires the license text alongside the binary;
@@ -58,14 +61,19 @@ def version_tuple(version: str) -> tuple[int, int, int, int]:
     return tuple((parts + [0, 0, 0, 0])[:4])  # type: ignore[return-value]
 
 
-def _write_version_file(version: str) -> Path:
+def _write_version_file(version: str, internal_name: str = "VASPen",
+                        description: str | None = None,
+                        filename: str = "version_info.txt") -> Path:
     """Render the Windows VERSIONINFO from ``__version__``.
 
     Generated at build time into build/ (gitignored) — no second
     hand-maintained version file to drift out of sync.
     """
+    if description is None:
+        description = ("VASPen - GUI for VASP first-principles "
+                       "calculations")
     BUILD_DIR.mkdir(exist_ok=True)
-    path = BUILD_DIR / "version_info.txt"
+    path = BUILD_DIR / filename
     path.write_text(
         f"""VSVersionInfo(
   ffi=FixedFileInfo(
@@ -85,10 +93,10 @@ def _write_version_file(version: str) -> Path:
           '040904B0',
           [
             StringStruct('CompanyName', 'VASPen'),
-            StringStruct('FileDescription', 'VASPen - GUI for VASP first-principles calculations'),
+            StringStruct('FileDescription', '{description}'),
             StringStruct('FileVersion', '{version}'),
-            StringStruct('InternalName', 'VASPen'),
-            StringStruct('OriginalFilename', 'VASPen.exe'),
+            StringStruct('InternalName', '{internal_name}'),
+            StringStruct('OriginalFilename', '{internal_name}.exe'),
             StringStruct('ProductName', 'VASPen'),
             StringStruct('ProductVersion', '{version}'),
             StringStruct('LegalCopyright', 'MIT License')
@@ -105,10 +113,11 @@ def _write_version_file(version: str) -> Path:
     return path
 
 
-def build_pyinstaller(smoke: bool = False) -> None:
+def build_pyinstaller(smoke: bool = False, with_mcp: bool = False) -> None:
     """Build with PyInstaller — fast, good for development. The release
     pipeline (version resource, bundled docs/examples, zip, smoke test)
-    runs here too."""
+    runs here too; ``with_mcp`` adds the headless vaspen-mcp console
+    exe (bundled into the same release zip)."""
     # --add-data takes "source<os.pathsep>dest" (';' on Windows, ':' on Linux).
     # Dest "vaspen/resources" mirrors the source layout so the frozen code
     # finds i18n/icons next to the package (Path(__file__).parent).
@@ -154,11 +163,64 @@ def build_pyinstaller(smoke: bool = False) -> None:
     print(f"Running: {' '.join(cmd)}")
     subprocess.run(cmd, cwd=ROOT, check=True)
 
+    if with_mcp:
+        _build_mcp_server(version)
     _bundle_release_files()
-    zip_path = _make_zip(version)
-    _verify_dist(zip_path)
+    zip_path = _make_zip(version, with_mcp=with_mcp)
+    _verify_dist(zip_path, with_mcp=with_mcp)
     if smoke:
         _smoke_test()
+        if with_mcp:
+            _smoke_mcp_server(version)
+
+
+def _build_mcp_server(version: str) -> None:
+    """Build the headless vaspen-mcp console exe (second PyInstaller
+    onedir — no sharing with the GUI bundle; opt-in via --with-mcp so
+    the default release zip stays lean).
+
+    The core layer the MCP tools reuse needs the same lazy-import
+    collections as the GUI (ase.io format plugins, ase/pymatgen data);
+    the mcp SDK and its mcp_types sibling import plugins lazily too.
+    """
+    import importlib.util as _ilu
+    if _ilu.find_spec("mcp") is None:
+        raise SystemExit(
+            "the mcp SDK is not installed in this environment — run "
+            '`pip install "mcp>=2.2"` first (build.py --with-mcp)')
+    version_file = _write_version_file(
+        version, internal_name="vaspen-mcp",
+        description="VASPen MCP server - headless VASPen tools for "
+                    "AI clients",
+        filename="version_info_mcp.txt")
+    icon = RESOURCES / "icons" / "app.ico"
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--name", "vaspen-mcp",
+        # console exe: stdout/stderr work, --version smoke relies on it
+        "--console",
+        "--onedir",
+        "--noconfirm",
+        "--icon", str(icon),
+        "--version-file", str(version_file),
+        "--specpath", str(BUILD_DIR),
+        # mcp.cli exits at import when typer (the mcp[cli] extra) is
+        # absent, which aborts a whole-package --collect-submodules mcp.
+        # Collect only the server-side trees; the client/CLI trees are
+        # not needed by a stdio server.
+        "--collect-submodules", "mcp.server",
+        "--collect-submodules", "mcp.shared",
+        "--collect-submodules", "mcp_types",
+        "--collect-submodules", "vaspen.mcp_server",
+        "--collect-submodules", "ase.io",
+        "--collect-submodules", "ase.geometry",
+        "--collect-all", "spglib",
+        "--collect-data", "ase",
+        "--collect-data", "pymatgen",
+        str(ROOT / "vaspen" / "mcp_server" / "__main__.py"),
+    ]
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd, cwd=ROOT, check=True)
 
 
 def build_nuitka() -> None:
@@ -200,9 +262,11 @@ def _bundle_release_files() -> None:
                     dirs_exist_ok=True)
 
 
-def _make_zip(version: str) -> Path:
+def _make_zip(version: str, with_mcp: bool = False) -> Path:
     """Zip dist/VASPen → dist/VASPen-v<version>-win64.zip with a single
-    top-level VASPen/ folder (safe "Extract here" behavior)."""
+    top-level VASPen/ folder (safe "Extract here" behavior). With
+    ``with_mcp`` the vaspen-mcp onedir is appended inside the same
+    VASPen/ folder (VASPen/vaspen-mcp/) — one zip, one top level."""
     zip_base = DIST_APP.parent / f"VASPen-v{version}-win64"
     stale = Path(str(zip_base) + ".zip")
     if stale.exists():
@@ -210,11 +274,19 @@ def _make_zip(version: str) -> Path:
     zip_path = Path(shutil.make_archive(
         str(zip_base), "zip",
         root_dir=str(DIST_APP.parent), base_dir="VASPen"))
+    if with_mcp:
+        with zipfile.ZipFile(zip_path, "a",
+                             compression=zipfile.ZIP_DEFLATED) as zf:
+            for file in sorted(DIST_MCP.rglob("*")):
+                if file.is_file():
+                    arc = Path("VASPen") / "vaspen-mcp" / \
+                        file.relative_to(DIST_MCP)
+                    zf.write(file, str(arc))
     print(f"Release zip → {zip_path}")
     return zip_path
 
 
-def _verify_dist(zip_path: Path) -> None:
+def _verify_dist(zip_path: Path, with_mcp: bool = False) -> None:
     """Hard-fail if the dist is missing a key piece — silent breakage
     here ships a broken release."""
     internal = DIST_APP / "_internal"
@@ -228,6 +300,18 @@ def _verify_dist(zip_path: Path) -> None:
         DIST_APP / "LICENSE",
         zip_path,
     ]
+    if with_mcp:
+        # Pure-Python packages (mcp, vaspen.*) live inside the PYZ
+        # archive, not as _internal dirs — the collect-data trees below
+        # are the on-disk proxies; the module import chain is proven by
+        # the --selftest smoke.
+        mcp_internal = DIST_MCP / "_internal"
+        expected += [
+            DIST_MCP / "vaspen-mcp.exe",
+            mcp_internal / "ase",
+            mcp_internal / "pymatgen",
+            mcp_internal / "spglib",
+        ]
     missing = [p for p in expected if not p.exists()]
     if missing:
         raise SystemExit(
@@ -235,6 +319,9 @@ def _verify_dist(zip_path: Path) -> None:
             + "\n  ".join(str(p) for p in missing))
     bundle_mb = sum(f.stat().st_size for f in DIST_APP.rglob("*")
                     if f.is_file()) / 1e6
+    if with_mcp:
+        bundle_mb += sum(f.stat().st_size for f in DIST_MCP.rglob("*")
+                         if f.is_file()) / 1e6
     print(f"Verified dist: {bundle_mb:.0f} MB bundle, "
           f"zip {zip_path.stat().st_size / 1e6:.0f} MB")
 
@@ -288,8 +375,32 @@ def _smoke_test() -> None:
     print("Smoke test OK — log tail:\n  " + "\n  ".join(tail))
 
 
+MCP_SMOKE_TIMEOUT_S = 60
+
+
+def _smoke_mcp_server(version: str) -> None:
+    """Console-exe smoke: ``vaspen-mcp.exe --selftest`` must import the
+    full tool surface (SDK + core + every tool module — a missing
+    frozen submodule fails here) and exit 0. A stdio server has no
+    window, so the GUI log-growth check does not apply."""
+    exe = DIST_MCP / "vaspen-mcp.exe"
+    try:
+        proc = subprocess.run(
+            [str(exe), "--selftest"], capture_output=True, text=True,
+            timeout=MCP_SMOKE_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise SystemExit("vaspen-mcp.exe --selftest timed out")
+    if proc.returncode != 0 or "selftest OK" not in proc.stdout:
+        raise SystemExit(
+            "vaspen-mcp.exe smoke failed — "
+            f"rc={proc.returncode}, stdout={proc.stdout!r}, "
+            f"stderr={proc.stderr[-400:]!r}")
+    print(f"MCP smoke test OK — {proc.stdout.strip()}")
+
+
 if __name__ == "__main__":
     if "--nuitka" in sys.argv:
         build_nuitka()
     else:
-        build_pyinstaller(smoke="--smoke" in sys.argv)
+        build_pyinstaller(smoke="--smoke" in sys.argv,
+                          with_mcp="--with-mcp" in sys.argv)
