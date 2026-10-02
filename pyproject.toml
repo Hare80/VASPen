@@ -42,9 +42,13 @@ deploy = [
     "pyinstaller>=6",
     "nuitka>=2",
 ]
+mcp = [
+    "mcp>=2.2",
+]
 
 [project.scripts]
 vaspen = "vaspen.main:main"
+vaspen-mcp = "vaspen.mcp_server.main:main"
 
 [project.urls]
 Homepage = "https://github.com/Hare80/VASPen"
