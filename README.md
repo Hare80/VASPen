@@ -30,7 +30,8 @@ Linux users run from source (Quick Start below).
 - **NEB workflow** — Linear & IDPP interpolation, frozen-atom handling, per-frame editing, standard VASP image layout
 - **Measurements** — distances, angles, dihedrals in the 3D viewport
 - **External file changes** — the GUI detects when the loaded file is modified on disk (editor, script, or the MCP server) and offers a reload
-- **MCP server** — headless `vaspen-mcp` stdio server exposing the full toolkit to AI clients (Claude Desktop, ZCode, Cursor, …), including structure rendering and a code-execution escape hatch
+- **MCP server** — `vaspen-mcp` stdio server exposing the full toolkit to AI clients (Claude Desktop, ZCode, Cursor, …), including structure rendering and a code-execution escape hatch
+- **Live bridge** — with VASPen open, MCP tools act on the window's structure in real time; without it, the server runs headlessly on files
 - **i18n** — English and Chinese interface (switchable live)
 - **Theming** — light/dark themes with live switching
 - **Welcome page** — recent files (click selects, double-click opens) and drag-and-drop opening
@@ -108,6 +109,11 @@ GUI preferences is shared with the server.
 pip install -e ".[mcp]"
 vaspen-mcp          # stdio MCP server; --version for the version
 ```
+
+**Live mode:** when a VASPen window is open (Settings → MCP Server →
+"Enable live bridge", on by default), MCP tools act on that window's
+structure in real time — what the AI cuts, you see rendered. Close the
+window and the same server keeps working headlessly on files.
 
 **From the release zip (Windows):** download the
 `VASPen-v<version>-win64.zip` built with `--with-mcp` and use

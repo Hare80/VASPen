@@ -439,6 +439,7 @@ Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
 - 需要确认的操作与 GUI 的确认对话框一一对应:AI 必须显式传
   `allow_disorder_loss`(丢弃部分占位)或 `force`(忽略 NEB 原子顺序
   警告)等确认参数,不会有静默的破坏性操作。
+- **实时模式** — VASPen 打开时,MCP 工具实时作用于**窗口内的结构**(设置 → MCP 服务器 → 实时桥接,默认开启):AI 切的面、建的超胞、保存的文件,窗口立即刷新。关闭 VASPen 后,同一服务器自动转为无头模式,仅操作文件。
 - 当服务器写入的文件正被 GUI 打开时,GUI 会察觉并重载(有未保存修改时
   会先询问)——见"菜单"一节的自动重载说明。
 

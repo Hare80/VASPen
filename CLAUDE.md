@@ -55,6 +55,7 @@ VASPen/
 │   │   ├── measurement.py            # Measurement manager + dock panel (right side)
 │   │   ├── display_options_dialog.py # Render settings dialog (live preview)
 │   │   ├── file_watch.py            # FileChangeMonitor — external file-change detection (§7.12)
+│   │   ├── bridge_server.py         # Live bridge — GUI hosts the MCP tools (§7.13)
 │   │   ├── welcome_page.py           # Empty-state landing page (recent files + quick actions, §7.10)
 │   │   └── tools.py                  # Viewport interaction tools (select/move/rotate/add/delete/bond/measure)
 │   ├── core/
@@ -71,9 +72,11 @@ VASPen/
 │   │   ├── templates/          # Default input file templates
 │   │   ├── themes/             # light.qss + dark.qss — Fusion theme stylesheets (§7.9)
 │   │   └── icons/              # App icon set — PNG + ICO (regenerate via scripts/make_icon.py)
-│   ├── mcp_server/             # Headless MCP server for AI clients (§7.11)
-│   │   ├── server.py           # Tool surface — thin adapters over core/
-│   │   ├── session.py          # ServerSession — current structure + lock
+│   ├── mcp_server/             # MCP server for AI clients (§7.11, §7.13)
+│   │   ├── tools.py            # Transport-free tool core — session + registry
+│   │   ├── server.py           # SDK adapter (ToolError mapping, bridge routing)
+│   │   ├── bridge.py           # Live-bridge proxy — forward to the running GUI
+│   │   ├── session.py          # ServerSession — headless current structure + lock
 │   │   ├── render.py           # render_preview — ASE/matplotlib 2D projection (Agg)
 │   │   ├── main.py             # `vaspen-mcp` entry (stdio, UTF-8 framing)
 │   │   └── __main__.py         # python -m vaspen.mcp_server / PyInstaller entry
@@ -870,9 +873,25 @@ directly over stdio. Purely additive: the UI layer is untouched, and
   JSON-RPC 2.0), spawned by the AI client. Entry points: console
   script `vaspen-mcp = "vaspen.mcp_server.main:main"` and
   `python -m vaspen.mcp_server` (the latter is also the PyInstaller
-  entry script for the optional console exe). NOT an in-GUI server —
-  a live-session bridge (local port + Qt thread sync) was evaluated
-  and deferred; do not add one without revisiting this section.
+  entry script for the optional console exe). When a VASPen GUI is
+  running with the live bridge enabled, tool calls are FORWARDED to
+  the GUI and act on its live structure — see §7.13; with no GUI the
+  process executes headlessly against its own session (original
+  behavior). The headless path remains the fallback contract.
+- **Tool core**: `vaspen/mcp_server/tools.py` holds the session, the
+  registry and all tool functions with ZERO `mcp`-SDK imports — it is
+  executed both by this server and inside the GUI (bridge). `server.py`
+  is the SDK adapter: it wraps each raw tool (ToolError mapping,
+  bytes→Image, live-bridge routing first) and re-exports the wrapped
+  functions at module level for tests/selftest. Raw tools raise native
+  core exceptions; each transport maps them for its own protocol.
+  Return convention: a dict result passes as-is; a `bytes` result is a
+  PNG (render_preview) — the SDK wraps it as `Image` content, the
+  bridge as a base64 payload. NOTE: the SDK builds a pydantic OUTPUT
+  model from the wrapped function's return annotation —
+  `render_preview`'s annotation is set explicitly to `Image` in
+  server.py (functools.wraps would inherit the raw tool's, which is
+  unannotated).
 - **SDK**: official `mcp` package, version **>= 2** — in 2.x FastMCP
   was renamed `MCPServer` (`from mcp.server.mcpserver import
   MCPServer`); sync tools run on worker threads (anyio), so every tool
@@ -1001,6 +1020,57 @@ the loaded file.
   `_reload_keep_camera` flag (`set_structure(reset_view=...)`).
 - i18n: the new MainWindow strings went through the §11.2 workflow
   (hand-edited zh.ts → sync_en_ts.py → lrelease).
+
+### 7.13 MCP live bridge (settled 2026-10-02 — do not re-litigate)
+
+The 2026-10-02 decision "NOT an in-GUI server" was formally REVERSED
+the same day by user decision: the GUI now HOSTS the MCP tool surface
+and AI tools act on the window's live structure (Blender-MCP model).
+The headless path survives as the automatic fallback.
+
+- **Wire**: `vaspen/ui/bridge_server.py` — the GUI listens on
+  127.0.0.1 (daemon thread, stdlib socket) with a newline-delimited
+  JSON protocol `{token, tool, args}` → `{ok, result|error|image}`.
+  Port starts at 8765 and bumps on conflict; the winning port and a
+  per-session token (`secrets.token_hex`) are published through the
+  SHARED QSettings store (`AppConfig.bridge_port/bridge_token`), which
+  is how the proxy discovers the bridge — no fixed-port contract.
+  **SO_REUSEADDR is POSIX-only** (set when `sys.platform != "win32"`):
+  on Windows it would allow binding a port another process is actively
+  listening on, silently misrouting bridge requests.
+- **Proxy**: `vaspen/mcp_server/bridge.py` — `forward(tool, args)` is
+  attempted FIRST in the SDK wrapper for every tool; connection
+  refusal/stale port → `UNAVAILABLE` sentinel → the call falls back to
+  the headless session in this process. Once a request is DELIVERED, a
+  failure must not fall back (the GUI may have mutated already) — it
+  raises `ToolError`. Timeouts: connect 0.5 s, read 300 s (the GUI
+  enforces the same ceiling).
+- **Marshaling**: worker thread → queued `Signal(object)` → main
+  thread slot (the surface_dialog relay idiom) → tool executed with
+  `tools.SESSION` bound to a `LiveSession` → `threading.Event` wait.
+  The Event timeout turns a wedged GUI into a clean "GUI busy" error.
+- **LiveSession** reads `window._structure` FRESH on every access
+  (`_on_new` swaps the model object) and REFUSES `open_structure`
+  while the window model is dirty — an AI-triggered open must never
+  silently discard in-window work (the refusal is a clean tool error;
+  the AI relays it to the user).
+- **Watcher interplay**: `StructureModel.save` emits no signal, so the
+  bridge calls `window._sync_file_watcher()` after every successful
+  tool — otherwise the bridge's own save would look external and
+  trigger the §7.12 reload prompt. Both features coexist: the watcher
+  covers external editors/scripts, the bridge covers AI calls.
+- **Shutdown ordering** (native-crash guard): `stop()` DISCONNECTS the
+  signal before stopping the thread — an emit from the worker into a
+  half-deleted QObject is an access violation; `_dispatch`/`_run_tool`
+  also short-circuit with a "GUI is closing" error once stopping.
+- **Config/UI**: `AppConfig.mcp_live_bridge` (default True) toggles
+  the listener; the Settings dialog MCP group has the checkbox. Every
+  executed tool announces itself in the status bar ("MCP: …").
+- **Test shape**: bridge calls MUST be issued from a non-main thread
+  with the event loop pumping (`QTest.qWait` loop) — a queued signal
+  never fires while the test function blocks. Bridge tests restore
+  `tools.SESSION` afterwards; the suite-wide config default keeps the
+  bridge OFF outside test_bridge.py.
 
 ---
 
@@ -1273,6 +1343,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] `scripts/build.py --with-mcp` optional console exe in the release zip
 - [x] render_preview (2D projection → MCP image content) + run_python escape hatch (Settings-gated)
 - [x] GUI external file-change detection with reload prompt (§7.12)
+- [x] GUI live bridge — MCP tools act on the window's live structure (§7.13)
 
 ### v1.0+ — Future
 - [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6

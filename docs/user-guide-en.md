@@ -519,6 +519,7 @@ assistant calls the tools itself and reports the results.
   pass explicit confirm flags for discarding partial occupancies
   (`allow_disorder_loss`) or continuing despite a NEB atom-order
   warning (`force`), so nothing destructive happens silently.
+- **Live mode** — While VASPen is open, MCP tools act on the **window's structure** in real time (Settings → MCP Server → Live bridge, on by default): what the AI cuts, supercells or saves, you see rendered immediately. With VASPen closed, the same server works headlessly on files.
 - When the server writes to a file that is currently open in the
   VASPen GUI, the GUI notices and reloads (asking first if you have
   unsaved changes) — see the reload note in the Menus section.
