@@ -375,7 +375,66 @@ NEB 预设(VTST 风格):SCF 基础之上加 `EDIFFG = -0.02`、
 **Linux 呢?**
 请从源码运行(见 §2)。发行 zip 仅限 Windows。
 
-## 18. 许可与致谢
+## 18. MCP 服务器(供 AI 客户端使用)
+
+VASPen 内置无头 [Model Context Protocol](https://modelcontextprotocol.io)
+(MCP)服务器,让 AI 助手——Claude Desktop、ZCode、Cursor 及其他 MCP
+客户端——直接调用本工具箱:从对话中加载并分析结构、切面、建超胞、
+准备 NEB 计算并一次性生成全套 VASP 输入文件。
+
+### 18.1 安装
+
+- **源码运行**(Windows 与 Linux):`pip install -e ".[mcp]"`,之后即有
+  `vaspen-mcp` 命令(`vaspen-mcp --version` 可查看版本)。
+- **发行压缩包**(Windows):使用以 `--with-mcp` 构建的压缩包中的
+  `VASPen/vaspen-mcp/vaspen-mcp.exe`。
+
+服务器是纯 stdio 进程:由 AI 客户端按需启动,通过 stdin/stdout 交换
+JSON-RPC,不监听任何网络端口。
+
+### 18.2 客户端配置
+
+Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
+设置:
+
+```json
+{
+  "mcpServers": {
+    "vaspen": {
+      "command": "D:/path/to/vaspen-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+源码安装时 `"command": "vaspen-mcp"` 通常即可。
+
+### 18.3 AI 能做什么
+
+| 分组 | 工具 |
+|------|------|
+| 结构 | open_structure、get_structure_info、list_atoms、save_structure、make_periodic |
+| 编辑 | make_supercell、set_fixed_atoms、set_magmoms、translate_atoms、rotate_atoms |
+| 分析 | measure(距离/键角/二面角)、find_bonds、analyze_symmetry、suggest_band_path、estimate_k_mesh |
+| 对称性与表面 | symmetrize_cell、list_slab_terminations、cut_surface、rebox_slab |
+| VASP 输入 | list_incar_presets、generate_inputs |
+| NEB | neb_check、neb_setup |
+
+典型指令:*"打开 TiO2_rutile.vasp,告诉我空间群,然后在 ./vasp-run 生成
+一套 k 间距 0.03 的 SCF 输入文件"*——助手会自行调用相应工具并汇报结果。
+
+### 18.4 注意事项
+
+- 无论界面语言为何,工具响应均为英文。
+- 原子索引从 0 开始;长度单位为 Å,角度单位为度。
+- **设置 → 赝势库路径**在 GUI 与 MCP 服务器之间共享(赝势库本身永不
+  打包分发)。
+- 需要确认的操作与 GUI 的确认对话框一一对应:AI 必须显式传
+  `allow_disorder_loss`(丢弃部分占位)或 `force`(忽略 NEB 原子顺序
+  警告)等确认参数,不会有静默的破坏性操作。
+
+## 19. 许可与致谢
 
 VASPen 免费开源,采用 MIT 许可(仓库中的 `LICENSE` 文件)。
 

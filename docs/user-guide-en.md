@@ -448,7 +448,71 @@ release builds only).
 **Linux?**
 Run from source (see §2). The release zip is Windows-only.
 
-## 18. License & Credits
+## 18. MCP Server (for AI clients)
+
+VASPen includes a headless [Model Context Protocol](https://modelcontextprotocol.io)
+(MCP) server that lets AI assistants — Claude Desktop, ZCode, Cursor and
+other MCP clients — drive the toolkit directly: load and analyze
+structures, cut surfaces, build supercells, prepare NEB runs and
+generate complete VASP input sets, all from a chat prompt.
+
+### 18.1 Installation
+
+- **From source** (Windows & Linux): `pip install -e ".[mcp]"`, then the
+  command `vaspen-mcp` is available (`vaspen-mcp --version` to check).
+- **From the release zip** (Windows): use
+  `VASPen/vaspen-mcp/vaspen-mcp.exe` from a zip built with `--with-mcp`.
+
+The server is a plain stdio process: your AI client launches it on
+demand and talks JSON-RPC over stdin/stdout — nothing listens on the
+network.
+
+### 18.2 Client configuration
+
+Claude Desktop (`claude_desktop_config.json`) or the ZCode / Cursor MCP
+settings:
+
+```json
+{
+  "mcpServers": {
+    "vaspen": {
+      "command": "D:/path/to/vaspen-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+For a source install, `"command": "vaspen-mcp"` usually suffices.
+
+### 18.3 What the AI can do
+
+| Group | Tools |
+|-------|-------|
+| Structures | open_structure, get_structure_info, list_atoms, save_structure, make_periodic |
+| Editing | make_supercell, set_fixed_atoms, set_magmoms, translate_atoms, rotate_atoms |
+| Analysis | measure (distance/angle/dihedral), find_bonds, analyze_symmetry, suggest_band_path, estimate_k_mesh |
+| Symmetry & surfaces | symmetrize_cell, list_slab_terminations, cut_surface, rebox_slab |
+| VASP inputs | list_incar_presets, generate_inputs |
+| NEB | neb_check, neb_setup |
+
+A typical prompt: *"Open TiO2_rutile.vasp, tell me the space group, then
+generate an SCF input set with a 0.03 k-spacing into ./vasp-run"* — the
+assistant calls the tools itself and reports the results.
+
+### 18.4 Notes
+
+- Tool responses are in English regardless of the GUI language.
+- Atom indices are 0-based; lengths are Å, angles in degrees.
+- The pseudopotential library path configured in **Settings →
+  Pseudopotential Library** is shared between the GUI and the MCP
+  server (the library itself is never bundled).
+- Guarded operations mirror the GUI's confirmation dialogs: the AI must
+  pass explicit confirm flags for discarding partial occupancies
+  (`allow_disorder_loss`) or continuing despite a NEB atom-order
+  warning (`force`), so nothing destructive happens silently.
+
+## 19. License & Credits
 
 VASPen is free and open source, released under the MIT License
 (`LICENSE` in the repository).

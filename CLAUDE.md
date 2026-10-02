@@ -70,6 +70,11 @@ VASPen/
 │   │   ├── templates/          # Default input file templates
 │   │   ├── themes/             # light.qss + dark.qss — Fusion theme stylesheets (§7.9)
 │   │   └── icons/              # App icon set — PNG + ICO (regenerate via scripts/make_icon.py)
+│   ├── mcp_server/             # Headless MCP server for AI clients (§7.11)
+│   │   ├── server.py           # Tool surface — thin adapters over core/
+│   │   ├── session.py          # ServerSession — current structure + lock
+│   │   ├── main.py             # `vaspen-mcp` entry (stdio, UTF-8 framing)
+│   │   └── __main__.py         # python -m vaspen.mcp_server / PyInstaller entry
 │   └── utils/
 │       ├── __init__.py
 │       ├── config.py           # AppConfig — QSettings wrapper
@@ -102,7 +107,9 @@ VASPen/
 │   ├── test_symmetry.py
 │   ├── test_transform.py
 │   ├── test_viewport_geometry.py
-│   └── test_icon_assets.py      # icon letterbox zero-crop + asset pins
+│   ├── test_welcome_page.py
+│   ├── test_icon_assets.py      # icon letterbox zero-crop + asset pins
+│   └── test_mcp_server.py      # MCP tools + stdio protocol E2E (§7.11)
 └── scripts/
     ├── build.py                # PyInstaller / Nuitka build script
     ├── make_icon.py            # Regenerate the app icon set (never crops)
@@ -849,6 +856,92 @@ Follow-up review of the 9 commits after the 2026-08-14 review (report:
 - CLI file open briefly shows the welcome page before the file loads
   (window shows before `_open_file`) — accepted quirk.
 
+### 7.11 MCP Server (settled 2026-10-02 — do not re-litigate)
+
+VASPen ships a **headless MCP (Model Context Protocol) server** so AI
+clients (Claude Desktop, ZCode, Cursor, …) can call the core layer
+directly over stdio. Purely additive: the UI layer is untouched, and
+`vaspen/mcp_server/` never imports `vaspen/ui`.
+
+- **Form**: standalone process, stdio transport (newline-delimited
+  JSON-RPC 2.0), spawned by the AI client. Entry points: console
+  script `vaspen-mcp = "vaspen.mcp_server.main:main"` and
+  `python -m vaspen.mcp_server` (the latter is also the PyInstaller
+  entry script for the optional console exe). NOT an in-GUI server —
+  a live-session bridge (local port + Qt thread sync) was evaluated
+  and deferred; do not add one without revisiting this section.
+- **SDK**: official `mcp` package, version **>= 2** — in 2.x FastMCP
+  was renamed `MCPServer` (`from mcp.server.mcpserver import
+  MCPServer`); sync tools run on worker threads (anyio), so every tool
+  body takes the session `threading.Lock`. Declared as the optional
+  dependency group `mcp` (`pip install "vaspen[mcp]"`) — GUI-only
+  installs never need it; the console script prints an install hint
+  on ImportError.
+- **Error convention**: core raises ValueError/FileNotFoundError/…
+  with clean messages. The `mcp_tool` decorator in server.py converts
+  those into the SDK's `ToolError` → an isError result whose text is
+  the clean message. This is REQUIRED: an uncaught exception surfaces
+  to the client as the SDK's generic "Error executing tool …" which
+  hides the real message. Truly unexpected exceptions fall through to
+  the SDK's own isError fallback (logged server-side).
+- **stdout is the protocol**: the stdio transport owns stdout —
+  application logging goes to stderr only (the `vaspen.mcp` logger;
+  `utils/logger.py`'s console handler is stderr already), and
+  `main.py` reconfigures stdin/stdout to UTF-8 explicitly (the
+  Windows default encoding would corrupt the JSON framing; Linux
+  defaults are fine but pinned anyway). Never print() to stdout in
+  this package.
+- **Session semantics**: one process = one session = one current
+  `StructureModel` (`ServerSession`, protected by a lock). Tools
+  without a path act on the loaded structure; `open_structure`
+  replaces it. Derived structures (cut/symmetrize/rebox) replace the
+  atoms in-model; `save_structure` REQUIRES an explicit path (never
+  implicitly overwrites the source file) and needs `wrap_padding`
+  when saving a molecule to vasp/cif (the headless counterpart of the
+  GUI's PeriodicWrapDialog — no silent conversion). The disorder
+  confirm dialogs map to `allow_disorder_loss` parameters; the NEB
+  order-mismatch confirm maps to `force=true`.
+- **i18n**: tool descriptions/responses are English-only (AI-facing,
+  not UI). The package never calls `tr()`/`_tr()` and is deliberately
+  NOT registered in `tests/test_i18n.py`; core's translatable errors
+  degrade to their English source strings headless (verified).
+- **Name collisions**: several tools share a name with the core
+  symbol they call (`measure`, `estimate_k_mesh`, `rebox_slab`,
+  `suggest_band_path`) — the core imports are aliased with a leading
+  underscore. `builder.make_supercell` at module level is ASE's
+  function (builder.py imports it); the model-mutating static method
+  lives on `StructureBuilder`.
+- **NEB frozen mask**: `neb.interpolate_*` take a 1-D fully-frozen
+  mask — `constraints_to_fixed_flags(atoms).all(axis=1)` (same
+  convention as the GUI/tests); FileIO.write keeps taking the (N,3)
+  flags.
+- **Config sharing**: `potcar_library` params default to
+  `AppConfig().potcar_library_path` — the same QSettings store the
+  GUI writes, so a library configured once in the GUI works for the
+  server (and vice versa). The pseudopotential library is still never
+  bundled.
+- **Packaging**: `scripts/build.py --with-mcp` builds a SECOND console
+  onedir (`dist/vaspen-mcp/`, no `_internal` sharing with the GUI —
+  opt-in because it roughly doubles the zip). It is appended into the
+  release zip under `VASPen/vaspen-mcp/`. Only the `--collect-data`
+  trees land on disk in `_internal` — pure-Python packages (mcp,
+  mcp_types, vaspen.*) go into the PYZ archive, so `_verify_dist`
+  checks the exe + the ase/pymatgen/spglib data dirs, and the MCP
+  smoke runs `vaspen-mcp.exe --selftest` (main.py builds the full
+  server and reports the tool count — a missing frozen submodule
+  fails there, exit-code check instead of the GUI log-growth check).
+  Do NOT use a whole-package `--collect-submodules mcp`: `mcp.cli`
+  exits at import when the `mcp[cli]` extra (typer) is absent —
+  collect only `mcp.server` + `mcp.shared`. Hard-fails when the `mcp`
+  package is not installed (mirrors the app.ico policy). Linux has no
+  frozen build — source/pip users run `vaspen-mcp` directly.
+- **Tests** (`tests/test_mcp_server.py`): tools called as plain
+  functions through the module surface (fresh `ServerSession` per
+  test via monkeypatch) plus ONE subprocess end-to-end test that
+  speaks initialize/tools-list/tools-call/resources-list JSON-RPC over
+  real stdio — deliberately not using SDK test helpers, to keep the
+  protocol wiring pinned independently of the SDK's API churn.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -1114,6 +1207,10 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] Test suite
 - [x] PyInstaller Windows build
 - [x] User documentation
+
+### v0.4 — AI integration
+- [x] Headless MCP server (`vaspen-mcp`, 23 tools over the core layer, §7.11)
+- [x] `scripts/build.py --with-mcp` optional console exe in the release zip
 
 ### v1.0+ — Future
 - [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6

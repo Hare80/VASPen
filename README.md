@@ -29,6 +29,7 @@ Linux users run from source (Quick Start below).
 - **One-click input generation** — generate all four VASP input files at once
 - **NEB workflow** — Linear & IDPP interpolation, frozen-atom handling, per-frame editing, standard VASP image layout
 - **Measurements** — distances, angles, dihedrals in the 3D viewport
+- **MCP server** — headless `vaspen-mcp` stdio server exposing the full toolkit to AI clients (Claude Desktop, ZCode, Cursor, …)
 - **i18n** — English and Chinese interface (switchable live)
 - **Theming** — light/dark themes with live switching
 - **Welcome page** — recent files (click selects, double-click opens) and drag-and-drop opening
@@ -88,6 +89,43 @@ Set the path in **Edit → Preferences → Pseudopotential Library**.
 
 If you already have such a library, point VASPen to the same directory.
 
+## MCP Server (for AI clients)
+
+VASPen ships a headless [Model Context Protocol](https://modelcontextprotocol.io)
+server that exposes its structure engine and VASP input generation to AI
+assistants — 23 tools covering file open/save, structure analysis
+(symmetry, bonds, measurements), supercells, surface cutting, NEB
+preparation and one-shot INCAR/KPOINTS/POSCAR/POTCAR generation. The
+pseudopotential library path configured in the GUI preferences is
+shared with the server.
+
+**From source (Windows & Linux):**
+
+```bash
+pip install -e ".[mcp]"
+vaspen-mcp          # stdio MCP server; --version for the version
+```
+
+**From the release zip (Windows):** download the
+`VASPen-v<version>-win64.zip` built with `--with-mcp` and use
+`VASPen/vaspen-mcp/vaspen-mcp.exe` as the command below.
+
+Register it with your AI client, e.g. Claude Desktop
+(`claude_desktop_config.json`) or ZCode:
+
+```json
+{
+  "mcpServers": {
+    "vaspen": {
+      "command": "D:/path/to/vaspen-mcp.exe",
+      "args": []
+    }
+  }
+}
+```
+
+(For a source install, `"command": "vaspen-mcp"` usually suffices.)
+
 ## Project Structure
 
 ```
@@ -119,9 +157,13 @@ VASPen/
 │   │   ├── i18n/           # Translation files (.ts/.qm)
 │   │   ├── templates/
 │   │   └── icons/
-│   └── utils/
-│       ├── config.py
-│       └── logger.py
+│   ├── utils/
+│   │   ├── config.py
+│   │   └── logger.py
+│   ├── mcp_server/           # Headless MCP server for AI clients
+│   │   ├── server.py         # Tool surface over the core layer
+│   │   ├── session.py        # Current-structure session state
+│   │   └── main.py           # vaspen-mcp entry (stdio)
 ├── tests/
 └── scripts/
     └── build.py
@@ -160,6 +202,7 @@ python scripts/build.py
 - [x] QSS theming
 - [x] PyInstaller Windows build (version resource, bundled docs, release zip, smoke test)
 - [x] User documentation (bilingual en/zh user guides)
+- [x] MCP server for AI clients (headless stdio, 23 tools)
 - [ ] SSH remote server connection + job submission (future)
 - [ ] Post-processing (band structure / DOS plotting)
 - [ ] Plugin system
