@@ -848,7 +848,10 @@ def test_settings_dialog_run_python_persists(qtbot):
 
 
 def test_settings_dialog_live_bridge_default_checked(qtbot):
-    """Unset config leaves the live-bridge toggle ON (settled 2026-10-02)."""
+    """Unset config leaves the live-bridge toggle ON (settled 2026-10-02).
+    (The suite-wide conftest default is OFF — drop the override first.)"""
+    config = AppConfig()
+    config.remove("mcp_live_bridge")
     dlg = SettingsDialog()
     qtbot.addWidget(dlg)
     assert dlg._mcp_live_bridge_check.isChecked()
