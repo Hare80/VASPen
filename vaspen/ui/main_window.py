@@ -36,6 +36,7 @@ from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
 from vaspen.ui.bridge_server import BridgeServer
 from vaspen.ui.file_watch import FileChangeMonitor
+from vaspen.ui.single_instance import SingleInstanceServer
 from vaspen.ui.generate_all_dialog import GenerateAllDialog
 from vaspen.ui.menu_button import MenuButton
 from vaspen.ui.structure_tree import StructureTreePanel
@@ -120,6 +121,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._update_welcome_visibility()
         self._restore_window_state()
+        self._setup_single_instance()
         self._start_live_bridge()
 
     # ------------------------------------------------------------------
@@ -1702,6 +1704,25 @@ class MainWindow(QMainWindow):
         self._config.window_state = self.saveState()
         self._config.sync()
         super().closeEvent(event)
+
+    def _setup_single_instance(self) -> None:
+        """Host the named-pipe server for second-launch handoffs
+        (§7.14): a repeated launch raises this window and opens its
+        file here instead of spawning a second process."""
+        self._single_instance = SingleInstanceServer(self)
+        if self._single_instance.listen():
+            self._single_instance.open_requested.connect(
+                self._on_second_instance_open)
+
+    def _on_second_instance_open(self, filepath: str | None) -> None:
+        """A second launch handed off: raise this window and open its
+        file (same path as File → Open — the user is at the keyboard)."""
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if filepath:
+            self._open_file(filepath)
 
     def _start_live_bridge(self) -> None:
         """Host the MCP live bridge (§7.13): AI tools act on this

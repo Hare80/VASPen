@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 
 from vaspen import __version__
+from vaspen.ui import single_instance
 from vaspen.ui.main_window import MainWindow
 from vaspen.utils.config import AppConfig
 from vaspen.utils.logger import logger, setup_logger
@@ -122,6 +123,15 @@ def main() -> int:
     config = AppConfig()
     apply_theme(app, config.theme)
 
+    # --- Single instance (§7.14, VESTA-style): a second launch hands
+    # its CLI file to the running window and exits instead of spawning
+    # a second process/window ---
+    cli_filepath = sys.argv[1] if len(sys.argv) > 1 else None
+    if single_instance.forward_to_running(cli_filepath):
+        logger.info("VASPen already running — forwarded %r and exiting",
+                    cli_filepath)
+        return 0
+
     # --- Main Window (loads translations itself; switchable live) ---
     lang = config.language
     window = MainWindow()
@@ -129,8 +139,8 @@ def main() -> int:
     window.show()
 
     # Open a file passed on the command line (e.g. double-click file association)
-    if len(sys.argv) > 1:
-        filepath = sys.argv[1]
+    if cli_filepath is not None:
+        filepath = cli_filepath
         if Path(filepath).exists():
             window._open_file(filepath)
             logger.info("Opened CLI file: %s", filepath)
