@@ -379,6 +379,10 @@ NEB 预设(VTST 风格):SCF 基础之上加 `EDIFFG = -0.02`、
 **Linux 呢?**
 请从源码运行(见 §2)。发行 zip 仅限 Windows。
 
+**再次启动 VASPen?**
+同一时间只有一个 VASPen 进程:再次启动只会把已打开的窗口带到前台,
+并在其中打开本次给出的文件(与 VESTA 一致)。
+
 ## 18. MCP 服务器(供 AI 客户端使用)
 
 VASPen 内置无头 [Model Context Protocol](https://modelcontextprotocol.io)

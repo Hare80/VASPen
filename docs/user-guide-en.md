@@ -454,6 +454,10 @@ release builds only).
 **Linux?**
 Run from source (see §2). The release zip is Windows-only.
 
+**Launching VASPen again?**
+Only one VASPen runs at a time: a second launch raises the existing
+window and opens the file it was given there (like VESTA).
+
 ## 18. MCP Server (for AI clients)
 
 VASPen includes a headless [Model Context Protocol](https://modelcontextprotocol.io)

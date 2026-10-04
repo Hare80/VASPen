@@ -1072,6 +1072,34 @@ The headless path survives as the automatic fallback.
   `tools.SESSION` afterwards; the suite-wide config default keeps the
   bridge OFF outside test_bridge.py.
 
+### 7.14 Single instance (settled 2026-10-02 — do not re-litigate)
+
+Launching VASPen again while it is running spawns NO second process or
+window (VESTA-style): the new process hands its CLI file to the
+running window and exits.
+
+- **Channel**: `vaspen/ui/single_instance.py` — `QLocalServer`/
+  `QLocalSocket` named pipe "VASPen" (per-user namespace), one JSON
+  line `{"path": ... | null}`. `main()` calls
+  `forward_to_running(filepath)` right after the QApplication exists;
+  True → log + `return 0`, False → this process becomes the instance
+  and `MainWindow._setup_single_instance()` listens.
+- **Deliberately independent of the MCP live bridge**: the handoff
+  works with the bridge disabled; the pipe needs no token (same-user
+  namespace, the user is at the keyboard).
+- **Open semantics**: the forwarded file goes through `_open_file` —
+  identical to File → Open/drag/CLI (no dirty confirm; consistent with
+  every other open path). A nonexistent path raises the standard
+  open-failure box. The window raises itself (showNormal when
+  minimized + raise_ + activateWindow).
+- **Platform gotchas** (both bit the tests): Windows named pipes allow
+  MULTIPLE listeners on one name — single-instance-ness comes from the
+  `main()` guard, not pipe exclusivity (tests close extra servers);
+  the client's write only completes when the PEER reads —
+  `disconnectFromServer` + `waitForDisconnected` flush it, and the
+  tests must run `forward_to_running` on a worker thread (same
+  process-server would otherwise starve).
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -1344,6 +1372,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] render_preview (2D projection → MCP image content) + run_python escape hatch (Settings-gated)
 - [x] GUI external file-change detection with reload prompt (§7.12)
 - [x] GUI live bridge — MCP tools act on the window's live structure (§7.13)
+- [x] Single-instance startup — second launch focuses the window and hands over its file (§7.14)
 
 ### v1.0+ — Future
 - [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6

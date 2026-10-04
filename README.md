@@ -32,6 +32,7 @@ Linux users run from source (Quick Start below).
 - **External file changes** — the GUI detects when the loaded file is modified on disk (editor, script, or the MCP server) and offers a reload
 - **MCP server** — `vaspen-mcp` stdio server exposing the full toolkit to AI clients (Claude Desktop, ZCode, Cursor, …), including structure rendering and a code-execution escape hatch
 - **Live bridge** — with VASPen open, MCP tools act on the window's structure in real time; without it, the server runs headlessly on files
+- **Single instance** — launching VASPen again focuses the running window and opens the passed file there (VESTA-style)
 - **i18n** — English and Chinese interface (switchable live)
 - **Theming** — light/dark themes with live switching
 - **Welcome page** — recent files (click selects, double-click opens) and drag-and-drop opening
