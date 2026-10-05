@@ -1053,6 +1053,7 @@ class MainWindow(QMainWindow):
             self._structure.load_atoms(new_atoms, path)
         finally:
             self._reload_keep_camera = False
+        logger.info("Reloaded from disk (external change): %s", path)
         self._set_status(self.tr("Reloaded from disk: {}").format(path))
 
     def _on_export_poscar(self) -> None:
@@ -1700,6 +1701,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self._bridge is not None:
             self._bridge.stop()
+        if self._single_instance is not None:
+            self._single_instance.stop()
         self._config.window_geometry = self.saveGeometry()
         self._config.window_state = self.saveState()
         self._config.sync()

@@ -297,6 +297,9 @@ def _verify_dist(zip_path: Path, with_mcp: bool = False) -> None:
         internal / "vaspen" / "resources" / "themes" / "light.qss",
         internal / "vaspen" / "resources" / "themes" / "dark.qss",
         internal / "vaspen" / "resources" / "icons" / "app.ico",
+        # QtNetwork ships the QLocalServer/QLocalSocket the single-
+        # instance (§7.14) and live-bridge (§7.13) features need.
+        internal / "PySide6" / "Qt6Network.dll",
         DIST_APP / "LICENSE",
         zip_path,
     ]
