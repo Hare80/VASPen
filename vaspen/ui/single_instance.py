@@ -63,8 +63,15 @@ class SingleInstanceServer(QObject):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._server = QLocalServer(self)
-        # POSIX keeps the pipe node after a crash — remove the stale one
-        # before listening (a no-op on Windows named pipes).
+
+    @staticmethod
+    def remove_stale_server() -> None:
+        """Drop a POSIX socket node left behind by a crashed instance.
+
+        Only call on the STARTUP path (we are the first instance) — on
+        POSIX this unlinks the active socket node of a running
+        instance, breaking its handoff channel (a no-op on Windows).
+        """
         QLocalServer.removeServer(SERVER_NAME)
 
     def listen(self) -> bool:
@@ -76,6 +83,13 @@ class SingleInstanceServer(QObject):
             return False
         self._server.newConnection.connect(self._on_new_connection)
         return True
+
+    def stop(self) -> None:
+        """Deterministically release the pipe (window close). Without
+        this the name lingers until the QObject is actually destroyed,
+        and on Windows a second server's connections can still land on
+        the stale listener."""
+        self._server.close()
 
     def _on_new_connection(self) -> None:
         while self._server.hasPendingConnections():

@@ -131,6 +131,9 @@ def main() -> int:
         logger.info("VASPen already running — forwarded %r and exiting",
                     cli_filepath)
         return 0
+    # We are the first instance — clear a POSIX socket node a crashed
+    # run may have left behind (no-op on Windows).
+    single_instance.SingleInstanceServer.remove_stale_server()
 
     # --- Main Window (loads translations itself; switchable live) ---
     lang = config.language

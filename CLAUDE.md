@@ -1219,7 +1219,10 @@ def test_open_poscar(qtbot, tmp_path):
 
 - 3D rendering quality (visual inspection)
 - File format compatibility with real VASP output files
-- Cross-platform behavior (test on both Windows and Linux before release)
+- Cross-platform: the full pytest suite is verified on Windows
+  (primary, Python 3.13) AND Ubuntu 24.04 / WSL2 (Python 3.12) — one
+  expected skip (the Windows-only shell32 icon test). Frozen builds
+  remain Windows-only; Linux runs from source.
 
 ---
 
