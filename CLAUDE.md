@@ -1146,6 +1146,18 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   in project context).
 - **SSH submission (roadmap) lands HERE**: submit = a runs/<id>/
   directory; status write-back = set_run_status. P3 connects them.
+- **P1.5 (2026-10-24) — run parameters visible & adjustable**: MCP
+  `get_run` (full provenance card + file list + has_outputs
+  file-existence hint) and `update_run` (partial parameter update,
+  regenerates the four inputs IN PLACE from the registered structure
+  — the card's parameter dict is REPLACED wholesale so stale INCAR
+  overrides never survive). GUI: `RunDialog` (right-click a run →
+  Parameters…) shows the card and edits preset/functional/KPOINTS
+  mode+params/INCAR overrides (KEY = VALUE text, parsed client-side);
+  Regenerate asks first when the run dir has CONTCAR/OSZICAR.
+  Regeneration source = the REGISTERED structure file
+  (structures/<id>), not the run's POSCAR; the card's structure
+  digest pins the structure and is untouched.
 
 ---
 

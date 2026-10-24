@@ -398,9 +398,11 @@ my-project/
 
 - **文件 → 新建项目 / 打开项目** 创建或打开项目;**项目面板**显示
   "结构"和"计算"两组。
-- 双击结构(或计算)即在三维视图中打开;右键点击计算可修改状态
-  (inputs-ready → submitted → running → done / failed)。状态只是标签
-  ——VASPen 绝不解析 VASP 输出文件。
+- 双击结构(或计算)即在三维视图中打开;右键点击计算可打开**参数
+  对话框**(完整溯源卡,可编辑 preset / 泛函 / KPOINTS / INCAR 覆盖项,
+  并一键重新生成输入文件),也可修改状态(inputs-ready → submitted →
+  running → done / failed)。状态只是标签——VASPen 绝不解析 VASP
+  输出文件。
 - 每个计算带有一张 `run.json` 溯源卡:由哪个结构、什么参数、哪个
   VASPen 版本生成。
 - **配合 AI**:对 MCP 客户端说*"打开我的项目,并为当前结构创建一个

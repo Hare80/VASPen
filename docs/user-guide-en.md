@@ -475,9 +475,11 @@ my-project/
 - **File → New Project / Open Project** creates or opens a project;
   the **Project dock** shows a Structures group and a Runs group.
 - Double-click a structure (or a run) to open it in the 3D view;
-  right-click a run to change its status (inputs-ready → submitted →
-  running → done / failed). Statuses are labels — VASPen never parses
-  VASP output files.
+  right-click a run to open its **Parameters dialog** (full
+  provenance card, editable preset / functional / KPOINTS / INCAR
+  overrides, and a Regenerate button) or to change its status
+  (inputs-ready → submitted → running → done / failed). Statuses are
+  labels — VASPen never parses VASP output files.
 - Each run carries a `run.json` provenance card: which structure and
   parameters generated it, and by which VASPen version.
 - **With AI:** ask your MCP client *"open my project and create an SCF
