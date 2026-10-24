@@ -59,6 +59,7 @@ CHECKED_MODULES = (
     ("vaspen/ui/project_panel.py", "ProjectPanel"),
     ("vaspen/ui/run_editor.py", "RunEditorDialog"),
     ("vaspen/ui/text_viewer.py", "TextViewerDialog"),
+    ("vaspen/ui/structure_picker.py", "StructurePickerDialog"),
     ("vaspen/ui/structure_tree.py", "StructureTreePanel"),
     ("vaspen/ui/viewport3d.py", "Viewport3D"),
     ("vaspen/ui/measurement.py", "MeasurementPanel"),

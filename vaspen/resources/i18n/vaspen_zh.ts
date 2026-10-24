@@ -744,6 +744,10 @@ Initialize a new project here?</source>
             <source>Nothing to redo for this image.</source>
             <translation>该图像没有可重做的操作。</translation>
         </message>
+        <message>
+            <source>Run created: {}</source>
+            <translation>已创建计算：{}</translation>
+        </message>
     <message><source>&amp;Re-box Slab...</source><translation>重新装盒(&amp;R)...</translation></message><message><source>Re-apply the vacuum of a structure that already carries it (e.g. a cut surface)</source><translation>重新施加已有结构的真空层(例如切面)</translation></message><message><source>Re-box Slab</source><translation>重新装盒</translation></message><message><source>Re-boxing requires a periodic structure (a full-rank cell with periodic boundary conditions).</source><translation>重新装盒需要周期结构（满秩晶胞且具有周期性边界条件）。</translation></message><message><source>Slab re-boxed (vacuum along c).</source><translation>已重新装盒切面（真空沿 c 方向）。</translation></message><message><source>Creating a supercell</source><translation>创建超胞</translation></message><message><source>Load a bulk structure before cleaving a surface.</source><translation>解理表面前请先加载一个体相结构。</translation></message><message><source>No Structure</source><translation>没有结构</translation></message><message><source>Partial Occupancy</source><translation>部分占据</translation></message><message><source>Symmetry</source><translation>对称性</translation></message><message><source>This structure has partial occupancy (disorder).
 The VASP POSCAR format does not support fractional occupancy — the saved file will contain only the dominant species per site and the composition information will be lost.
 
@@ -1293,6 +1297,50 @@ Files: {}</source>
 
 文件：{}</translation>
         </message>
+        <message>
+            <source>Current project (new run)</source>
+            <translation>当前项目（新建计算）</translation>
+        </message>
+        <message>
+            <source>Folder:</source>
+            <translation>文件夹：</translation>
+        </message>
+        <message>
+            <source>Run name:</source>
+            <translation>计算名称：</translation>
+        </message>
+        <message>
+            <source>Names the new run — becomes the runs/&lt;id&gt;/ directory (empty: automatic from task and structure).</source>
+            <translation>命名新计算——将成为 runs/&lt;id&gt;/ 目录名（留空：按计算类型与结构自动命名）。</translation>
+        </message>
+        <message>
+            <source>No Project Open</source>
+            <translation>未打开项目</translation>
+        </message>
+        <message>
+            <source>No project is open — open or create one first (File → New/Open Project).</source>
+            <translation>尚未打开项目——请先打开或新建项目（文件 → 新建/打开项目）。</translation>
+        </message>
+        <message>
+            <source>Structure Not Saved</source>
+            <translation>结构未保存</translation>
+        </message>
+        <message>
+            <source>Save the structure to a file first, then generate the run.</source>
+            <translation>请先把结构保存为文件，然后再生成计算。</translation>
+        </message>
+        <message>
+            <source>The NEB initial endpoint has no source file — load it from a file (or save the current structure) first.</source>
+            <translation>NEB 起点结构没有源文件——请先从文件载入（或先保存当前结构）。</translation>
+        </message>
+        <message>
+            <source>Run {} created in the project.
+
+Files: {}</source>
+            <translation>已在项目中创建计算 {}。
+
+文件：{}</translation>
+        </message>
     <message><source>{}
 
 Partially written files were removed.</source><translation>{}
@@ -1456,6 +1504,18 @@ Interpolate in strict file order anyway?</source>
         <message>
             <source>Regenerating the images will discard your manual edits to the frames. Continue?</source>
             <translation>重新生成图像将丢弃你对帧的手动编辑。是否继续？</translation>
+        </message>
+        <message>
+            <source>From Project...</source>
+            <translation>从项目选择...</translation>
+        </message>
+        <message>
+            <source>No Structures</source>
+            <translation>无结构</translation>
+        </message>
+        <message>
+            <source>The open project has no registered structures.</source>
+            <translation>当前项目没有已登记的结构。</translation>
         </message>
     <message><source>Changing the initial/final structure discards the manual edits made to the images.
 
@@ -2578,6 +2638,21 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         <message>
             <source>Registered structure not found.</source>
             <translation>找不到登记的结构。</translation>
+        </message>
+    </context>
+    <context>
+        <name>StructurePickerDialog</name>
+        <message>
+            <source>Choose Project Structure</source>
+            <translation>选择项目结构</translation>
+        </message>
+        <message>
+            <source>Registered structures:</source>
+            <translation>已登记的结构：</translation>
+        </message>
+        <message>
+            <source>(No structures registered — add some to the project first.)</source>
+            <translation>（项目尚未登记任何结构——请先添加。）</translation>
         </message>
     </context>
 </TS>

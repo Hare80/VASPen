@@ -84,10 +84,14 @@ class PoscarPanel(QWidget):
     #: Emitted with the number of intermediate images after interpolation.
     images_generated = Signal(int)
 
-    def __init__(self, structure_model=None, preview_callback=None, parent=None) -> None:
+    def __init__(self, structure_model=None, preview_callback=None, parent=None,
+                 project_provider=None) -> None:
         super().__init__(parent)
         self._structure_model = structure_model
         self._preview_callback = preview_callback
+        #: Callable returning the open Project (or None) — enables the
+        #: "From Project..." endpoint pickers (NEB page).
+        self._project_provider = project_provider
         self._config = AppConfig()
         self._init_atoms: Atoms | None = None
         self._final_atoms: Atoms | None = None
@@ -172,6 +176,11 @@ class PoscarPanel(QWidget):
             self.tr("(current structure)") if self._ini_default else "")
         self._ini_edit.setReadOnly(True)
         ini_row.addWidget(self._ini_edit, 1)
+        if self._project_provider is not None:
+            self._ini_project_btn = QPushButton(
+                self.tr("From Project..."))
+            self._ini_project_btn.clicked.connect(self._on_project_ini)
+            ini_row.addWidget(self._ini_project_btn)
         self._ini_browse = QPushButton(self.tr("Browse..."))
         self._ini_browse.clicked.connect(self._on_browse_ini)
         ini_row.addWidget(self._ini_browse)
@@ -184,6 +193,11 @@ class PoscarPanel(QWidget):
         self._fin_edit = QLineEdit("")
         self._fin_edit.setReadOnly(True)
         fin_row.addWidget(self._fin_edit, 1)
+        if self._project_provider is not None:
+            self._fin_project_btn = QPushButton(
+                self.tr("From Project..."))
+            self._fin_project_btn.clicked.connect(self._on_project_fin)
+            fin_row.addWidget(self._fin_project_btn)
         self._fin_browse = QPushButton(self.tr("Browse..."))
         self._fin_browse.clicked.connect(self._on_browse_fin)
         fin_row.addWidget(self._fin_browse)
@@ -255,6 +269,9 @@ class PoscarPanel(QWidget):
         self._preview_label.setText(self.tr("Preview:"))
         self._ini_label.setText(self.tr("Initial structure:"))
         self._fin_label.setText(self.tr("Final structure:"))
+        if self._project_provider is not None:
+            self._ini_project_btn.setText(self.tr("From Project..."))
+            self._fin_project_btn.setText(self.tr("From Project..."))
         if self._ini_default:
             self._ini_edit.setText(self.tr("(current structure)"))
         self._ini_browse.setText(self.tr("Browse..."))
@@ -454,6 +471,33 @@ class PoscarPanel(QWidget):
         )
         return reply == QMessageBox.Yes
 
+    def _load_endpoint_file(self, filepath: str, final: bool) -> None:
+        """Load an endpoint structure from ``filepath`` (shared by the
+        file-browse and project-picker paths)."""
+        try:
+            atoms = FileIO.read(filepath)
+        except Exception as e:
+            QMessageBox.warning(
+                self, self.tr("Open Failed"),
+                self.tr("Could not open file:\n{}").format(str(e)))
+            return
+        atoms = self._ensure_periodic_copy(atoms)
+        if atoms is None:
+            return
+        if final:
+            self._final_atoms = atoms
+            self._final_source_path = filepath
+            self._fin_edit.setText(filepath)
+        else:
+            self._init_atoms = atoms
+            self._ini_fixed_flags = constraints_to_fixed_flags(atoms)
+            self._init_source_path = filepath
+            self._ini_edit.setText(filepath)
+            self._ini_default = False
+        self._config.last_directory = str(Path(filepath).parent)
+        self._clear_images()
+        self._update_diagnostics()
+
     def _on_browse_ini(self) -> None:
         if not self._confirm_discard_frame_edits():
             return
@@ -465,24 +509,7 @@ class PoscarPanel(QWidget):
         )
         if not filepath:
             return
-        try:
-            atoms = FileIO.read(filepath)
-        except Exception as e:
-            QMessageBox.warning(
-                self, self.tr("Open Failed"),
-                self.tr("Could not open file:\n{}").format(str(e)))
-            return
-        atoms = self._ensure_periodic_copy(atoms)
-        if atoms is None:
-            return
-        self._init_atoms = atoms
-        self._ini_fixed_flags = constraints_to_fixed_flags(atoms)
-        self._init_source_path = filepath
-        self._ini_edit.setText(filepath)
-        self._ini_default = False
-        self._config.last_directory = str(Path(filepath).parent)
-        self._clear_images()
-        self._update_diagnostics()
+        self._load_endpoint_file(filepath, final=False)
 
     def _on_browse_fin(self) -> None:
         if not self._confirm_discard_frame_edits():
@@ -495,22 +522,39 @@ class PoscarPanel(QWidget):
         )
         if not filepath:
             return
-        try:
-            atoms = FileIO.read(filepath)
-        except Exception as e:
-            QMessageBox.warning(
-                self, self.tr("Open Failed"),
-                self.tr("Could not open file:\n{}").format(str(e)))
+        self._load_endpoint_file(filepath, final=True)
+
+    def _on_project_ini(self) -> None:
+        if not self._confirm_discard_frame_edits():
             return
-        atoms = self._ensure_periodic_copy(atoms)
-        if atoms is None:
+        path = self._pick_project_structure()
+        if path is not None:
+            self._load_endpoint_file(str(path), final=False)
+
+    def _on_project_fin(self) -> None:
+        if not self._confirm_discard_frame_edits():
             return
-        self._final_atoms = atoms
-        self._final_source_path = filepath
-        self._fin_edit.setText(filepath)
-        self._config.last_directory = str(Path(filepath).parent)
-        self._clear_images()
-        self._update_diagnostics()
+        path = self._pick_project_structure()
+        if path is not None:
+            self._load_endpoint_file(str(path), final=True)
+
+    def _pick_project_structure(self):
+        """Modal pick over the project's registered structures — the
+        path of the chosen one, or None (cancelled / nothing picked /
+        no project or empty project)."""
+        from vaspen.ui.structure_picker import StructurePickerDialog
+
+        project = (self._project_provider()
+                   if self._project_provider is not None else None)
+        if project is None or not project.structures:
+            QMessageBox.information(
+                self, self.tr("No Structures"),
+                self.tr("The open project has no registered structures."))
+            return None
+        dlg = StructurePickerDialog(project, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dlg.selected_structure_path()
 
     def _ensure_periodic_copy(self, atoms: Atoms) -> Atoms | None:
         """Wrap a molecule in a padded cell (on a copy, model untouched).
@@ -762,7 +806,8 @@ class GenerateAllDialog(QDialog):
         # ── Tabs ──
         self._tabs = QTabWidget()
         self._poscar_panel = PoscarPanel(
-            self._structure_model, preview_callback=self._preview_callback)
+            self._structure_model, preview_callback=self._preview_callback,
+            project_provider=self._project_provider)
         self._incar_panel = IncarEditorPanel(self._structure_model)
         self._kpoints_panel = KpointsEditorPanel(self._structure_model)
         self._potcar_panel = PotcarPanel(self._structure_model)

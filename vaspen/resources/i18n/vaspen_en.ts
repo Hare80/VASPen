@@ -734,6 +734,10 @@ Initialize a new project here?</translation>
       <translation>Nothing to redo for this image.</translation>
     </message>
     <message>
+      <source>Run created: {}</source>
+      <translation>Run created: {}</translation>
+    </message>
+    <message>
       <source>&amp;Re-box Slab...</source>
       <translation>&amp;Re-box Slab...</translation>
     </message>
@@ -1343,6 +1347,50 @@ Files: {}</source>
 Files: {}</translation>
     </message>
     <message>
+      <source>Current project (new run)</source>
+      <translation>Current project (new run)</translation>
+    </message>
+    <message>
+      <source>Folder:</source>
+      <translation>Folder:</translation>
+    </message>
+    <message>
+      <source>Run name:</source>
+      <translation>Run name:</translation>
+    </message>
+    <message>
+      <source>Names the new run — becomes the runs/&lt;id&gt;/ directory (empty: automatic from task and structure).</source>
+      <translation>Names the new run — becomes the runs/&lt;id&gt;/ directory (empty: automatic from task and structure).</translation>
+    </message>
+    <message>
+      <source>No Project Open</source>
+      <translation>No Project Open</translation>
+    </message>
+    <message>
+      <source>No project is open — open or create one first (File → New/Open Project).</source>
+      <translation>No project is open — open or create one first (File → New/Open Project).</translation>
+    </message>
+    <message>
+      <source>Structure Not Saved</source>
+      <translation>Structure Not Saved</translation>
+    </message>
+    <message>
+      <source>Save the structure to a file first, then generate the run.</source>
+      <translation>Save the structure to a file first, then generate the run.</translation>
+    </message>
+    <message>
+      <source>The NEB initial endpoint has no source file — load it from a file (or save the current structure) first.</source>
+      <translation>The NEB initial endpoint has no source file — load it from a file (or save the current structure) first.</translation>
+    </message>
+    <message>
+      <source>Run {} created in the project.
+
+Files: {}</source>
+      <translation>Run {} created in the project.
+
+Files: {}</translation>
+    </message>
+    <message>
       <source>{}
 
 Partially written files were removed.</source>
@@ -1510,6 +1558,18 @@ Interpolate in strict file order anyway?</translation>
     <message>
       <source>Regenerating the images will discard your manual edits to the frames. Continue?</source>
       <translation>Regenerating the images will discard your manual edits to the frames. Continue?</translation>
+    </message>
+    <message>
+      <source>From Project...</source>
+      <translation>From Project...</translation>
+    </message>
+    <message>
+      <source>No Structures</source>
+      <translation>No Structures</translation>
+    </message>
+    <message>
+      <source>The open project has no registered structures.</source>
+      <translation>The open project has no registered structures.</translation>
     </message>
     <message>
       <source>Changing the initial/final structure discards the manual edits made to the images.
@@ -2695,6 +2755,21 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
     <message>
       <source>Registered structure not found.</source>
       <translation>Registered structure not found.</translation>
+    </message>
+  </context>
+  <context>
+    <name>StructurePickerDialog</name>
+    <message>
+      <source>Choose Project Structure</source>
+      <translation>Choose Project Structure</translation>
+    </message>
+    <message>
+      <source>Registered structures:</source>
+      <translation>Registered structures:</translation>
+    </message>
+    <message>
+      <source>(No structures registered — add some to the project first.)</source>
+      <translation>(No structures registered — add some to the project first.)</translation>
     </message>
   </context>
 </TS>

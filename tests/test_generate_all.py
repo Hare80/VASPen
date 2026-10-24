@@ -1102,3 +1102,77 @@ def test_folder_destination_still_works_with_provider(
     assert (out / "POSCAR").exists()
     assert project.runs == []
     assert info
+
+
+def test_endpoint_from_project_picker(qtbot, tmp_path, monkeypatch,
+                                      vacancy_hop_pair):
+    """From Project... loads a registered project structure as an
+    endpoint (source path tracked for run registration)."""
+    from PySide6.QtWidgets import QDialog
+
+    import vaspen.ui.structure_picker as sp
+    from vaspen.core.project import Project
+
+    ini = _write_poscar(vacancy_hop_pair[0].copy(), tmp_path / "ini.vasp")
+    fin = _write_poscar(vacancy_hop_pair[1].copy(), tmp_path / "fin.vasp")
+    project = Project.create(tmp_path / "proj", "T")
+    project.add_structure(ini, metadata={"formula": "Cu7"})
+    project.add_structure(fin, metadata={"formula": "Cu7"})
+    model = StructureModel()
+    model.load_atoms(vacancy_hop_pair[0].copy())
+
+    class _FakePicker:
+        def __init__(self, proj, parent=None):
+            self._path = proj.structure_path("fin")
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def selected_structure_path(self):
+            return self._path
+
+    monkeypatch.setattr(sp, "StructurePickerDialog", _FakePicker)
+
+    dlg = GenerateAllDialog(model, default_task="neb",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+    panel._fin_project_btn.click()
+    assert panel.final_source_path() == str(project.structure_path("fin"))
+    assert panel._fin_edit.text() == str(project.structure_path("fin"))
+
+
+def test_endpoint_from_project_cancel_keeps_endpoint(
+        qtbot, tmp_path, monkeypatch, example_model):
+    from PySide6.QtWidgets import QDialog
+
+    import vaspen.ui.structure_picker as sp
+    from vaspen.core.project import Project
+
+    src = _write_poscar(example_model.atoms, tmp_path / "cu.vasp")
+    project = Project.create(tmp_path / "proj", "T")
+    project.add_structure(src)
+    monkeypatch.setattr(
+        sp.StructurePickerDialog, "exec",
+        lambda self: QDialog.DialogCode.Rejected)
+
+    dlg = GenerateAllDialog(example_model, default_task="neb",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    panel = dlg._poscar_panel
+    panel._ini_project_btn.click()  # cancel → endpoint unchanged
+    assert panel.initial_source_path() is None
+    assert panel._ini_edit.text() != str(project.structure_path("cu"))
+
+
+def test_endpoint_from_project_empty_project_infos(
+        qtbot, tmp_path, monkeypatch, example_model):
+    from vaspen.core.project import Project
+
+    infos = _record(monkeypatch, "information")
+    project = Project.create(tmp_path / "proj", "T")  # no structures
+    dlg = GenerateAllDialog(example_model, default_task="neb",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    dlg._poscar_panel._fin_project_btn.click()
+    assert infos
