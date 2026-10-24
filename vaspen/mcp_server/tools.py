@@ -54,6 +54,7 @@ from vaspen.core.vasp_input import (
     generate_potcar,
     suggest_band_path as _suggest_band_path,
 )
+from vaspen.core.project import Project, sha256_file
 from vaspen.mcp_server.session import ServerSession
 from vaspen.utils.config import AppConfig
 
@@ -61,6 +62,36 @@ SESSION = ServerSession()
 
 # All registered tools, wrapped; build_server() hands them to the SDK.
 _TOOLS: list = []
+
+
+class _ProjectRef:
+    """Where project tools find the current project.
+
+    Headless: the holder stores the Project opened by open_project.
+    The GUI live bridge REPLACES this attribute with a LiveProjectRef
+    that resolves the WINDOW's project per call (open/close needs no
+    rebind) — same pattern as SESSION.
+    """
+
+    def __init__(self) -> None:
+        self._project: Project | None = None
+
+    def get(self) -> Project | None:
+        return self._project
+
+    def set(self, project: Project | None) -> None:
+        self._project = project
+
+
+PROJECT_REF = _ProjectRef()
+
+
+def _require_project() -> Project:
+    project = PROJECT_REF.get()
+    if project is None:
+        raise ValueError(
+            "No project open — call open_project(dir) first.")
+    return project
 
 # Output caps (paginate or truncate instead of flooding the AI context).
 MAX_LIST_ATOMS = 1000
@@ -670,6 +701,34 @@ def list_incar_presets() -> dict:
     return {"ok": True, "presets": _incar_presets_payload()}
 
 
+def _write_input_set(out: Path, model, preset, overrides, kpoints_mode,
+                     kpoints_params, library, functional,
+                     poscar_direct) -> tuple[dict[str, str], dict[str, str]]:
+    """Generate + write the four VASP inputs into ``out``.
+
+    Shared by generate_inputs (bare directory) and create_run (project
+    run directory). Returns (written file paths, full contents).
+    """
+    contents = generate_all_inputs(
+        model,
+        incar_preset=preset,
+        incar_overrides=overrides,
+        kpoints_mode=kpoints_mode,
+        kpoints_params=kpoints_params,
+        potcar_library=library,
+        functional=functional,
+        poscar_direct=poscar_direct,
+    )
+    files: dict[str, str] = {}
+    for name, content in contents.items():
+        if not content:
+            continue
+        target = out / name
+        _write_text(target, content)
+        files[name] = str(target)
+    return files, contents
+
+
 @tool
 def generate_inputs(out_dir: str, preset: str = "scf",
                     incar_overrides: dict[str, Any] | None = None,
@@ -711,24 +770,10 @@ def generate_inputs(out_dir: str, preset: str = "scf",
         model = SESSION.require_model()
         _check_disorder(model, allow_disorder_loss, "POSCAR generation")
         library = potcar_library or AppConfig().potcar_library_path
-        contents = generate_all_inputs(
-            model,
-            incar_preset=preset,
-            incar_overrides=incar_overrides,
-            kpoints_mode=kpoints_mode,
-            kpoints_params=kpoints_params,
-            potcar_library=library,
-            functional=functional,
-            poscar_direct=poscar_direct,
-        )
         out = Path(out_dir)
-        files: dict[str, str] = {}
-        for name, content in contents.items():
-            if not content:
-                continue
-            target = out / name
-            _write_text(target, content)
-            files[name] = str(target)
+        files, contents = _write_input_set(
+            out, model, preset, incar_overrides, kpoints_mode,
+            kpoints_params, library, functional, poscar_direct)
         response: dict[str, Any] = {
             "ok": True,
             "out_dir": str(out),
@@ -1028,3 +1073,167 @@ def run_python(code: str) -> dict:
         if SESSION.model is not None and SESSION.model.n_atoms:
             response["summary"] = _structure_summary(SESSION.model)
         return response
+
+
+# ----------------------------------------------------------------------
+# Calculation projects (§7.15)
+# ----------------------------------------------------------------------
+
+
+def _project_payload(project: Project) -> dict:
+    return {
+        "name": project.name,
+        "root": str(project.root),
+        "structures": [
+            {"id": s["id"],
+             "formula": s.get("formula", ""),
+             "file": s["file"]}
+            for s in project.structures],
+        "runs": [
+            {"id": r["id"], "type": r.get("type", ""),
+             "status": r.get("status", ""),
+             "structure": r.get("structure", ""),
+             "created": r.get("created", "")}
+            for r in project.runs],
+    }
+
+
+@tool
+def open_project(dir: str) -> dict:
+    """Open a calculation project (a folder with project.json — see the
+    VASPen docs for the layout) and make it the current project. All
+    project tools act on it afterwards; with the VASPen GUI running
+    (live bridge) the window's project panel shows it in real time.
+
+    Args:
+        dir: Path to the project folder.
+    """
+    if not Path(dir).is_dir():
+        raise FileNotFoundError(f"Folder not found: {dir}")
+    project = Project.load(dir)
+    PROJECT_REF.set(project)
+    return {"ok": True, **_project_payload(project)}
+
+
+@tool
+def get_project() -> dict:
+    """Summary of the current project: name, structures and runs with
+    statuses."""
+    return {"ok": True, **_project_payload(_require_project())}
+
+
+@tool
+def add_structure_to_project(name: str | None = None) -> dict:
+    """Save the current structure into the project's structures/ folder
+    and register it (formula recorded automatically).
+
+    Args:
+        name: Optional display id (slugified); defaults to the file stem.
+    """
+    with SESSION.lock:
+        model = SESSION.require_model()
+        if not model.filepath:
+            raise ValueError(
+                "The current structure has no source file — save it "
+                "(save_structure) before adding it to a project.")
+        project = _require_project()
+        entry = project.add_structure(
+            model.filepath, name,
+            metadata={"formula": model.chemical_formula})
+        return {"ok": True, "structure": entry,
+                "project": _project_payload(project)}
+
+
+@tool
+def create_run(name: str, preset: str = "scf",
+               incar_overrides: dict[str, Any] | None = None,
+               kpoints_mode: str = "automatic",
+               kpoints_params: dict[str, Any] | None = None,
+               potcar_library: str | None = None,
+               functional: str = "PBE",
+               poscar_direct: bool = False) -> dict:
+    """Create a calculation run in the current project from the CURRENT
+    structure: writes INCAR/KPOINTS/POSCAR/POTCAR into a new
+    runs/<NNN-name>/ directory with a run.json provenance card
+    (structure digest, parameters, generator version) and registers it
+    in the manifest at status "inputs-ready". Same parameter semantics
+    as generate_inputs.
+
+    Args:
+        name: Run name (slugified into the directory id).
+        preset: INCAR preset (see list_incar_presets).
+        incar_overrides: INCAR tag → value overrides.
+        kpoints_mode: "automatic" | "manual" | "line".
+        kpoints_params: Per-mode parameters (see generate_inputs).
+        potcar_library: Pseudopotential library root (defaults to the
+            GUI-configured path).
+        functional: XC functional for POTCAR.
+        poscar_direct: Write POSCAR in fractional (Direct) coordinates.
+    """
+    with SESSION.lock:
+        model = SESSION.require_model()
+        _check_disorder(model, False, "POSCAR generation")
+        if not model.filepath:
+            raise ValueError(
+                "The current structure has no source file — save it "
+                "(save_structure) or add_structure_to_project first.")
+        project = _require_project()
+        library = potcar_library or AppConfig().potcar_library_path
+        digest = sha256_file(model.filepath)
+        params = {"preset": preset, "kpoints_mode": kpoints_mode,
+                  "kpoints_params": kpoints_params or {},
+                  "functional": functional}
+        entry = project.add_run(name, preset, params,
+                                structure_id=Path(model.filepath).stem,
+                                structure_digest=digest, via="mcp")
+        files, contents = _write_input_set(
+            project.run_dir(entry["id"]), model, preset, incar_overrides,
+            kpoints_mode, kpoints_params, library, functional,
+            poscar_direct)
+        response: dict[str, Any] = {
+            "ok": True,
+            "run": {k: v for k, v in entry.items() if k != "card"},
+            "dir": str(project.run_dir(entry["id"])),
+            "files": files,
+            "INCAR": contents["INCAR"],
+        }
+        if "POTCAR" not in files and not library:
+            response["potcar_note"] = (
+                "POTCAR not written — no pseudopotential library "
+                "configured (pass potcar_library or set it in the VASPen "
+                "GUI preferences).")
+        return response
+
+
+@tool
+def set_run_status(run_id: str, status: str) -> dict:
+    """Change a run's status (labels only — VASP outputs are never
+    parsed). Whitelist: inputs-ready, submitted, running, done, failed.
+
+    Args:
+        run_id: Run id from the project (e.g. "001-scf-fe3o4").
+        status: One of the whitelisted statuses.
+    """
+    project = _require_project()
+    entry = project.set_run_status(run_id, status)
+    return {"ok": True, "run": entry}
+
+
+@tool
+def open_run_structure(run_id: str) -> dict:
+    """Load a run's POSCAR into the current session (with the VASPen GUI
+    running this opens it in the window) — e.g. to continue from a
+    relaxed structure.
+
+    Args:
+        run_id: Run id from the project.
+    """
+    with SESSION.lock:
+        project = _require_project()
+        poscar = project.run_dir(run_id) / "POSCAR"
+        if not poscar.exists():
+            raise FileNotFoundError(
+                f"No POSCAR in run {run_id} — inputs not generated yet.")
+        model = SESSION.load(poscar)
+        return {"ok": True, "run": run_id,
+                **_structure_summary(model)}

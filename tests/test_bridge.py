@@ -43,6 +43,7 @@ def bridge_window(qtbot):
     assert window._bridge is not None
     yield window
     mcp_tools.SESSION = ServerSession()
+    mcp_tools.PROJECT_REF = mcp_tools._ProjectRef()
 
 
 def _si_file(tmp_path: Path, a: float = 5.43) -> Path:
@@ -262,3 +263,46 @@ def test_proxy_falls_back_when_no_bridge(qtbot):
         if hasattr(mcp_tools.get_structure_info, "__wrapped__") else None
     with pytest.raises(ValueError, match="No structure loaded"):
         mcp_tools.get_structure_info()
+
+
+# ----------------------------------------------------------------------
+# Projects over the bridge (§7.15)
+# ----------------------------------------------------------------------
+
+
+def test_bridge_create_run_shows_in_panel(bridge_window, qtbot, tmp_path):
+    from vaspen.core.project import Project
+
+    f = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(f, format="vasp")
+    project = Project.create(tmp_path / "proj", "Bridge Demo")
+
+    # AI opens the project — the WINDOW adopts it (panel + recents)
+    assert _call(bridge_window, "open_project",
+                 {"dir": str(project.root)})["ok"] is True
+    assert bridge_window._project is not None
+    assert bridge_window._project_panel._header.text() == "Bridge Demo"
+
+    # AI loads a structure and creates a run — the panel refreshes live
+    _call(bridge_window, "open_structure", {"path": str(f)})
+    response = _call(bridge_window, "create_run",
+                     {"name": "scf bulk", "preset": "scf"})
+    assert response["ok"] is True
+    run_id = response["result"]["run"]["id"]
+
+    def panel_has_run():
+        runs_root = bridge_window._project_panel._tree.topLevelItem(1)
+        return any(
+            runs_root.child(i).text(0) == run_id
+            for i in range(runs_root.childCount()))
+
+    qtbot.waitUntil(panel_has_run, timeout=5000)
+
+    # status changes through the bridge land in the manifest on disk
+    # (the window reloaded its OWN Project instance from disk on
+    # open_project — the test-local object is deliberately stale)
+    assert _call(bridge_window, "set_run_status",
+                 {"run_id": run_id, "status": "submitted"})["ok"] is True
+    from vaspen.core.project import Project as _Project
+    on_disk = _Project.load(project.root)
+    assert on_disk.run_entry(run_id)["status"] == "submitted"

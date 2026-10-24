@@ -109,6 +109,23 @@ class LiveSession:
         return model
 
 
+class LiveProjectRef:
+    """``tools._ProjectRef`` for the bridge: resolves the WINDOW's
+    project on every access (open/close swaps the Project object —
+    per-call resolution, the LiveSession pattern)."""
+
+    def __init__(self, window) -> None:
+        self._window = window
+
+    def get(self):
+        return self._window._project
+
+    def set(self, project) -> None:
+        """open_project from the AI lands in the window: panel, recents
+        and status all update exactly like File → Open Project."""
+        self._window._adopt_project(project)
+
+
 class BridgeServer(QObject):
     """Localhost listener that runs MCP tools on the GUI main thread."""
 
@@ -163,6 +180,8 @@ class BridgeServer(QObject):
         config.sync()
         # The window's model is now the session every bridge tool sees.
         mcp_tools.SESSION = self._session
+        # Project tools resolve the window's project per call.
+        mcp_tools.PROJECT_REF = LiveProjectRef(self._window)
         self._thread = threading.Thread(target=self._serve, daemon=True,
                                         name="vaspen-bridge")
         self._thread.start()
@@ -190,6 +209,9 @@ class BridgeServer(QObject):
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        # Restore the default project ref (tests share one process; the
+        # dead-window wrapper must not leak into later headless use).
+        mcp_tools.PROJECT_REF = mcp_tools._ProjectRef()
 
     # -- worker thread -------------------------------------------------
 
@@ -278,6 +300,9 @@ class BridgeServer(QObject):
                 payload["response"] = {"ok": True, "result": result}
             self._window._set_status(QCoreApplication.translate(
                 "MainWindow", "MCP: {} (done)").format(name))
+            # Project tools may have added runs / changed statuses —
+            # keep the window's project panel in sync (cheap rebuild).
+            self._window._project_panel.refresh()
             # Tools that wrote the file (save_structure) must refresh the
             # watcher baseline — StructureModel.save emits no signal, so
             # without this the GUI would treat its own bridge save as an

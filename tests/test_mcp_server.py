@@ -27,10 +27,10 @@ from vaspen.mcp_server.session import ServerSession
 
 @pytest.fixture(autouse=True)
 def fresh_session(monkeypatch):
-    """Every test starts with an empty session (the module-level one
-    is process-global and would otherwise leak structures across
-    tests)."""
+    """Every test starts with an empty session and no open project
+    (both are process-global and would otherwise leak across tests)."""
     monkeypatch.setattr(mcp_tools, "SESSION", ServerSession())
+    monkeypatch.setattr(mcp_tools, "PROJECT_REF", mcp_tools._ProjectRef())
 
 
 def _open(atoms, tmp_path, name="struct.vasp"):
@@ -600,3 +600,58 @@ def test_stdio_subprocess_image_content(tmp_path):
             proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+# ----------------------------------------------------------------------
+# Calculation projects (§7.15)
+# ----------------------------------------------------------------------
+
+
+def test_project_lifecycle_roundtrip(tmp_path):
+    project = mcp_tools.Project.create(tmp_path / "proj", "Test")
+    mcp_tools.PROJECT_REF.set(project)
+
+    assert mcp_tools.get_project()["ok"] is True
+    assert mcp_tools.get_project()["name"] == "Test"
+
+    # structure added from the session (needs a source file)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    r = mcp_server.add_structure_to_project()
+    assert r["structure"]["id"] == "si"
+    assert r["structure"]["formula"] == "Si8"
+
+    # run created from the current structure
+    run = mcp_server.create_run("scf bulk", preset="scf")
+    assert run["run"]["id"] == "001-scf-bulk"
+    run_dir = Path(run["dir"])
+    assert (run_dir / "INCAR").exists()
+    assert (run_dir / "KPOINTS").exists()
+    assert (run_dir / "POSCAR").exists()
+    assert (run_dir / "run.json").exists()
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["structure_digest"].startswith("sha256:")
+    assert card["generated_by"]["via"] == "mcp"
+
+    # manifest registered everything
+    manifest = json.loads(
+        (project.root / "project.json").read_text("utf-8"))
+    assert [s["id"] for s in manifest["structures"]] == ["si"]
+    assert manifest["runs"][0]["status"] == "inputs-ready"
+
+    # status flow + run structure reload
+    assert mcp_server.set_run_status("001-scf-bulk",
+                                     "submitted")["run"]["status"] == "submitted"
+    loaded = mcp_server.open_run_structure("001-scf-bulk")
+    assert loaded["ok"] is True
+    assert loaded["formula"] == "Si8"
+
+
+def test_project_tools_require_open_project(tmp_path):
+    with pytest.raises(ToolError, match="No project open"):
+        mcp_server.get_project()
+    with pytest.raises(ToolError, match="No project open"):
+        mcp_server.set_run_status("001-x", "done")
+    with pytest.raises(ToolError, match="not a VASPen project|Folder not found"):
+        mcp_server.open_project(str(tmp_path / "empty"))
