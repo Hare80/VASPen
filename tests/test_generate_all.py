@@ -973,3 +973,132 @@ def test_retranslate_preserves_selections(qtbot, example_model):
     assert dlg._poscar_panel._coord_combo.currentIndex() == 1
     assert dlg._kpoints_panel.mode() == "line"  # band rule still active
     assert dlg._tabs.tabText(0)  # re-applied, non-empty
+
+
+# ----------------------------------------------------------------------
+# Project destination (§7.15 P2)
+# ----------------------------------------------------------------------
+
+
+def test_project_mode_scf_creates_run(qtbot, tmp_path, monkeypatch,
+                                      example_model):
+    import json
+
+    from vaspen.core.project import Project
+
+    info = _record(monkeypatch, "information")
+    src = _write_poscar(example_model.atoms, tmp_path / "cu.vasp")
+    model = StructureModel()
+    model.load(src)
+    project = Project.create(tmp_path / "proj", "T")
+
+    dlg = GenerateAllDialog(model, default_task="scf",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    created: list = []
+    dlg.run_created.connect(created.append)
+    dlg._run_name_edit.setText("cu scf")
+    dlg._on_generate()
+
+    assert created == ["001-cu-scf"]
+    run_dir = project.run_dir("001-cu-scf")
+    for f in ("INCAR", "KPOINTS", "POSCAR"):
+        assert (run_dir / f).exists()
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["type"] == "scf"
+    assert card["generated_by"]["via"] == "gui"
+    assert card["parameters"]["preset"] == "scf"
+    assert len(project.structures) == 1  # auto-registered, no duplicate
+    assert info
+
+
+def test_project_mode_neb_registers_endpoints_and_frames(
+        qtbot, tmp_path, monkeypatch, vacancy_hop_pair):
+    import json
+
+    from vaspen.core.project import Project
+
+    info = _record(monkeypatch, "information")
+    (tmp_path / "initial").mkdir()
+    (tmp_path / "final").mkdir()
+    ini = _write_poscar(vacancy_hop_pair[0].copy(),
+                        tmp_path / "initial" / "POSCAR")
+    fin = _write_poscar(vacancy_hop_pair[1].copy(),
+                        tmp_path / "final" / "POSCAR")
+    model = StructureModel()
+    model.load(ini)
+    project = Project.create(tmp_path / "proj", "T")
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(fin), ""),
+    )
+
+    dlg = GenerateAllDialog(model, default_task="neb",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    created: list = []
+    dlg.run_created.connect(created.append)
+    panel = dlg._poscar_panel
+    panel._on_browse_fin()
+    panel._on_interpolate()
+    assert panel.n_images == 4
+    dlg._on_generate()
+
+    assert len(created) == 1
+    run_id = created[0]
+    run_dir = project.run_dir(run_id)
+    for i in range(6):
+        assert (run_dir / f"{i:02d}" / "POSCAR").exists(), i
+    assert (run_dir / "INCAR").exists()
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["type"] == "neb"
+    assert card["parameters"]["n_images"] == 4
+    assert card["parameters"]["method"] in ("linear", "idpp")
+    # both endpoints registered as project structures
+    assert len(project.structures) == 2
+    assert card["parameters"]["final_structure"]
+    assert info
+
+
+def test_project_mode_without_project_warns(qtbot, monkeypatch,
+                                            example_model):
+    warnings = _record(monkeypatch, "warning")
+    dlg = GenerateAllDialog(example_model, default_task="scf",
+                            project_provider=lambda: None)
+    qtbot.addWidget(dlg)
+    dlg._on_generate()
+    assert warnings
+
+
+def test_project_mode_unsaved_structure_warns(qtbot, tmp_path,
+                                              monkeypatch, example_model):
+    from vaspen.core.project import Project
+
+    infos = _record(monkeypatch, "information")
+    project = Project.create(tmp_path / "proj", "T")
+    dlg = GenerateAllDialog(example_model, default_task="scf",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    dlg._on_generate()  # model has no source file → save-first hint
+    assert infos
+    assert project.runs == []
+
+
+def test_folder_destination_still_works_with_provider(
+        qtbot, tmp_path, monkeypatch, example_model):
+    from vaspen.core.project import Project
+
+    info = _record(monkeypatch, "information")
+    project = Project.create(tmp_path / "proj", "T")
+    dlg = GenerateAllDialog(example_model, default_task="scf",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    out = tmp_path / "out"
+    out.mkdir()
+    dlg._dest_folder_radio.setChecked(True)
+    assert not dlg._run_name_edit.isEnabled()
+    dlg._dir_edit.setText(str(out))
+    dlg._on_generate()
+    assert (out / "POSCAR").exists()
+    assert project.runs == []
+    assert info

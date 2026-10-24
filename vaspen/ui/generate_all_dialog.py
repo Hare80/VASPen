@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -90,6 +91,11 @@ class PoscarPanel(QWidget):
         self._config = AppConfig()
         self._init_atoms: Atoms | None = None
         self._final_atoms: Atoms | None = None
+        # Where each endpoint was loaded from (None = no source file,
+        # e.g. the initial endpoint handed in from an unsaved structure).
+        # Project-run creation registers these files in the project.
+        self._init_source_path: str | None = None
+        self._final_source_path: str | None = None
         self._images: list[Atoms] = []
         # Per-atom per-direction fixed flags of the INITIAL structure:
         # fully-fixed atoms stay put during interpolation; all flags
@@ -108,6 +114,7 @@ class PoscarPanel(QWidget):
         if structure_model is not None and structure_model.n_atoms:
             self._init_atoms = structure_model.atoms.copy()
             self._init_atoms.info = {}
+            self._init_source_path = structure_model.filepath
             self._ini_fixed_flags = np.asarray(
                 structure_model.fixed_flags, dtype=bool).copy()
 
@@ -292,6 +299,20 @@ class PoscarPanel(QWidget):
         """Number of intermediate images (0 when none generated)."""
         return max(0, len(self._images) - 2)
 
+    def initial_source_path(self) -> str | None:
+        """File the initial endpoint was loaded from (None when it has
+        no source file — e.g. an unsaved structure from the viewport)."""
+        return self._init_source_path
+
+    def final_source_path(self) -> str | None:
+        """File the final endpoint was loaded from (None until one is
+        browsed in)."""
+        return self._final_source_path
+
+    def neb_method(self) -> str:
+        """Selected interpolation algorithm: "linear" or "idpp"."""
+        return "idpp" if self._algo_combo.currentIndex() == 1 else "linear"
+
     # ------------------------------------------------------------------
     # Frame editing (middle images only)
     # ------------------------------------------------------------------
@@ -456,6 +477,7 @@ class PoscarPanel(QWidget):
             return
         self._init_atoms = atoms
         self._ini_fixed_flags = constraints_to_fixed_flags(atoms)
+        self._init_source_path = filepath
         self._ini_edit.setText(filepath)
         self._ini_default = False
         self._config.last_directory = str(Path(filepath).parent)
@@ -484,6 +506,7 @@ class PoscarPanel(QWidget):
         if atoms is None:
             return
         self._final_atoms = atoms
+        self._final_source_path = filepath
         self._fin_edit.setText(filepath)
         self._config.last_directory = str(Path(filepath).parent)
         self._clear_images()
@@ -638,11 +661,20 @@ class PoscarPanel(QWidget):
 class GenerateAllDialog(QDialog):
     """Unified preview/adjust/generate window for the four VASP inputs."""
 
+    #: Emitted after a project run was created and filled (run id) —
+    #: the main window refreshes the project panel on it.
+    run_created = Signal(str)
+
     def __init__(self, structure_model, parent=None,
-                 preview_callback=None, default_task: str = "scf") -> None:
+                 preview_callback=None, default_task: str = "scf",
+                 project_provider=None) -> None:
         super().__init__(parent)
         self._structure_model = structure_model
         self._preview_callback = preview_callback
+        #: Callable returning the currently open Project (or None),
+        #: resolved at Generate time — the dialog is non-modal, so the
+        #: project can be opened/closed while it sits there.
+        self._project_provider = project_provider
         self._config = AppConfig()
         self._syncing = False
 
@@ -685,10 +717,25 @@ class GenerateAllDialog(QDialog):
         self._tabs.setTabText(1, self.tr("INCAR"))
         self._tabs.setTabText(2, self.tr("KPOINTS"))
         self._tabs.setTabText(3, self.tr("POTCAR"))
+        if self._dest_project_radio is not None:
+            self._dest_project_radio.setText(
+                self.tr("Current project (new run)"))
+            self._dest_folder_radio.setText(self.tr("Folder:"))
+            self._run_name_label.setText(self.tr("Run name:"))
         self._dir_label.setText(self.tr("Output directory:"))
         self._dir_browse_btn.setText(self.tr("Browse..."))
         self._generate_btn.setText(self.tr("Generate"))
         self._cancel_btn.setText(self.tr("Cancel"))
+
+    def _on_destination_changed(self) -> None:
+        """Project destination: the folder picker is inert; folder
+        destination: the run name is."""
+        project_selected = self._dest_project_radio.isChecked()
+        self._run_name_label.setEnabled(project_selected)
+        self._run_name_edit.setEnabled(project_selected)
+        self._dir_label.setEnabled(not project_selected)
+        self._dir_edit.setEnabled(not project_selected)
+        self._dir_browse_btn.setEnabled(not project_selected)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -728,7 +775,33 @@ class GenerateAllDialog(QDialog):
         self._incar_panel.preset_changed.connect(self._on_incar_preset_changed)
         self._poscar_panel.images_generated.connect(self._on_images_generated)
 
-        # ── Output directory ──
+        # ── Destination ──
+        self._dest_project_radio: QRadioButton | None = None
+        self._dest_folder_radio: QRadioButton | None = None
+        self._run_name_edit: QLineEdit | None = None
+        if self._project_provider is not None:
+            radio_row = QHBoxLayout()
+            self._dest_project_radio = QRadioButton(
+                self.tr("Current project (new run)"))
+            self._dest_project_radio.setChecked(True)
+            self._dest_project_radio.toggled.connect(
+                self._on_destination_changed)
+            radio_row.addWidget(self._dest_project_radio)
+            self._dest_folder_radio = QRadioButton(self.tr("Folder:"))
+            radio_row.addWidget(self._dest_folder_radio)
+            radio_row.addStretch()
+            layout.addLayout(radio_row)
+
+            name_row = QHBoxLayout()
+            self._run_name_label = QLabel(self.tr("Run name:"))
+            name_row.addWidget(self._run_name_label)
+            self._run_name_edit = QLineEdit()
+            self._run_name_edit.setToolTip(self.tr(
+                "Names the new run — becomes the runs/<id>/ directory "
+                "(empty: automatic from task and structure)."))
+            name_row.addWidget(self._run_name_edit, 1)
+            layout.addLayout(name_row)
+
         dir_row = QHBoxLayout()
         self._dir_label = QLabel(self.tr("Output directory:"))
         dir_row.addWidget(self._dir_label)
@@ -738,6 +811,8 @@ class GenerateAllDialog(QDialog):
         self._dir_browse_btn.clicked.connect(self._browse_output_dir)
         dir_row.addWidget(self._dir_browse_btn)
         layout.addLayout(dir_row)
+        if self._dest_folder_radio is not None:
+            self._on_destination_changed()
 
         # ── Buttons ──
         btn_row = QHBoxLayout()
@@ -845,12 +920,24 @@ class GenerateAllDialog(QDialog):
         return buf.getvalue()
 
     def _on_generate(self) -> None:
-        out_text = self._dir_edit.text().strip()
-        if not out_text:
-            QMessageBox.warning(
-                self, self.tr("No Output Directory"),
-                self.tr("Choose an output directory first."))
-            return
+        project = None
+        run_id: str | None = None
+        if (self._dest_project_radio is not None
+                and self._dest_project_radio.isChecked()):
+            project = self._project_provider()
+            if project is None:
+                QMessageBox.warning(
+                    self, self.tr("No Project Open"),
+                    self.tr("No project is open — open or create one "
+                            "first (File → New/Open Project)."))
+                return
+        else:
+            out_text = self._dir_edit.text().strip()
+            if not out_text:
+                QMessageBox.warning(
+                    self, self.tr("No Output Directory"),
+                    self.tr("Choose an output directory first."))
+                return
         if self._structure_model is None or self._structure_model.n_atoms == 0:
             QMessageBox.warning(
                 self, self.tr("No Structure"),
@@ -914,7 +1001,13 @@ class GenerateAllDialog(QDialog):
         if potcar:
             files["POTCAR"] = potcar
 
-        out = Path(out_text)
+        if project is not None:
+            prepared = self._prepare_project_run(project)
+            if prepared is None:
+                return
+            out, run_id = prepared
+        else:
+            out = Path(out_text)
         written: list[Path] = []
         try:
             for name, content in files.items():
@@ -938,11 +1031,92 @@ class GenerateAllDialog(QDialog):
                 .format(e))
             return
 
-        self._config.last_directory = str(out)
-        QMessageBox.information(
-            self,
-            self.tr("Success"),
-            self.tr("Generated files in:\n{}\n\nFiles: {}").format(
-                out_text, ", ".join(files)),
-        )
+        if run_id is not None:
+            self.run_created.emit(run_id)
+            QMessageBox.information(
+                self,
+                self.tr("Success"),
+                self.tr("Run {} created in the project.\n\nFiles: {}").format(
+                    run_id, ", ".join(files)),
+            )
+        else:
+            self._config.last_directory = str(out)
+            QMessageBox.information(
+                self,
+                self.tr("Success"),
+                self.tr("Generated files in:\n{}\n\nFiles: {}").format(
+                    str(out), ", ".join(files)),
+            )
         self.accept()
+
+    def _prepare_project_run(self, project):
+        """Register the run's structure(s), create the run entry and
+        return ``(run_dir, run_id)`` — or None after showing an error
+        (the caller then aborts before writing anything)."""
+        try:
+            task = TASKS[self._task_combo.currentIndex()]
+            if self._poscar_panel.neb_mode:
+                # both endpoints become project structures so the run's
+                # provenance points at real registered files
+                initial = self._poscar_panel.initial_source_path()
+                if not initial:
+                    QMessageBox.information(
+                        self, self.tr("Structure Not Saved"),
+                        self.tr("The NEB initial endpoint has no source "
+                                "file — load it from a file (or save the "
+                                "current structure) first."))
+                    return None
+                structure_id, digest = project.register_structure_file(
+                    initial,
+                    formula=self._poscar_panel.images[0]
+                    .get_chemical_formula())
+                final_id = ""
+                final = self._poscar_panel.final_source_path()
+                if final:
+                    final_id, _ = project.register_structure_file(
+                        final,
+                        formula=self._poscar_panel.images[-1]
+                        .get_chemical_formula())
+                params = {
+                    "preset": task,
+                    "kpoints_mode": self._kpoints_panel.mode(),
+                    "functional": self._potcar_panel.functional(),
+                    "method": self._poscar_panel.neb_method(),
+                    "n_images": self._poscar_panel.n_images,
+                    "final_structure": final_id,
+                }
+            else:
+                if not self._structure_model.filepath:
+                    QMessageBox.information(
+                        self, self.tr("Structure Not Saved"),
+                        self.tr("Save the structure to a file first, "
+                                "then generate the run."))
+                    return None
+                structure_id, digest = project.register_structure_file(
+                    self._structure_model.filepath,
+                    formula=self._structure_model.chemical_formula)
+                params = {
+                    "preset": task,
+                    "kpoints_mode": self._kpoints_panel.mode(),
+                    "functional": self._potcar_panel.functional(),
+                }
+            name = (self._run_name_edit.text().strip()
+                    if self._run_name_edit is not None else "") \
+                or self._auto_run_name(task)
+            entry = project.add_run(name, task, params,
+                                    structure_id=structure_id,
+                                    structure_digest=digest, via="gui")
+        except (OSError, ValueError) as e:
+            QMessageBox.critical(self, self.tr("Generation Failed"), str(e))
+            return None
+        return project.run_dir(entry["id"]), entry["id"]
+
+    def _auto_run_name(self, task: str) -> str:
+        """Default run name: <task>-<structure stem or formula>."""
+        model = self._structure_model
+        stem = ""
+        if model is not None and model.filepath:
+            stem = Path(model.filepath).stem
+        elif model is not None and model.n_atoms:
+            stem = model.chemical_formula
+        return f"{task}-{stem}" if stem else task

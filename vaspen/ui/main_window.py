@@ -958,6 +958,10 @@ class MainWindow(QMainWindow):
     def _on_close_project(self) -> None:
         if self._project is None:
             return
+        # the generate dialog holds a project provider — close it so it
+        # cannot generate into a just-closed project
+        if self._generate_dialog is not None:
+            self._generate_dialog.close()
         logger.info("Project closed: %s", self._project.root)
         self._project = None
         self._project_panel.set_project(None)
@@ -993,6 +997,14 @@ class MainWindow(QMainWindow):
         self._sync_project_tools()
         self._set_status(
             self.tr("Added to project: {}").format(entry["id"]))
+
+    def _on_project_run_created(self, run_id: str) -> None:
+        """The Generate All dialog wrote a run into the project."""
+        if self._project is None:
+            return
+        self._project_panel.refresh()
+        self._sync_project_tools()
+        self._set_status(self.tr("Run created: {}").format(run_id))
 
     def _on_run_status_change(self, run_id: str, status: str) -> None:
         if self._project is None:
@@ -1320,6 +1332,7 @@ class MainWindow(QMainWindow):
                 self,
                 preview_callback=self._preview_image_atoms,
                 default_task=self._config.default_calc_type,
+                project_provider=lambda: self._project,
             )
         except Exception as e:
             # The dialog must never fail silently (e.g. a molecule that
@@ -1329,6 +1342,7 @@ class MainWindow(QMainWindow):
                 self, self.tr("Generation Failed"), str(e))
             return
         dlg.finished.connect(lambda _result: self._on_generate_dialog_finished(dlg))
+        dlg.run_created.connect(self._on_project_run_created)
         self._generate_dialog = dlg
         self._set_preview_editing_enabled(False)
         self._viewport.cancel_active_tool()

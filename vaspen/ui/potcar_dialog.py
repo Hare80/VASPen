@@ -135,6 +135,11 @@ class PotcarPanel(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
+    def functional(self) -> str:
+        """Currently selected XC functional (e.g. "PBE") — recorded on
+        run provenance cards created by the Generate All dialog."""
+        return self._functional_combo.currentText()
+
     def generate_content(self) -> str:
         """Concatenate POTCAR text from the current selections.
 
