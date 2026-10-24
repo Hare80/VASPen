@@ -1117,7 +1117,7 @@ def open_project(dir: str) -> dict:
     """
     if not Path(dir).is_dir():
         raise FileNotFoundError(f"Folder not found: {dir}")
-    project = Project.load(dir)
+    project = _Project.load(dir)
     PROJECT_REF.set(project)
     return {"ok": True, **_project_payload(project)}
 
@@ -1186,13 +1186,39 @@ def create_run(name: str, preset: str = "scf",
                 "(save_structure) or add_structure_to_project first.")
         project = _require_project()
         library = potcar_library or AppConfig().potcar_library_path
+        # ensure the current structure is registered in the project —
+        # a run references a REGISTERED id. Match by path first, then by
+        # content digest (the session may still point at the original
+        # file add_structure copied from — same bytes, same material).
+        structure_id = None
         digest = sha256_file(model.filepath)
+        for s_entry in project.structures:
+            try:
+                registered = project.structure_path(s_entry["id"])
+            except ValueError:
+                continue  # registered file deleted — skip, don't crash
+            if registered.resolve() == Path(model.filepath).resolve():
+                structure_id = s_entry["id"]
+                break
+        for s_entry in project.structures:
+            if structure_id is not None:
+                break
+            try:
+                if s_entry.get("digest") == digest:
+                    structure_id = s_entry["id"]
+            except ValueError:
+                continue
+        if structure_id is None:
+            s_entry = project.add_structure(
+                model.filepath, metadata={"formula": model.chemical_formula})
+            structure_id = s_entry["id"]
+            digest = s_entry["digest"]
         params = {"preset": preset, "kpoints_mode": kpoints_mode,
                   "kpoints_params": kpoints_params or {},
                   "functional": functional,
                   **(incar_overrides or {})}
         entry = project.add_run(name, preset, params,
-                                structure_id=Path(model.filepath).stem,
+                                structure_id=structure_id,
                                 structure_digest=digest, via="mcp")
         files, contents = _write_input_set(
             project.run_dir(entry["id"]), model, preset, incar_overrides,
