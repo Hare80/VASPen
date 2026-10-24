@@ -733,6 +733,7 @@ def test_update_run_neb_aware(tmp_path):
                               kpoints_params={"k_spacing": 0.03})
     assert r["ok"] is True
     assert "POSCAR" not in r["files"]
+    assert "0.0300" in (run_dir / "KPOINTS").read_text("utf-8")
     incar = (run_dir / "INCAR").read_text("utf-8")
     assert "IMAGES" in incar and "2" in incar.split("IMAGES")[1][:8]
     for i in range(4):

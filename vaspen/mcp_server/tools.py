@@ -1337,6 +1337,9 @@ def update_run(run_id: str, preset: str | None = None,
             files = project.write_run_inputs(
                 run_id, model, preset=preset or "neb",
                 incar_overrides=incar_overrides,
+                kpoints_params=(kpoints_params if kpoints_params
+                                is not None else
+                                params.get("kpoints_params") or {}),
                 potcar_library=potcar_library
                 or AppConfig().potcar_library_path,
                 functional=functional or params.get("functional",
