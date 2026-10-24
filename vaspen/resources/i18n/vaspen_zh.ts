@@ -218,6 +218,86 @@ has been modified on disk. Reload and discard your unsaved changes?</source>
             <translation>已从磁盘重新加载：{}</translation>
         </message>
         <message>
+            <source>New Pro&amp;ject...</source>
+            <translation>新建项目(&amp;J)…</translation>
+        </message>
+        <message>
+            <source>Create a new calculation project folder</source>
+            <translation>创建新的计算项目文件夹</translation>
+        </message>
+        <message>
+            <source>Open Projec&amp;t...</source>
+            <translation>打开项目(&amp;T)…</translation>
+        </message>
+        <message>
+            <source>Open a calculation project (project.json)</source>
+            <translation>打开计算项目（project.json）</translation>
+        </message>
+        <message>
+            <source>Close Pro&amp;ject</source>
+            <translation>关闭项目(&amp;J)</translation>
+        </message>
+        <message>
+            <source>Detach the open project (files stay on disk)</source>
+            <translation>脱离当前项目（文件保留在磁盘上）</translation>
+        </message>
+        <message>
+            <source>New Project — Choose Folder</source>
+            <translation>新建项目 — 选择文件夹</translation>
+        </message>
+        <message>
+            <source>New Project</source>
+            <translation>新建项目</translation>
+        </message>
+        <message>
+            <source>Project name:</source>
+            <translation>项目名称：</translation>
+        </message>
+        <message>
+            <source>Project created: {}</source>
+            <translation>项目已创建：{}</translation>
+        </message>
+        <message>
+            <source>Open Project</source>
+            <translation>打开项目</translation>
+        </message>
+        <message>
+            <source>No project.json in this folder.
+
+Initialize a new project here?</source>
+            <translation>此文件夹中没有 project.json。
+
+在此初始化一个新项目吗？</translation>
+        </message>
+        <message>
+            <source>Project opened: {}</source>
+            <translation>项目已打开：{}</translation>
+        </message>
+        <message>
+            <source>Add Structure</source>
+            <translation>添加结构</translation>
+        </message>
+        <message>
+            <source>Save the structure to a file first, then add it.</source>
+            <translation>请先将结构保存为文件，再添加到项目。</translation>
+        </message>
+        <message>
+            <source>Added to project: {}</source>
+            <translation>已添加到项目：{}</translation>
+        </message>
+        <message>
+            <source>Recent &amp;Projects</source>
+            <translation>最近的项目(&amp;P)</translation>
+        </message>
+        <message>
+            <source>(No recent projects)</source>
+            <translation>（无最近项目）</translation>
+        </message>
+        <message>
+            <source>Project</source>
+            <translation>项目</translation>
+        </message>
+        <message>
             <source>Reload failed: {}</source>
             <translation>重新加载失败：{}</translation>
         </message>
@@ -2332,4 +2412,48 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         <source>Drag and drop a structure file anywhere in this window.</source>
         <translation>将结构文件拖放到本窗口任意位置即可打开。</translation>
     </message>
-</context></TS>
+</context>
+    <context>
+        <name>ProjectPanel</name>
+        <message>
+            <source>No project open</source>
+            <translation>未打开项目</translation>
+        </message>
+        <message>
+            <source>Item</source>
+            <translation>条目</translation>
+        </message>
+        <message>
+            <source>Status / Type</source>
+            <translation>状态 / 类型</translation>
+        </message>
+        <message>
+            <source>Structures</source>
+            <translation>结构</translation>
+        </message>
+        <message>
+            <source>Runs</source>
+            <translation>计算</translation>
+        </message>
+        <message>
+            <source>Open a project (File → Open Project) or let the AI create runs — new runs appear here in real time.</source>
+            <translation>打开一个项目（文件 → 打开项目），或让 AI 创建计算——新计算会实时出现在这里。</translation>
+        </message>
+        <message>
+            <source>Set Status</source>
+            <translation>设置状态</translation>
+        </message>
+        <message>
+            <source>Open</source>
+            <translation>打开</translation>
+        </message>
+        <message>
+            <source>Add Current Structure Here</source>
+            <translation>把当前结构添加到这里</translation>
+        </message>
+        <message>
+            <source>Add Current Structure</source>
+            <translation>添加当前结构</translation>
+        </message>
+    </context>
+</TS>

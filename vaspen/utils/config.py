@@ -211,6 +211,23 @@ class AppConfig:
     def recent_files(self, files: list[str]) -> None:
         self.set("recent_files", files[-10:])  # keep last 10
 
+    @property
+    def recent_projects(self) -> list[str]:
+        return self.get("recent_projects", []) or []
+
+    @recent_projects.setter
+    def recent_projects(self, paths: list[str]) -> None:
+        self.set("recent_projects", paths[-8:])  # keep last 8
+
+    def add_recent_project(self, directory: str | Path) -> None:
+        """Add a project folder to the recents (deduplicated, max 8)."""
+        paths = self.recent_projects
+        entry = str(Path(directory).resolve())
+        if entry in paths:
+            paths.remove(entry)
+        paths.insert(0, entry)
+        self.recent_projects = paths
+
     def add_recent_file(self, filepath: str | Path) -> None:
         """Add a file to the recent-files list (deduplicates, max 10)."""
         files = self.recent_files

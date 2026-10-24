@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDockWidget,
     QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -34,11 +35,13 @@ from PySide6.QtWidgets import (
 from vaspen import __version__
 from vaspen.core.structure import StructureModel
 from vaspen.core.file_io import PERIODIC_FORMATS, FileIO, resolve_format
+from vaspen.core.project import MANIFEST_NAME, Project
 from vaspen.ui.bridge_server import BridgeServer
 from vaspen.ui.file_watch import FileChangeMonitor
 from vaspen.ui.single_instance import SingleInstanceServer
 from vaspen.ui.generate_all_dialog import GenerateAllDialog
 from vaspen.ui.menu_button import MenuButton
+from vaspen.ui.project_panel import ProjectPanel
 from vaspen.ui.structure_tree import StructureTreePanel
 from vaspen.ui.tools import ToolMode, confirm_disorder_loss
 from vaspen.ui.viewport3d import Viewport3D
@@ -70,6 +73,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._config = AppConfig()
         self._structure = StructureModel()
+        # Calculation project (folder-as-project, §7.15) — None = none open
+        self._project: Project | None = None
         # Non-modal preview dialogs (kept alive while open; one at a time)
         self._surface_dialog = None
         self._generate_dialog = None
@@ -154,6 +159,23 @@ class MainWindow(QMainWindow):
 
         self.act_export_poscar = QAction(self.tr("Export as &POSCAR..."), self)
         self.act_export_poscar.triggered.connect(self._on_export_poscar)
+
+        # ── Project (§7.15) ──
+        self.act_new_project = QAction(self.tr("New Pro&ject..."), self)
+        self.act_new_project.setStatusTip(
+            self.tr("Create a new calculation project folder"))
+        self.act_new_project.triggered.connect(self._on_new_project)
+
+        self.act_open_project = QAction(self.tr("Open Projec&t..."), self)
+        self.act_open_project.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        self.act_open_project.setStatusTip(
+            self.tr("Open a calculation project (project.json)"))
+        self.act_open_project.triggered.connect(self._on_open_project)
+
+        self.act_close_project = QAction(self.tr("Close Pro&ject"), self)
+        self.act_close_project.setStatusTip(
+            self.tr("Detach the open project (files stay on disk)"))
+        self.act_close_project.triggered.connect(self._on_close_project)
 
         self.act_quit = QAction(self.tr("&Quit"), self)
         self.act_quit.setShortcut(QKeySequence.Quit)
@@ -374,12 +396,19 @@ class MainWindow(QMainWindow):
         self._menu_file.addAction(self.act_new)
         self._menu_file.addAction(self.act_open)
         self._menu_file.addSeparator()
+        self._menu_file.addAction(self.act_new_project)
+        self._menu_file.addAction(self.act_open_project)
+        self._menu_file.addAction(self.act_close_project)
+        self._menu_file.addSeparator()
         self._menu_file.addAction(self.act_save)
         self._menu_file.addAction(self.act_save_as)
         self._menu_file.addAction(self.act_export_poscar)
         self._menu_file.addSeparator()
         self._recent_menu = self._menu_file.addMenu(self.tr("&Recent Files"))
         self._update_recent_menu()
+        self._recent_projects_menu = self._menu_file.addMenu(
+            self.tr("Recent &Projects"))
+        self._update_recent_projects_menu()
         self._menu_file.addSeparator()
         self._menu_file.addAction(self.act_quit)
 
@@ -702,6 +731,14 @@ class MainWindow(QMainWindow):
         self._dock_structure.setWidget(self._structure_tree)
         self.addDockWidget(Qt.LeftDockWidgetArea, self._dock_structure)
 
+        # Project dock (left, below the structure tree) — §7.15
+        self._dock_project = QDockWidget(self.tr("Project"), self)
+        self._dock_project.setObjectName("dock_project")
+        self._dock_project.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self._project_panel = ProjectPanel()
+        self._dock_project.setWidget(self._project_panel)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self._dock_project)
+
         # Measurement dock (right side) — distance/angle/dihedral list
         from vaspen.ui.measurement import MeasurementManager, MeasurementPanel
 
@@ -761,6 +798,14 @@ class MainWindow(QMainWindow):
         self._welcome_page.new_requested.connect(self._on_new)
         self._welcome_page.open_requested.connect(self._on_welcome_open)
         self._welcome_page.browse_requested.connect(self._on_open)
+        # Project panel (§7.15)
+        self._project_panel.structure_open_requested.connect(
+            self._open_file)
+        self._project_panel.run_open_requested.connect(self._open_file)
+        self._project_panel.run_status_change_requested.connect(
+            self._on_run_status_change)
+        self._project_panel.add_current_structure_requested.connect(
+            self._on_add_current_structure)
 
     def _connect_model_signals(self, model: StructureModel) -> None:
         """Connect a StructureModel's signals to window/UI updates.
@@ -826,6 +871,138 @@ class MainWindow(QMainWindow):
         path = self._welcome_page.selected_file()
         if path:
             self._open_file(path)
+
+    # ------------------------------------------------------------------
+    # Calculation projects (§7.15)
+    # ------------------------------------------------------------------
+
+    def _on_new_project(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self, self.tr("New Project — Choose Folder"),
+            self._config.last_directory)
+        if not directory:
+            return
+        name, ok = QInputDialog.getText(
+            self, self.tr("New Project"), self.tr("Project name:"),
+            text=Path(directory).name)
+        if not ok or not name.strip():
+            return
+        try:
+            project = Project.create(directory, name.strip())
+        except ValueError as e:
+            QMessageBox.critical(self, self.tr("New Project"), str(e))
+            return
+        self._adopt_project(project)
+        self._set_status(self.tr("Project created: {}").format(
+            project.name))
+
+    def _on_open_project(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self, self.tr("Open Project"),
+            self._config.last_directory)
+        if not directory:
+            return
+        self._open_project_path(directory)
+
+    def _open_project_path(self, directory: str) -> None:
+        try:
+            project = Project.load(directory)
+        except ValueError as e:
+            if MANIFEST_NAME in str(e):
+                reply = QMessageBox.question(
+                    self, self.tr("Open Project"),
+                    self.tr(
+                        "No project.json in this folder.\n\nInitialize a "
+                        "new project here?"))
+                if reply != QMessageBox.Yes:
+                    return
+                name, ok = QInputDialog.getText(
+                    self, self.tr("New Project"), self.tr("Project name:"),
+                    text=Path(directory).name)
+                if not ok or not name.strip():
+                    return
+                try:
+                    project = Project.create(directory, name.strip())
+                except ValueError as e2:
+                    QMessageBox.critical(
+                        self, self.tr("Open Project"), str(e2))
+                    return
+            else:
+                QMessageBox.critical(self, self.tr("Open Project"), str(e))
+                return
+        self._adopt_project(project)
+        self._set_status(self.tr("Project opened: {}").format(project.name))
+
+    def _adopt_project(self, project: Project) -> None:
+        """Attach an opened project to the window (panel + recents +
+        MCP tool state)."""
+        self._project = project
+        self._project_panel.set_project(project)
+        self._config.add_recent_project(str(project.root))
+        self._config.last_directory = str(project.root)
+        self._update_recent_projects_menu()
+        self._sync_project_tools()
+        logger.info("Project adopted: %s", project.root)
+
+    def _on_close_project(self) -> None:
+        if self._project is None:
+            return
+        logger.info("Project closed: %s", self._project.root)
+        self._project = None
+        self._project_panel.set_project(None)
+        self._sync_project_tools()
+
+    def _on_add_current_structure(self) -> None:
+        """Add the window's structure to the project (structures/)."""
+        if self._project is None or self._structure.n_atoms == 0:
+            return
+        if not self._structure.filepath:
+            QMessageBox.information(
+                self, self.tr("Add Structure"),
+                self.tr("Save the structure to a file first, then add it."))
+            return
+        entry = self._project.add_structure(
+            self._structure.filepath,
+            metadata={"formula": self._structure.chemical_formula})
+        self._project_panel.refresh()
+        self._sync_project_tools()
+        self._set_status(
+            self.tr("Added to project: {}").format(entry["id"]))
+
+    def _on_run_status_change(self, run_id: str, status: str) -> None:
+        if self._project is None:
+            return
+        try:
+            self._project.set_run_status(run_id, status)
+        except ValueError as e:
+            self._set_status(str(e))
+            return
+        self._project_panel.refresh()
+        self._sync_project_tools()
+
+    def _sync_project_tools(self) -> None:
+        """Point the MCP tool core at this window's project so bridge
+        project tools see the live project (identity is resolved per
+        call — open/close needs no rebind, only the initial install)."""
+        if self._bridge is None:
+            return
+        from vaspen.ui.bridge_server import LiveProjectRef
+        from vaspen.mcp_server import tools as mcp_tools
+        mcp_tools.PROJECT_REF = LiveProjectRef(self)
+
+    def _update_recent_projects_menu(self) -> None:
+        self._recent_projects_menu.clear()
+        recent = self._config.recent_projects
+        if not recent:
+            self._recent_projects_menu.addAction(
+                self.tr("(No recent projects)")).setEnabled(False)
+            return
+        for path in recent:
+            action = QAction(Path(path).name, self)
+            action.setToolTip(path)
+            action.triggered.connect(
+                lambda checked, p=path: self._open_project_path(p))
+            self._recent_projects_menu.addAction(action)
 
     def _open_file(self, filepath: str) -> None:
         """Load a structure from the given path."""
@@ -1511,6 +1688,15 @@ class MainWindow(QMainWindow):
         self.act_save_as.setText(self.tr("Save &As..."))
         self.act_save_as.setStatusTip(self.tr("Save to a new file"))
         self.act_export_poscar.setText(self.tr("Export as &POSCAR..."))
+        self.act_new_project.setText(self.tr("New Pro&ject..."))
+        self.act_new_project.setStatusTip(
+            self.tr("Create a new calculation project folder"))
+        self.act_open_project.setText(self.tr("Open Projec&t..."))
+        self.act_open_project.setStatusTip(
+            self.tr("Open a calculation project (project.json)"))
+        self.act_close_project.setText(self.tr("Close Pro&ject"))
+        self.act_close_project.setStatusTip(
+            self.tr("Detach the open project (files stay on disk)"))
         self.act_quit.setText(self.tr("&Quit"))
         self.act_undo.setText(self.tr("&Undo"))
         self.act_redo.setText(self.tr("&Redo"))
@@ -1582,6 +1768,7 @@ class MainWindow(QMainWindow):
         # Menus
         self._menu_file.setTitle(self.tr("&File"))
         self._recent_menu.setTitle(self.tr("&Recent Files"))
+        self._recent_projects_menu.setTitle(self.tr("Recent &Projects"))
         self._menu_edit.setTitle(self.tr("&Edit"))
         self._menu_view.setTitle(self.tr("&View"))
         self._menu_style.setTitle(self.tr("Display &Style"))

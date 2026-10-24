@@ -218,6 +218,86 @@ has been modified on disk. Reload and discard your unsaved changes?</translation
       <translation>Reloaded from disk: {}</translation>
     </message>
     <message>
+      <source>New Pro&amp;ject...</source>
+      <translation>New Pro&amp;ject...</translation>
+    </message>
+    <message>
+      <source>Create a new calculation project folder</source>
+      <translation>Create a new calculation project folder</translation>
+    </message>
+    <message>
+      <source>Open Projec&amp;t...</source>
+      <translation>Open Projec&amp;t...</translation>
+    </message>
+    <message>
+      <source>Open a calculation project (project.json)</source>
+      <translation>Open a calculation project (project.json)</translation>
+    </message>
+    <message>
+      <source>Close Pro&amp;ject</source>
+      <translation>Close Pro&amp;ject</translation>
+    </message>
+    <message>
+      <source>Detach the open project (files stay on disk)</source>
+      <translation>Detach the open project (files stay on disk)</translation>
+    </message>
+    <message>
+      <source>New Project — Choose Folder</source>
+      <translation>New Project — Choose Folder</translation>
+    </message>
+    <message>
+      <source>New Project</source>
+      <translation>New Project</translation>
+    </message>
+    <message>
+      <source>Project name:</source>
+      <translation>Project name:</translation>
+    </message>
+    <message>
+      <source>Project created: {}</source>
+      <translation>Project created: {}</translation>
+    </message>
+    <message>
+      <source>Open Project</source>
+      <translation>Open Project</translation>
+    </message>
+    <message>
+      <source>No project.json in this folder.
+
+Initialize a new project here?</source>
+      <translation>No project.json in this folder.
+
+Initialize a new project here?</translation>
+    </message>
+    <message>
+      <source>Project opened: {}</source>
+      <translation>Project opened: {}</translation>
+    </message>
+    <message>
+      <source>Add Structure</source>
+      <translation>Add Structure</translation>
+    </message>
+    <message>
+      <source>Save the structure to a file first, then add it.</source>
+      <translation>Save the structure to a file first, then add it.</translation>
+    </message>
+    <message>
+      <source>Added to project: {}</source>
+      <translation>Added to project: {}</translation>
+    </message>
+    <message>
+      <source>Recent &amp;Projects</source>
+      <translation>Recent &amp;Projects</translation>
+    </message>
+    <message>
+      <source>(No recent projects)</source>
+      <translation>(No recent projects)</translation>
+    </message>
+    <message>
+      <source>Project</source>
+      <translation>Project</translation>
+    </message>
+    <message>
       <source>Reload failed: {}</source>
       <translation>Reload failed: {}</translation>
     </message>
@@ -2449,6 +2529,49 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
     <message>
       <source>Drag and drop a structure file anywhere in this window.</source>
       <translation>Drag and drop a structure file anywhere in this window.</translation>
+    </message>
+  </context>
+  <context>
+    <name>ProjectPanel</name>
+    <message>
+      <source>No project open</source>
+      <translation>No project open</translation>
+    </message>
+    <message>
+      <source>Item</source>
+      <translation>Item</translation>
+    </message>
+    <message>
+      <source>Status / Type</source>
+      <translation>Status / Type</translation>
+    </message>
+    <message>
+      <source>Structures</source>
+      <translation>Structures</translation>
+    </message>
+    <message>
+      <source>Runs</source>
+      <translation>Runs</translation>
+    </message>
+    <message>
+      <source>Open a project (File → Open Project) or let the AI create runs — new runs appear here in real time.</source>
+      <translation>Open a project (File → Open Project) or let the AI create runs — new runs appear here in real time.</translation>
+    </message>
+    <message>
+      <source>Set Status</source>
+      <translation>Set Status</translation>
+    </message>
+    <message>
+      <source>Open</source>
+      <translation>Open</translation>
+    </message>
+    <message>
+      <source>Add Current Structure Here</source>
+      <translation>Add Current Structure Here</translation>
+    </message>
+    <message>
+      <source>Add Current Structure</source>
+      <translation>Add Current Structure</translation>
     </message>
   </context>
 </TS>

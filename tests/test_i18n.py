@@ -56,6 +56,7 @@ CHECKED_MODULES = (
     ("vaspen/ui/generate_all_dialog.py", "PoscarPanel"),
     ("vaspen/ui/generate_all_dialog.py", "GenerateAllDialog"),
     ("vaspen/ui/settings_dialog.py", "SettingsDialog"),
+    ("vaspen/ui/project_panel.py", "ProjectPanel"),
     ("vaspen/ui/structure_tree.py", "StructureTreePanel"),
     ("vaspen/ui/viewport3d.py", "Viewport3D"),
     ("vaspen/ui/measurement.py", "MeasurementPanel"),
