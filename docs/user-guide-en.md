@@ -458,7 +458,33 @@ Run from source (see §2). The release zip is Windows-only.
 Only one VASPen runs at a time: a second launch raises the existing
 window and opens the file it was given there (like VESTA).
 
-## 18. MCP Server (for AI clients)
+## 18. Calculation Projects
+
+A **project** organizes structures and calculations in one plain
+folder — no proprietary database; everything stays git-friendly and
+machine-readable:
+
+```
+my-project/
+├── project.json      # the manifest (autosaved)
+├── structures/       # source structures
+└── runs/             # one folder per calculation
+    └── 001-scf-bulk/ # INCAR/KPOINTS/POSCAR/POTCAR + run.json
+```
+
+- **File → New Project / Open Project** creates or opens a project;
+  the **Project dock** shows a Structures group and a Runs group.
+- Double-click a structure (or a run) to open it in the 3D view;
+  right-click a run to change its status (inputs-ready → submitted →
+  running → done / failed). Statuses are labels — VASPen never parses
+  VASP output files.
+- Each run carries a `run.json` provenance card: which structure and
+  parameters generated it, and by which VASPen version.
+- **With AI:** ask your MCP client *"open my project and create an SCF
+  run for the current structure"* — new runs appear in the panel in
+  real time (see §19).
+
+## 19. MCP Server (for AI clients)
 
 VASPen includes a headless [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP) server that lets AI assistants — Claude Desktop, ZCode, Cursor and
@@ -466,7 +492,7 @@ other MCP clients — drive the toolkit directly: load and analyze
 structures, cut surfaces, build supercells, prepare NEB runs and
 generate complete VASP input sets, all from a chat prompt.
 
-### 18.1 Installation
+### 19.1 Installation
 
 - **From source** (Windows & Linux): `pip install -e ".[mcp]"`, then the
   command `vaspen-mcp` is available (`vaspen-mcp --version` to check).
@@ -477,7 +503,7 @@ The server is a plain stdio process: your AI client launches it on
 demand and talks JSON-RPC over stdin/stdout — nothing listens on the
 network.
 
-### 18.2 Client configuration
+### 19.2 Client configuration
 
 Claude Desktop (`claude_desktop_config.json`) or the ZCode / Cursor MCP
 settings:
@@ -495,7 +521,7 @@ settings:
 
 For a source install, `"command": "vaspen-mcp"` usually suffices.
 
-### 18.3 What the AI can do
+### 19.3 What the AI can do
 
 | Group | Tools |
 |-------|-------|
@@ -505,6 +531,7 @@ For a source install, `"command": "vaspen-mcp"` usually suffices.
 | Symmetry & surfaces | symmetrize_cell, list_slab_terminations, cut_surface, rebox_slab |
 | VASP inputs | list_incar_presets, generate_inputs |
 | NEB | neb_check, neb_setup |
+| Projects | open_project, create_run (with provenance), set_run_status, … |
 | Visualization | render_preview — a ball-and-stick image the AI can look at |
 | Escape hatch | run_python — execute Python against the loaded structure (Settings-gated) |
 
@@ -512,7 +539,7 @@ A typical prompt: *"Open TiO2_rutile.vasp, tell me the space group, then
 generate an SCF input set with a 0.03 k-spacing into ./vasp-run"* — the
 assistant calls the tools itself and reports the results.
 
-### 18.4 Notes
+### 19.4 Notes
 
 - Tool responses are in English regardless of the GUI language.
 - Atom indices are 0-based; lengths are Å, angles in degrees.
@@ -528,7 +555,7 @@ assistant calls the tools itself and reports the results.
   VASPen GUI, the GUI notices and reloads (asking first if you have
   unsaved changes) — see the reload note in the Menus section.
 
-## 19. License & Credits
+## 20. License & Credits
 
 VASPen is free and open source, released under the MIT License
 (`LICENSE` in the repository).

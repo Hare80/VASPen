@@ -33,6 +33,7 @@ Linux users run from source (Quick Start below).
 - **MCP server** — `vaspen-mcp` stdio server exposing the full toolkit to AI clients (Claude Desktop, ZCode, Cursor, …), including structure rendering and a code-execution escape hatch
 - **Live bridge** — with VASPen open, MCP tools act on the window's structure in real time; without it, the server runs headlessly on files
 - **Single instance** — launching VASPen again focuses the running window and opens the passed file there (VESTA-style)
+- **Calculation projects** — a project is a plain folder (project.json manifest + structures/ + runs/ with provenance cards); the GUI shows a live tree and AI clients create runs into it
 - **i18n** — English and Chinese interface (switchable live)
 - **Theming** — light/dark themes with live switching
 - **Welcome page** — recent files (click selects, double-click opens) and drag-and-drop opening
@@ -96,9 +97,10 @@ If you already have such a library, point VASPen to the same directory.
 
 VASPen ships a headless [Model Context Protocol](https://modelcontextprotocol.io)
 server that exposes its structure engine and VASP input generation to AI
-assistants — 25 tools covering file open/save, structure analysis
+assistants — 31 tools covering file open/save, structure analysis
 (symmetry, bonds, measurements), supercells, surface cutting, NEB
-preparation and one-shot INCAR/KPOINTS/POSCAR/POTCAR generation, plus a
+preparation and one-shot INCAR/KPOINTS/POSCAR/POTCAR generation,
+project management (open/create runs with provenance), plus a
 `render_preview` tool (the AI can see the structure it is working on)
 and a Settings-gated `run_python` escape hatch for anything the fixed
 tools do not cover. The pseudopotential library path configured in the
@@ -110,6 +112,12 @@ GUI preferences is shared with the server.
 pip install -e ".[mcp]"
 vaspen-mcp          # stdio MCP server; --version for the version
 ```
+
+**Projects:** a project folder keeps structures and every calculation
+organized (`runs/001-scf/`, `002-neb/`… each with a `run.json`
+provenance card). Ask the AI: *"create an SCF run for the current
+structure in my project"* — the run appears in the window's project
+panel in real time. File → New/Open Project.
 
 **Live mode:** when a VASPen window is open (Settings → MCP Server →
 "Enable live bridge", on by default), MCP tools act on that window's

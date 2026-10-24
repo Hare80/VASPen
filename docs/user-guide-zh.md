@@ -383,14 +383,37 @@ NEB 预设(VTST 风格):SCF 基础之上加 `EDIFFG = -0.02`、
 同一时间只有一个 VASPen 进程:再次启动只会把已打开的窗口带到前台,
 并在其中打开本次给出的文件(与 VESTA 一致)。
 
-## 18. MCP 服务器(供 AI 客户端使用)
+## 18. 计算项目
+
+**项目**把结构和计算组织在一个普通文件夹里——没有专有数据库,一切对
+git 和 AI 都友好可读:
+
+```
+my-project/
+├── project.json      # 项目清单(自动保存)
+├── structures/       # 源结构
+└── runs/             # 每个计算一个文件夹
+    └── 001-scf-bulk/ # INCAR/KPOINTS/POSCAR/POTCAR + run.json
+```
+
+- **文件 → 新建项目 / 打开项目** 创建或打开项目;**项目面板**显示
+  "结构"和"计算"两组。
+- 双击结构(或计算)即在三维视图中打开;右键点击计算可修改状态
+  (inputs-ready → submitted → running → done / failed)。状态只是标签
+  ——VASPen 绝不解析 VASP 输出文件。
+- 每个计算带有一张 `run.json` 溯源卡:由哪个结构、什么参数、哪个
+  VASPen 版本生成。
+- **配合 AI**:对 MCP 客户端说*"打开我的项目,并为当前结构创建一个
+  SCF 计算"*——新计算会实时出现在项目面板中(见 §19)。
+
+## 19. MCP 服务器(供 AI 客户端使用)
 
 VASPen 内置无头 [Model Context Protocol](https://modelcontextprotocol.io)
 (MCP)服务器,让 AI 助手——Claude Desktop、ZCode、Cursor 及其他 MCP
 客户端——直接调用本工具箱:从对话中加载并分析结构、切面、建超胞、
 准备 NEB 计算并一次性生成全套 VASP 输入文件。
 
-### 18.1 安装
+### 19.1 安装
 
 - **源码运行**(Windows 与 Linux):`pip install -e ".[mcp]"`,之后即有
   `vaspen-mcp` 命令(`vaspen-mcp --version` 可查看版本)。
@@ -400,7 +423,7 @@ VASPen 内置无头 [Model Context Protocol](https://modelcontextprotocol.io)
 服务器是纯 stdio 进程:由 AI 客户端按需启动,通过 stdin/stdout 交换
 JSON-RPC,不监听任何网络端口。
 
-### 18.2 客户端配置
+### 19.2 客户端配置
 
 Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
 设置:
@@ -418,7 +441,7 @@ Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
 
 源码安装时 `"command": "vaspen-mcp"` 通常即可。
 
-### 18.3 AI 能做什么
+### 19.3 AI 能做什么
 
 | 分组 | 工具 |
 |------|------|
@@ -428,13 +451,14 @@ Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
 | 对称性与表面 | symmetrize_cell、list_slab_terminations、cut_surface、rebox_slab |
 | VASP 输入 | list_incar_presets、generate_inputs |
 | NEB | neb_check、neb_setup |
+| 项目 | open_project、create_run(带溯源)、set_run_status 等 |
 | 可视化 | render_preview——生成球棍模型图片,AI 可以直接查看 |
 | 逃生舱 | run_python——对当前结构执行 Python(可在设置中关闭) |
 
 典型指令:*"打开 TiO2_rutile.vasp,告诉我空间群,然后在 ./vasp-run 生成
 一套 k 间距 0.03 的 SCF 输入文件"*——助手会自行调用相应工具并汇报结果。
 
-### 18.4 注意事项
+### 19.4 注意事项
 
 - 无论界面语言为何,工具响应均为英文。
 - 原子索引从 0 开始;长度单位为 Å,角度单位为度。
@@ -447,7 +471,7 @@ Claude Desktop(`claude_desktop_config.json`)或 ZCode / Cursor 的 MCP
 - 当服务器写入的文件正被 GUI 打开时,GUI 会察觉并重载(有未保存修改时
   会先询问)——见"菜单"一节的自动重载说明。
 
-## 19. 许可与致谢
+## 20. 许可与致谢
 
 VASPen 免费开源,采用 MIT 许可(仓库中的 `LICENSE` 文件)。
 

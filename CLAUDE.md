@@ -55,12 +55,14 @@ VASPen/
 │   │   ├── measurement.py            # Measurement manager + dock panel (right side)
 │   │   ├── display_options_dialog.py # Render settings dialog (live preview)
 │   │   ├── file_watch.py            # FileChangeMonitor — external file-change detection (§7.12)
+│   ├── project_panel.py         # Project tree dock — structures/runs (§7.15)
 │   │   ├── bridge_server.py         # Live bridge — GUI hosts the MCP tools (§7.13)
 │   │   ├── welcome_page.py           # Empty-state landing page (recent files + quick actions, §7.10)
 │   │   └── tools.py                  # Viewport interaction tools (select/move/rotate/add/delete/bond/measure)
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── structure.py        # StructureModel — wraps ASE Atoms with signals
+│   ├── project.py          # Calculation projects — manifest + runs (§7.15)
 │   │   ├── file_io.py          # Unified file read/write with format registry
 │   │   ├── surface.py          # Miller-index slab cutting via ASE
 │   │   ├── builder.py          # Add/remove/replace atoms, supercell, symmetry
@@ -114,6 +116,8 @@ VASPen/
 │   ├── test_viewport_geometry.py
 │   ├── test_welcome_page.py
 │   ├── test_file_watch.py      # external file-change detection (§7.12)
+│   ├── test_project.py         # project manifest core (§7.15)
+│   ├── test_project_panel.py   # project panel + window wiring (§7.15)
 │   ├── test_icon_assets.py      # icon letterbox zero-crop + asset pins
 │   └── test_mcp_server.py      # MCP tools + stdio protocol E2E (§7.11)
 └── scripts/
@@ -1100,6 +1104,49 @@ running window and exits.
   tests must run `forward_to_running` on a worker thread (same
   process-server would otherwise starve).
 
+### 7.15 Calculation projects (settled 2026-10-24 — do not re-litigate)
+
+A calculation PROJECT is an ordinary folder (MS-Explorer UX,
+atomate2-style openness — no binary database, git/AI-navigable)::
+
+    <dir>/project.json      manifest (schema-versioned, atomic writes)
+    <dir>/structures/       source structures, registered with digests
+    <dir>/runs/NNN-slug/    one calculation dir: VASP inputs + run.json
+                            provenance card + (later) VASP outputs
+
+- **`vaspen/core/project.py`** (pure, no Qt): `Project.create/load`,
+  `add_structure` (copy in, slug ids, -2 dedupe), `add_run`
+  (`%03d-slug` numbering, never recycled), `set_run_status`
+  (whitelist `inputs-ready/submitted/running/done/failed`),
+  `sha256_file`, `slugify`. Manifest writes are ATOMIC (tmp +
+  os.replace) after every mutation — projects autosave; there is no
+  save-project action. Plain-English ValueErrors (transform.py
+  precedent — deliberately no _tr context).
+- **VASP outputs are NEVER parsed** (user decision 2026-10-03): status
+  is a label set by user/AI; at most callers may show file-existence
+  hints. Do not add OUTCAR/OSZICAR parsing here.
+- **GUI**: `ProjectPanel` (left dock, `dock_project`; Structures/Runs
+  tree, status labels stay in canonical English — they are manifest
+  identifiers). File menu: New/Open/Close Project + Recent Projects
+  (max 8). Double-click opens through `_open_file` (standard open
+  semantics). `add_structure` requires the model to have a source
+  FILE (save first — prompted, not silent). Run CREATION from the GUI
+  is P2 (Generate-All "write into project"); in P1 the MCP
+  `create_run` fills the tree live.
+- **MCP** (31 tools total): `open_project` (bridge: adopts the project
+  INTO the window via `_adopt_project`), `get_project`,
+  `add_structure_to_project`, `create_run` (writes the standard four
+  inputs via the shared `_write_input_set`, provenance card with
+  structure digest + `via: mcp`), `set_run_status`,
+  `open_run_structure`. `PROJECT_REF` follows the SESSION pattern:
+  headless holds the opened Project; the bridge installs a
+  `LiveProjectRef` resolving `window._project` PER CALL (open/close
+  needs no rebind; `set` adopts into the window). Bridge success path
+  refreshes the project panel. NEB runs are P2 (endpoint management
+  in project context).
+- **SSH submission (roadmap) lands HERE**: submit = a runs/<id>/
+  directory; status write-back = set_run_status. P3 connects them.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
@@ -1376,6 +1423,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] GUI external file-change detection with reload prompt (§7.12)
 - [x] GUI live bridge — MCP tools act on the window's live structure (§7.13)
 - [x] Single-instance startup — second launch focuses the window and hands over its file (§7.14)
+- [x] Calculation projects — folder-as-project + manifest, GUI panel, MCP project tools (§7.15)
 
 ### v1.0+ — Future
 - [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6
