@@ -25,7 +25,8 @@ SERVER_NAME = "VASPen"
 _CONNECT_TIMEOUT_MS = 300
 
 
-def forward_to_running(filepath: str | None) -> bool:
+def forward_to_running(filepath: str | None,
+                       server_name: str | None = None) -> bool:
     """Hand ``filepath`` to the already-running VASPen, if any.
 
     Returns True when a running instance accepted the handoff (the
@@ -33,7 +34,10 @@ def forward_to_running(filepath: str | None) -> bool:
     caller becomes the single instance.
     """
     sock = QLocalSocket()
-    sock.connectToServer(SERVER_NAME)
+    # resolved at CALL time — tests monkeypatch SERVER_NAME to a unique
+    # name so a real VASPen running elsewhere cannot receive their
+    # handoffs (Windows named pipes allow several listeners per name)
+    sock.connectToServer(server_name or SERVER_NAME)
     if not sock.waitForConnected(_CONNECT_TIMEOUT_MS):
         # No running instance (or a stale pipe — the fresh listen in
         # the new process will clean it up on POSIX).
@@ -60,8 +64,12 @@ class SingleInstanceServer(QObject):
     #: a second launch arrived; path may be None (just raise the window)
     open_requested = Signal(object)
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None,
+                 server_name: str | None = None) -> None:
         super().__init__(parent)
+        # resolved at construction; None → the production name (call-time
+        # lookup lets tests rebind the module constant hermetically)
+        self._server_name = server_name or SERVER_NAME
         self._server = QLocalServer(self)
 
     @staticmethod
@@ -77,7 +85,7 @@ class SingleInstanceServer(QObject):
     def listen(self) -> bool:
         """Start listening; False when the name is taken (a second
         window inside the same process — degrade gracefully)."""
-        if not self._server.listen(SERVER_NAME):
+        if not self._server.listen(self._server_name):
             logger.warning("single-instance listen failed: %s",
                            self._server.errorString())
             return False

@@ -17,6 +17,17 @@ from vaspen.ui.main_window import MainWindow
 from vaspen.ui.single_instance import SingleInstanceServer, forward_to_running
 
 
+@pytest.fixture(autouse=True)
+def hermetic_pipe_name(monkeypatch):
+    """Rebind the pipe name per test — a real VASPen running on this
+    machine hosts the default name and would otherwise receive the
+    test handoffs (Windows allows several listeners per name)."""
+    import uuid as _uuid
+    import vaspen.ui.single_instance as si
+    monkeypatch.setattr(si, "SERVER_NAME",
+                        f"VASPen-test-{_uuid.uuid4().hex[:8]}")
+
+
 @pytest.fixture
 def window(qtbot):
     w = MainWindow()
@@ -40,8 +51,8 @@ def _forward(filepath):
 
 
 def test_forward_without_running_instance_returns_false(tmp_path):
-    # No window/server in this test yet — the connect must fail and
-    # report "we are the first instance".
+    # The per-test pipe name has no listener — the connect must fail
+    # and report "we are the first instance".
     assert _forward(str(tmp_path / "whatever.vasp")) is False
     assert _forward(None) is False
 
@@ -85,6 +96,7 @@ def test_forwarded_nonexistent_path_ignored(window, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "vaspen.ui.main_window.QMessageBox.critical",
         staticmethod(lambda *a, **k: asked.append(True) or QMessageBox.Ok))
+    # the window's own single-instance server delivers
     assert _forward(str(tmp_path / "nope.vasp")) is True
     QTest.qWait(300)
     assert window._structure.n_atoms == 0
