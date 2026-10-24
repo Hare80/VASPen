@@ -20,6 +20,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from vaspen.core.file_io import FileIO
+from vaspen.core.project import Project
 from vaspen.mcp_server import server as mcp_server
 from vaspen.mcp_server import tools as mcp_tools
 from vaspen.mcp_server.session import ServerSession
@@ -610,7 +611,7 @@ def test_stdio_subprocess_image_content(tmp_path):
 
 
 def test_project_lifecycle_roundtrip(tmp_path):
-    project = mcp_tools.Project.create(tmp_path / "proj", "Test")
+    project = Project.create(tmp_path / "proj", "Test")
     mcp_tools.PROJECT_REF.set(project)
 
     assert mcp_tools.get_project()["ok"] is True
@@ -657,3 +658,28 @@ def test_project_tools_require_open_project(tmp_path):
         mcp_server.set_run_status("001-x", "done")
     with pytest.raises(ToolError, match="not a VASPen project|Folder not found"):
         mcp_server.open_project(str(tmp_path / "empty"))
+
+
+def test_get_run_and_update_run(tmp_path):
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    mcp_server.add_structure_to_project()
+    run = mcp_server.create_run("scf", preset="scf")
+    run_id = run["run"]["id"]
+
+    detail = mcp_server.get_run(run_id)
+    assert detail["run"]["type"] == "scf"
+    assert "INCAR" in detail["files"]
+    assert detail["has_outputs"] is False
+
+    updated = mcp_server.update_run(run_id, preset="opt",
+                                    kpoints_params={"k_spacing": 0.03})
+    assert updated["parameters"]["preset"] == "opt"
+    assert updated["parameters"]["kpoints_params"] == {"k_spacing": 0.03}
+    assert "EDIFFG" in Path(updated["files"]["INCAR"]).read_text()
+
+    with pytest.raises(ToolError, match="Unknown run"):
+        mcp_server.get_run("999-nope")

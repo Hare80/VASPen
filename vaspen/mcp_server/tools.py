@@ -54,7 +54,9 @@ from vaspen.core.vasp_input import (
     generate_potcar,
     suggest_band_path as _suggest_band_path,
 )
-from vaspen.core.project import Project, sha256_file
+from vaspen.core.project import RUN_STATUSES as _RUN_STATUSES
+from vaspen.core.project import Project as _Project
+from vaspen.core.project import sha256_file
 from vaspen.mcp_server.session import ServerSession
 from vaspen.utils.config import AppConfig
 
@@ -1017,6 +1019,8 @@ def _run_namespace() -> dict:
     ns["session"] = SESSION
     ns["model"] = SESSION.model
     ns["PROJECT_REF"] = PROJECT_REF  # per-call: bridge swaps this
+    ns["Project"] = _Project
+    ns["RUN_STATUSES"] = _RUN_STATUSES
     return ns
 
 
@@ -1185,7 +1189,8 @@ def create_run(name: str, preset: str = "scf",
         digest = sha256_file(model.filepath)
         params = {"preset": preset, "kpoints_mode": kpoints_mode,
                   "kpoints_params": kpoints_params or {},
-                  "functional": functional}
+                  "functional": functional,
+                  **(incar_overrides or {})}
         entry = project.add_run(name, preset, params,
                                 structure_id=Path(model.filepath).stem,
                                 structure_digest=digest, via="mcp")
@@ -1240,3 +1245,77 @@ def open_run_structure(run_id: str) -> dict:
         model = SESSION.load(poscar)
         return {"ok": True, "run": run_id,
                 **_structure_summary(model)}
+
+
+@tool
+def get_run(run_id: str) -> dict:
+    """Full detail of one project run: the provenance card (structure
+    digest, parameters, generator) plus the run directory's file list
+    (outputs like CONTCAR/OSZICAR show up as present files — contents
+    are never parsed).
+
+    Args:
+        run_id: Run id from the project (e.g. "001-scf-fe3o4").
+    """
+    project = _require_project()
+    entry = dict(project.run_entry(run_id))
+    run_dir = project.run_dir(run_id)
+    files = sorted(f.name for f in run_dir.iterdir() if f.is_file())
+    return {"ok": True,
+            "run": entry,
+            "parameters": project.run_parameters(run_id),
+            "dir": str(run_dir),
+            "files": files,
+            "has_outputs": (run_dir / "CONTCAR").exists()
+                           or (run_dir / "OSZICAR").exists()}
+
+
+@tool
+def update_run(run_id: str, preset: str | None = None,
+               incar_overrides: dict[str, Any] | None = None,
+               kpoints_mode: str | None = None,
+               kpoints_params: dict[str, Any] | None = None,
+               functional: str | None = None,
+               potcar_library: str | None = None,
+               poscar_direct: bool | None = None) -> dict:
+    """Adjust a run's parameters and regenerate its input files in
+    place (INCAR/KPOINTS/POSCAR/POTCAR) from the registered structure.
+    Only the parameters you pass change; the rest keep their values.
+    The run's provenance card records the new parameters. If the run
+    directory already contains calculation outputs, they are
+    overwritten — confirm with the user first.
+
+    Args:
+        run_id: Run id from the project.
+        preset: INCAR preset (see list_incar_presets).
+        incar_overrides: INCAR tag → value overrides.
+        kpoints_mode: "automatic" | "manual" | "line".
+        kpoints_params: Per-mode parameters (see generate_inputs).
+        functional: XC functional for POTCAR.
+        potcar_library: Pseudopotential library root (defaults to the
+            GUI-configured path).
+        poscar_direct: Write POSCAR in fractional (Direct) coordinates.
+    """
+    with SESSION.lock:
+        project = _require_project()
+        entry = project.run_entry(run_id)
+        params = project.run_parameters(run_id)
+        model = StructureModel()
+        model.load(project.structure_path(entry.get("structure", "")))
+        files = project.write_run_inputs(
+            run_id, model,
+            preset=preset or params.get("preset", "scf"),
+            incar_overrides=incar_overrides,
+            kpoints_mode=kpoints_mode or params.get("kpoints_mode",
+                                                    "automatic"),
+            kpoints_params=(kpoints_params if kpoints_params is not None
+                            else params.get("kpoints_params") or {}),
+            potcar_library=potcar_library
+            or AppConfig().potcar_library_path,
+            functional=functional or params.get("functional", "PBE"),
+            poscar_direct=bool(poscar_direct)
+            if poscar_direct is not None else False,
+        )
+        return {"ok": True, "run": dict(project.run_entry(run_id)),
+                "parameters": project.run_parameters(run_id),
+                "files": files}
