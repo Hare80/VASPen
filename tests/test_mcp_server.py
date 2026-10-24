@@ -683,3 +683,31 @@ def test_get_run_and_update_run(tmp_path):
 
     with pytest.raises(ToolError, match="Unknown run"):
         mcp_server.get_run("999-nope")
+
+
+def test_read_run_file(tmp_path):
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    mcp_server.add_structure_to_project()
+    run = mcp_server.create_run("scf", preset="scf")
+    run_id = run["run"]["id"]
+    run_dir = Path(run["dir"])
+    (run_dir / "OSZICAR").write_text("1 F= -.123\n2 F= -.456\n" * 20,
+                                     encoding="utf-8")
+
+    r = mcp_server.read_run_file(run_id, "INCAR")
+    assert r["ok"] is True
+    assert "ENCUT" in r["content"]
+    r = mcp_server.read_run_file(run_id, "OSZICAR")
+    assert "F=" in r["content"]
+    # NEB-style subdirectory path
+    r = mcp_server.read_run_file(run_id, "POSCAR")
+    assert "Direct" in r["content"] or "Cartesian" in r["content"] or \
+        r["content"]
+    with pytest.raises(ToolError, match="inside the run directory"):
+        mcp_server.read_run_file(run_id, "../../secrets.txt")
+    with pytest.raises(ToolError, match="No file"):
+        mcp_server.read_run_file(run_id, "CONTCAR")  # not run yet

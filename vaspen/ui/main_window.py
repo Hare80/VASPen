@@ -806,6 +806,8 @@ class MainWindow(QMainWindow):
             self._on_run_status_change)
         self._project_panel.run_parameters_requested.connect(
             self._on_run_parameters)
+        self._project_panel.file_open_requested.connect(
+            self._on_open_text_file)
         self._project_panel.add_current_structure_requested.connect(
             self._on_add_current_structure)
 
@@ -953,6 +955,11 @@ class MainWindow(QMainWindow):
         self._project = None
         self._project_panel.set_project(None)
         self._sync_project_tools()
+
+    def _on_open_text_file(self, path: str) -> None:
+        from vaspen.ui.text_viewer import TextViewerDialog
+        dlg = TextViewerDialog(path, self)
+        dlg.show()
 
     def _on_run_parameters(self, run_id: str) -> None:
         if self._project is None:

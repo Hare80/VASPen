@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from ase.build import bulk
+from PySide6.QtCore import Qt
 
 from vaspen.core.project import Project
 from vaspen.ui.main_window import MainWindow
@@ -119,3 +120,32 @@ def test_run_tooltip_shows_parameters(window, project):
     tooltip = panel._run_tooltip("001-scf")
     assert "preset: scf" in tooltip
     assert "functional: PBE" in tooltip
+
+
+def test_run_expands_to_file_tree(window, project):
+    window._adopt_project(project)
+    panel = window._project_panel
+    runs_root = panel._tree.topLevelItem(1)
+    run_item = runs_root.child(0)
+    # add_run wrote run.json; the tree lists it as a file child
+    files = [run_item.child(i).text(0)
+             for i in range(run_item.childCount())]
+    assert "run.json" in files
+    child = next(c for c in (run_item.child(i) for i in
+                             range(run_item.childCount()))
+                 if c.text(0) == "run.json")
+    assert child.data(0, Qt.ItemDataRole.UserRole) == "run-file"
+
+
+def test_run_file_double_click_routes_by_kind(window, project, qtbot):
+    window._adopt_project(project)
+    panel = window._project_panel
+    runs_root = panel._tree.topLevelItem(1)
+    run_item = runs_root.child(0)
+    json_child = next(c for c in (run_item.child(i) for i in
+                                  range(run_item.childCount()))
+                      if c.text(0) == "run.json")
+    seen = []
+    panel.file_open_requested.connect(seen.append)
+    panel._on_double_clicked(json_child, 0)  # run.json → text viewer
+    assert seen and seen[0].endswith("run.json")

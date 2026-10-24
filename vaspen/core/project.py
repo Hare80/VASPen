@@ -158,6 +158,17 @@ class Project:
                 return self._root / RUNS_DIR / entry["dir"]
         raise ValueError(f"Unknown run id: {run_id}")
 
+    def run_files(self, run_id: str) -> list[Path]:
+        """All files in the run directory, as paths RELATIVE to it
+        (recursive — NEB image subdirectories included), sorted. Names
+        only: nothing is ever parsed here (§7.15)."""
+        run_dir = self.run_dir(run_id)
+        files: list[Path] = []
+        for path in sorted(run_dir.rglob("*")):
+            if path.is_file():
+                files.append(path.relative_to(run_dir))
+        return files
+
     def run_entry(self, run_id: str) -> dict:
         for entry in self._manifest["runs"]:
             if entry["id"] == run_id:

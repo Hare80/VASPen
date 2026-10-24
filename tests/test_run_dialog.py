@@ -106,3 +106,21 @@ def test_dialog_override_error_blocks_regenerate(qtbot, project_with_run,
     dlg._on_regenerate()
     assert warned
     assert not dlg.result()
+
+
+def test_text_viewer_loads_and_truncates(tmp_path, qtbot):
+    from vaspen.ui.text_viewer import TextViewerDialog
+
+    small = tmp_path / "INCAR"
+    small.write_text("ENCUT = 400\n", encoding="utf-8")
+    dlg = TextViewerDialog(small)
+    qtbot.addWidget(dlg)
+    assert "ENCUT = 400" in dlg._text.toPlainText()
+
+    big = tmp_path / "OUTCAR"
+    big.write_text("x" * (600 * 1024), encoding="utf-8")  # > 512 KB
+    dlg2 = TextViewerDialog(big)
+    qtbot.addWidget(dlg2)
+    text = dlg2._text.toPlainText()
+    assert "truncated" in text
+    assert len(text) < 600 * 1024

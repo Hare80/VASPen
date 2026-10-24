@@ -2455,5 +2455,117 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
             <source>Add Current Structure</source>
             <translation>添加当前结构</translation>
         </message>
+        <message>
+            <source>Parameters…</source>
+            <translation>参数…</translation>
+        </message>
+        <message>
+            <source>Show in Explorer</source>
+            <translation>在资源管理器中显示</translation>
+        </message>
+    </context>
+
+    <context>
+        <name>RunDialog</name>
+        <message>
+            <source>Run Parameters</source>
+            <translation>计算参数</translation>
+        </message>
+        <message>
+            <source>Provenance</source>
+            <translation>溯源信息</translation>
+        </message>
+        <message>
+            <source>Run:</source>
+            <translation>计算：</translation>
+        </message>
+        <message>
+            <source>Type:</source>
+            <translation>类型：</translation>
+        </message>
+        <message>
+            <source>Structure:</source>
+            <translation>结构：</translation>
+        </message>
+        <message>
+            <source>Created:</source>
+            <translation>创建时间：</translation>
+        </message>
+        <message>
+            <source>Structure digest:</source>
+            <translation>结构指纹：</translation>
+        </message>
+        <message>
+            <source>Status</source>
+            <translation>状态</translation>
+        </message>
+        <message>
+            <source>Status:</source>
+            <translation>状态：</translation>
+        </message>
+        <message>
+            <source>Generation Parameters</source>
+            <translation>生成参数</translation>
+        </message>
+        <message>
+            <source>INCAR preset:</source>
+            <translation>INCAR 预设：</translation>
+        </message>
+        <message>
+            <source>Functional:</source>
+            <translation>交换关联泛函：</translation>
+        </message>
+        <message>
+            <source>KPOINTS mode:</source>
+            <translation>KPOINTS 模式：</translation>
+        </message>
+        <message>
+            <source>KSPACING (2π/Å):</source>
+            <translation>KSPACING（2π/Å）：</translation>
+        </message>
+        <message>
+            <source>Mesh (k1 k2 k3):</source>
+            <translation>网格（k1 k2 k3）：</translation>
+        </message>
+        <message>
+            <source>INCAR overrides:</source>
+            <translation>INCAR 覆盖项：</translation>
+        </message>
+        <message>
+            <source>KEY = VALUE (one per line), e.g.
+  IVDW = 11
+  MAGMOM = 0.6*56</source>
+            <translation>KEY = VALUE（每行一条），例如
+  IVDW = 11
+  MAGMOM = 0.6*56</translation>
+        </message>
+        <message>
+            <source>&amp;Regenerate Inputs</source>
+            <translation>重新生成输入文件(&amp;R)</translation>
+        </message>
+        <message>
+            <source>INCAR overrides: {}</source>
+            <translation>INCAR 覆盖项：{}</translation>
+        </message>
+        <message>
+            <source>This run directory already contains calculation outputs — regenerating will overwrite the input files. Continue?</source>
+            <translation>该计算目录已包含 VASP 输出文件——重新生成将覆盖输入文件。继续吗？</translation>
+        </message>
+    </context>
+
+    <context>
+        <name>TextViewerDialog</name>
+        <message>
+            <source>{}  (showing first {} of {} bytes)</source>
+            <translation>{} （显示前 {} 字节，共 {} 字节）</translation>
+        </message>
+        <message>
+            <source>Read-only — raw file content</source>
+            <translation>只读 — 原始文件内容</translation>
+        </message>
+        <message>
+            <source>Show in Explorer</source>
+            <translation>在资源管理器中显示</translation>
+        </message>
     </context>
 </TS>

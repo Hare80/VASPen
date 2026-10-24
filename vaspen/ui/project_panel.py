@@ -10,8 +10,8 @@ the meantime.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QEvent, QUrl, Qt, Signal
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -38,6 +38,7 @@ class ProjectPanel(QWidget):
     run_open_requested = Signal(str)         # run POSCAR path
     run_status_change_requested = Signal(str, str)  # run id, status
     run_parameters_requested = Signal(str)           # run id
+    file_open_requested = Signal(str)                # text file path
     add_current_structure_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -107,6 +108,14 @@ class ProjectPanel(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, "run")
             item.setData(1, Qt.ItemDataRole.UserRole, entry["id"])
             item.setToolTip(0, self._run_tooltip(entry["id"]))
+            for rel in self._project.run_files(entry["id"]):
+                child = QTreeWidgetItem(
+                    [str(rel), _file_kind_text(rel)])
+                child.setData(0, Qt.ItemDataRole.UserRole, "run-file")
+                child.setData(1, Qt.ItemDataRole.UserRole, str(rel))
+                child.setToolTip(0, str(self._project.run_dir(entry["id"])
+                                        / rel))
+                item.addChild(child)
             runs_root.addChild(item)
         self._tree.addTopLevelItem(runs_root)
         runs_root.setExpanded(True)
@@ -132,6 +141,19 @@ class ProjectPanel(QWidget):
             poscar = self._project.run_dir(ident) / "POSCAR"
             if poscar.exists():
                 self.run_open_requested.emit(str(poscar))
+        elif kind == "run-file":
+            rel = item.data(1, Qt.ItemDataRole.UserRole)
+            run_id = item.parent().data(1, Qt.ItemDataRole.UserRole)
+            path = self._project.run_dir(run_id) / rel
+            # text first: run.json's .json suffix would otherwise
+            # classify as a (non-ASE) structure and hang the opener
+            if _is_text_file(path):
+                self.file_open_requested.emit(str(path))
+            elif _is_structure_file(path):
+                self.structure_open_requested.emit(str(path))
+            else:
+                QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(str(self._project.run_dir(run_id))))
 
     def _on_context_menu(self, pos) -> None:
         if self._project is None:
@@ -142,7 +164,18 @@ class ProjectPanel(QWidget):
         kind = item.data(0, Qt.ItemDataRole.UserRole)
         ident = item.data(1, Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
-        if kind == "run":
+        if kind == "run-file":
+            rel = item.data(1, Qt.ItemDataRole.UserRole)
+            run_id = item.parent().data(1, Qt.ItemDataRole.UserRole)
+            path = self._project.run_dir(run_id) / rel
+            act_open = menu.addAction(self.tr("Open"))
+            act_open.triggered.connect(
+                lambda: self._on_double_clicked(item, 0))
+            act_reveal = menu.addAction(self.tr("Show in Explorer"))
+            act_reveal.triggered.connect(
+                lambda: QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(str(path.parent))))
+        elif kind == "run":
             act_params = menu.addAction(self.tr("Parameters…"))
             act_params.triggered.connect(
                 lambda: self.run_parameters_requested.emit(ident))
@@ -209,3 +242,33 @@ def _status_text(status: str) -> str:
     """Status labels stay in their canonical English form — they are
     manifest values (AI-facing identifiers), not UI prose."""
     return status
+
+
+from vaspen.core.file_io import resolve_format  # noqa: E402
+
+
+def _is_structure_file(path: Path) -> bool:
+    """Structure-like files open in the 3D viewport."""
+    return resolve_format(str(path)) is not None
+
+
+_TEXT_NAMES = ("INCAR", "KPOINTS", "OSZICAR", "OUTCAR", "run.json",
+               "EIGENVAL", "DOSCAR", "IBZKPT", "XDATCAR", "PROCAR",
+               "POTCAR")
+
+
+def _is_text_file(path: Path) -> bool:
+    """Known VASP text files (and .json/.txt) open in the viewer."""
+    if path.suffix.lower() in (".json", ".txt"):
+        return True
+    return path.name.upper() in _TEXT_NAMES
+
+
+def _file_kind_text(rel: Path) -> str:
+    """Second-column hint for a run file row (text check FIRST — see
+    the double-click branch comment)."""
+    if _is_text_file(rel):
+        return "text"
+    if _is_structure_file(rel):
+        return "structure"
+    return "binary"

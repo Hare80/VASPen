@@ -257,3 +257,25 @@ def test_write_run_inputs_missing_structure(project: Project):
     # the registered structure file never existed on disk
     with pytest.raises(ValueError, match="Unknown structure"):
         project.structure_path("s")
+
+
+def test_run_files_recursive_and_sorted(project: Project, tmp_path):
+    from vaspen.core.structure import StructureModel
+
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    s_entry = project.add_structure(src)
+    r_entry = project.add_run("neb", "neb", {}, s_entry["id"],
+                              "sha256:x", "gui")
+    run_dir = project.run_dir(r_entry["id"])
+    (run_dir / "INCAR").write_text("x", encoding="utf-8")
+    (run_dir / "00").mkdir()
+    (run_dir / "00" / "POSCAR").write_text("f", encoding="utf-8")
+    (run_dir / "04").mkdir()
+    (run_dir / "04" / "POSCAR").write_text("l", encoding="utf-8")
+
+    files = project.run_files(r_entry["id"])
+    rels = [f.as_posix() for f in files]
+    assert rels == ["00/POSCAR", "04/POSCAR", "INCAR", "run.json"]
+    with pytest.raises(ValueError, match="Unknown run"):
+        project.run_files("nope")
