@@ -2605,16 +2605,12 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <translation>Run: {}</translation>
     </message>
     <message>
-      <source>Run</source>
-      <translation>Run</translation>
+      <source>Type: {}</source>
+      <translation>Type: {}</translation>
     </message>
     <message>
-      <source>Type:</source>
-      <translation>Type:</translation>
-    </message>
-    <message>
-      <source>Structure:</source>
-      <translation>Structure:</translation>
+      <source>Structure: {}</source>
+      <translation>Structure: {}</translation>
     </message>
     <message>
       <source>Status:</source>
@@ -2637,8 +2633,8 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <translation>POSCAR</translation>
     </message>
     <message>
-      <source>POSCAR is generated from the registered structure — to change it, edit the structure (structures/) and regenerate here.</source>
-      <translation>POSCAR is generated from the registered structure — to change it, edit the structure (structures/) and regenerate here.</translation>
+      <source>POSCAR is written out from the structure registered in this project (structures/). This button only rewrites the run's POSCAR file to match it — it never modifies the structure itself. Use it after updating the registered structure, or to restore a lost POSCAR.</source>
+      <translation>POSCAR is written out from the structure registered in this project (structures/). This button only rewrites the run's POSCAR file to match it — it never modifies the structure itself. Use it after updating the registered structure, or to restore a lost POSCAR.</translation>
     </message>
     <message>
       <source>Regenerate POSCAR</source>

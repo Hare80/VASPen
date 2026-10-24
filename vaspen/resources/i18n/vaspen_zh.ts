@@ -2488,16 +2488,12 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
             <translation>计算：{}</translation>
         </message>
         <message>
-            <source>Run</source>
-            <translation>计算</translation>
+            <source>Type: {}</source>
+            <translation>类型：{}</translation>
         </message>
         <message>
-            <source>Type:</source>
-            <translation>类型：</translation>
-        </message>
-        <message>
-            <source>Structure:</source>
-            <translation>结构：</translation>
+            <source>Structure: {}</source>
+            <translation>结构：{}</translation>
         </message>
         <message>
             <source>Status:</source>
@@ -2520,8 +2516,8 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
             <translation>POSCAR</translation>
         </message>
         <message>
-            <source>POSCAR is generated from the registered structure — to change it, edit the structure (structures/) and regenerate here.</source>
-            <translation>POSCAR 由登记的结构生成——想改结构请编辑 structures/ 中的文件,然后在此重新生成。</translation>
+            <source>POSCAR is written out from the structure registered in this project (structures/). This button only rewrites the run's POSCAR file to match it — it never modifies the structure itself. Use it after updating the registered structure, or to restore a lost POSCAR.</source>
+            <translation>POSCAR 由本项目中登记的结构（structures/）写出。该按钮仅把本计算的 POSCAR 文件重写为与之一致——绝不会修改结构本身。更新登记结构后可用，或用于恢复丢失的 POSCAR。</translation>
         </message>
         <message>
             <source>Regenerate POSCAR</source>

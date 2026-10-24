@@ -20,8 +20,6 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -60,8 +58,8 @@ class RunEditorDialog(QDialog):
             self._structure_model = None
 
         self.setWindowTitle(self.tr("Run: {}").format(run_id))
-        self.resize(760, 560)
         self._build_ui()
+        self._restore_geometry()
         self._load()
 
     # -- UI --------------------------------------------------------------
@@ -69,17 +67,21 @@ class RunEditorDialog(QDialog):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        info = QGroupBox(self.tr("Run"))
-        form = QFormLayout(info)
-        self._type_label = QLabel(self._entry.get("type", ""))
-        self._structure_label = QLabel(self._entry.get("structure", ""))
-        form.addRow(self.tr("Type:"), self._type_label)
-        form.addRow(self.tr("Structure:"), self._structure_label)
+        # one compact line — every pixel goes to the editor panels
+        info_bar = QHBoxLayout()
+        self._type_label = QLabel(self.tr("Type: {}").format(
+            self._entry.get("type", "")))
+        self._structure_label = QLabel(self.tr("Structure: {}").format(
+            self._entry.get("structure", "")))
         self._status_combo = QComboBox()
         for status in RUN_STATUSES:
             self._status_combo.addItem(status)  # canonical manifest values
-        form.addRow(self.tr("Status:"), self._status_combo)
-        layout.addWidget(info)
+        info_bar.addWidget(self._type_label)
+        info_bar.addWidget(self._structure_label)
+        info_bar.addStretch(1)
+        info_bar.addWidget(QLabel(self.tr("Status:")))
+        info_bar.addWidget(self._status_combo)
+        layout.addLayout(info_bar)
 
         self._tabs = QTabWidget()
         self._incar_panel = IncarEditorPanel(
@@ -127,9 +129,11 @@ class RunEditorDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         note = QLabel(self.tr(
-            "POSCAR is generated from the registered structure — to "
-            "change it, edit the structure (structures/) and regenerate "
-            "here."))
+            "POSCAR is written out from the structure registered in "
+            "this project (structures/). This button only rewrites the "
+            "run's POSCAR file to match it — it never modifies the "
+            "structure itself. Use it after updating the registered "
+            "structure, or to restore a lost POSCAR."))
         note.setWordWrap(True)
         layout.addWidget(note)
         regen = QPushButton(self.tr("Regenerate POSCAR"))
@@ -137,6 +141,24 @@ class RunEditorDialog(QDialog):
         layout.addWidget(regen)
         layout.addStretch(1)
         return page
+
+    # -- geometry ------------------------------------------------------------
+
+    def _restore_geometry(self) -> None:
+        """Default 1100x800; remember the user's size across opens."""
+        from PySide6.QtCore import QSettings
+
+        geo = QSettings("VASPen", "VASPen").value("run_editor_geometry")
+        if geo and self.restoreGeometry(geo):
+            return
+        self.resize(1100, 800)
+
+    def closeEvent(self, event) -> None:
+        from PySide6.QtCore import QSettings
+
+        QSettings("VASPen", "VASPen").setValue(
+            "run_editor_geometry", self.saveGeometry())
+        super().closeEvent(event)
 
     # -- load --------------------------------------------------------------
 
