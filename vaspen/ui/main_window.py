@@ -804,6 +804,8 @@ class MainWindow(QMainWindow):
         self._project_panel.run_open_requested.connect(self._open_file)
         self._project_panel.run_status_change_requested.connect(
             self._on_run_status_change)
+        self._project_panel.run_parameters_requested.connect(
+            self._on_run_parameters)
         self._project_panel.add_current_structure_requested.connect(
             self._on_add_current_structure)
 
@@ -951,6 +953,15 @@ class MainWindow(QMainWindow):
         self._project = None
         self._project_panel.set_project(None)
         self._sync_project_tools()
+
+    def _on_run_parameters(self, run_id: str) -> None:
+        if self._project is None:
+            return
+        from vaspen.ui.run_dialog import RunDialog
+        dlg = RunDialog(self._project, run_id, self)
+        if dlg.exec() and self._project is not None:
+            self._project_panel.refresh()
+            self._sync_project_tools()
 
     def _on_add_current_structure(self) -> None:
         """Add the window's structure to the project (structures/)."""

@@ -37,6 +37,7 @@ class ProjectPanel(QWidget):
     structure_open_requested = Signal(str)   # structure file path
     run_open_requested = Signal(str)         # run POSCAR path
     run_status_change_requested = Signal(str, str)  # run id, status
+    run_parameters_requested = Signal(str)           # run id
     add_current_structure_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -105,6 +106,7 @@ class ProjectPanel(QWidget):
                 [entry["id"], _status_text(entry.get("status", ""))])
             item.setData(0, Qt.ItemDataRole.UserRole, "run")
             item.setData(1, Qt.ItemDataRole.UserRole, entry["id"])
+            item.setToolTip(0, self._run_tooltip(entry["id"]))
             runs_root.addChild(item)
         self._tree.addTopLevelItem(runs_root)
         runs_root.setExpanded(True)
@@ -141,6 +143,10 @@ class ProjectPanel(QWidget):
         ident = item.data(1, Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
         if kind == "run":
+            act_params = menu.addAction(self.tr("Parameters…"))
+            act_params.triggered.connect(
+                lambda: self.run_parameters_requested.emit(ident))
+            menu.addSeparator()
             entry = self._project.run_entry(ident)
             status_menu = menu.addMenu(self.tr("Set Status"))
             for status in RUN_STATUSES:
@@ -169,6 +175,15 @@ class ProjectPanel(QWidget):
                     self.add_current_structure_requested.emit)
         if not menu.isEmpty():
             menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _run_tooltip(self, run_id: str) -> str:
+        """One-line parameter summary from the run's provenance card."""
+        if self._project is None:
+            return ""
+        params = self._project.run_parameters(run_id)
+        parts = [f"{key}: {value}" for key, value in params.items()
+                 if key in ("preset", "functional", "kpoints_mode")]
+        return " · ".join(parts)
 
     # -- i18n --------------------------------------------------------------
 

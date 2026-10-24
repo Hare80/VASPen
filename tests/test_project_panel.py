@@ -23,7 +23,7 @@ def project(tmp_path):
     f = tmp_path / "Fe.vasp"
     bulk("Fe").write(f, format="vasp")
     proj.add_structure(f, metadata={"formula": "Fe"})
-    proj.add_run("scf", "scf", {"preset": "scf"}, "fe", "sha256:x", "gui")
+    proj.add_run("scf", "scf", {"preset": "scf", "kpoints_mode": "automatic", "kpoints_params": {"k_spacing": 0.04}, "functional": "PBE"}, "fe", "sha256:x", "gui")
     return proj
 
 
@@ -87,3 +87,35 @@ def test_add_current_structure_guard(window):
     # no project / empty model → silent no-op
     window._on_add_current_structure()
     assert window._project is None
+
+
+def test_run_parameters_menu_signal(window, project, monkeypatch):
+    """The panel signal opens the RunDialog wired to the right run
+    (fake the modal — a real exec() would block the test)."""
+    opened = []
+
+    class _FakeRunDialog:
+        DialogCode = 1  # Accepted
+
+        def __init__(self, project, run_id, parent=None):
+            opened.append(run_id)
+
+        def exec(self):
+            return self.DialogCode
+
+    monkeypatch.setattr(
+        "vaspen.ui.run_dialog.RunDialog", _FakeRunDialog)
+    window._adopt_project(project)
+    panel = window._project_panel
+    panel.run_parameters_requested.emit("001-scf")
+    assert opened == ["001-scf"]
+    # accepted → the panel resynced via _sync_project_tools (the
+    # bridge-specific PROJECT_REF rebind is covered in test_bridge.py)
+
+
+def test_run_tooltip_shows_parameters(window, project):
+    window._adopt_project(project)
+    panel = window._project_panel
+    tooltip = panel._run_tooltip("001-scf")
+    assert "preset: scf" in tooltip
+    assert "functional: PBE" in tooltip

@@ -270,6 +270,83 @@ class Project:
         self._write_manifest()
         return dict(entry)
 
+    def run_parameters(self, run_id: str) -> dict:
+        """The run's parameter dict from its provenance card."""
+        card_path = self.run_dir(run_id) / "run.json"
+        if not card_path.exists():
+            return {}
+        try:
+            card = json.loads(card_path.read_text("utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return dict(card.get("parameters", {}))
+
+    def update_run_parameters(self, run_id: str, parameters: dict,
+                              replace: bool = False) -> dict:
+        """Set the run's provenance-card parameters. Merges by default;
+        ``replace=True`` swaps the whole parameter dict (input
+        regeneration uses replace so stale overrides never survive).
+        Manifest runs entries carry no parameters — the card is the
+        single source."""
+        if not isinstance(parameters, dict):
+            raise ValueError("parameters must be a dict.")
+        self.run_entry(run_id)  # validate the id
+        card_path = self.run_dir(run_id) / "run.json"
+        try:
+            card = json.loads(card_path.read_text("utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Cannot read run card: {exc}") from exc
+        merged = parameters if replace else {
+            **card.get("parameters", {}), **parameters}
+        card["parameters"] = merged
+        card["parameters_updated"] = _now()
+        card_path.write_text(
+            json.dumps(card, indent=2) + "\n", encoding="utf-8")
+        return dict(merged)
+
+    def write_run_inputs(self, run_id: str, model, preset: str = "scf",
+                         incar_overrides: dict | None = None,
+                         kpoints_mode: str = "automatic",
+                         kpoints_params: dict | None = None,
+                         potcar_library: str = "",
+                         functional: str = "PBE",
+                         poscar_direct: bool = False) -> dict:
+        """(Re)generate the four VASP input files in the run directory
+        from ``model`` and record the parameters on the provenance
+        card. ``model`` is the caller's StructureModel — typically
+        loaded from the registered structure file."""
+        from vaspen.core.vasp_input import generate_all_inputs
+
+        run_dir = self.run_dir(run_id)
+        contents = generate_all_inputs(
+            model,
+            incar_preset=preset,
+            incar_overrides=incar_overrides,
+            kpoints_mode=kpoints_mode,
+            kpoints_params=kpoints_params,
+            potcar_library=potcar_library,
+            functional=functional,
+            poscar_direct=poscar_direct,
+        )
+        files: dict[str, str] = {}
+        for name, content in contents.items():
+            if not content:
+                continue
+            target = run_dir / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            files[name] = str(target)
+        # REPLACE: regeneration defines the full parameter set — stale
+        # overrides from a previous generation must not survive.
+        self.update_run_parameters(run_id, {
+            "preset": preset,
+            "kpoints_mode": kpoints_mode,
+            "kpoints_params": kpoints_params or {},
+            "functional": functional,
+            **(incar_overrides or {}),
+        }, replace=True)
+        return files
+
     # -- persistence ----------------------------------------------------
 
     def _write_manifest(self) -> None:

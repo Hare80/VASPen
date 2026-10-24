@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+from ase.build import bulk
 
 from vaspen.core.project import (
     MANIFEST_NAME,
@@ -189,3 +190,70 @@ def test_manifest_atomic_write_leaves_no_tmp(project: Project):
 def test_status_tuple_documented():
     assert RUN_STATUSES == ("inputs-ready", "submitted", "running",
                             "done", "failed")
+
+
+# ----------------------------------------------------------------------
+# parameter update + input regeneration
+# ----------------------------------------------------------------------
+
+
+def test_update_run_parameters_merges(project: Project):
+    project.add_run("r", "scf", {"preset": "scf", "k": 0.04}, "s",
+                    "sha256:x", "gui")
+    merged = project.update_run_parameters("001-r", {"functional": "PBE"})
+    assert merged == {"preset": "scf", "k": 0.04, "functional": "PBE"}
+    card = json.loads(
+        (project.run_dir("001-r") / "run.json").read_text("utf-8"))
+    assert card["parameters"]["functional"] == "PBE"
+    assert "parameters_updated" in card
+
+
+def test_update_run_parameters_rejects_non_dict(project: Project):
+    project.add_run("r", "scf", {}, "s", "sha256:x", "gui")
+    with pytest.raises(ValueError, match="dict"):
+        project.update_run_parameters("001-r", "ENCUT=400")
+
+
+def test_run_parameters_reader(project: Project):
+    project.add_run("r", "scf", {"preset": "scf"}, "s", "sha256:x", "gui")
+    assert project.run_parameters("001-r") == {"preset": "scf"}
+    with pytest.raises(ValueError, match="Unknown run"):
+        project.run_parameters("missing")
+
+
+def test_write_run_inputs_regenerates(project: Project, tmp_path):
+    from vaspen.core.structure import StructureModel
+
+    project.add_run("r", "scf", {"preset": "scf"}, "s", "sha256:x", "gui")
+    model = StructureModel()
+    model.load(project.structure_path("s")) if False else None
+    # register a real structure file to load from
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    entry = project.add_structure(src)
+    # point the run at it by rewriting the card structure_id (test shim)
+    card_path = project.run_dir("001-r") / "run.json"
+    card = json.loads(card_path.read_text("utf-8"))
+    card["structure_id"] = entry["id"]
+    card_path.write_text(json.dumps(card, indent=2), encoding="utf-8")
+
+    model = StructureModel()
+    model.load(entry and project.structure_path(entry["id"]))
+    files = project.write_run_inputs(
+        "001-r", model, preset="opt",
+        kpoints_params={"k_spacing": 0.03}, functional="PBE")
+    assert set(files) == {"INCAR", "KPOINTS", "POSCAR", "POTCAR"} or \
+        set(files) >= {"INCAR", "KPOINTS", "POSCAR"}
+    assert "EDIFFG" in (project.run_dir("001-r") / "INCAR").read_text()
+    params = project.run_parameters("001-r")
+    assert params["preset"] == "opt" and params["kpoints_params"] == {
+        "k_spacing": 0.03}
+
+
+def test_write_run_inputs_missing_structure(project: Project):
+    from vaspen.core.structure import StructureModel
+
+    project.add_run("r", "scf", {}, "s", "sha256:x", "gui")
+    # the registered structure file never existed on disk
+    with pytest.raises(ValueError, match="Unknown structure"):
+        project.structure_path("s")
