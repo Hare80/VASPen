@@ -336,24 +336,63 @@ class Project:
                          kpoints_params: dict | None = None,
                          potcar_library: str = "",
                          functional: str = "PBE",
-                         poscar_direct: bool = False) -> dict:
-        """(Re)generate the four VASP input files in the run directory
-        from ``model`` and record the parameters on the provenance
-        card. ``model`` is the caller's StructureModel — typically
-        loaded from the registered structure file."""
-        from vaspen.core.vasp_input import generate_all_inputs
+                         poscar_direct: bool = False,
+                         run_type: str = "") -> dict:
+        """(Re)generate the VASP input files in the run directory from
+        ``model`` and record the parameters on the provenance card.
+
+        NEB runs (``run_type == "neb"``) only get INCAR/KPOINTS/POTCAR:
+        no root POSCAR, frame directories are never touched, and an
+        existing IMAGES value in the run's INCAR is preserved (the
+        frame count on disk is authoritative)."""
+        from vaspen.core.vasp_input import (
+            INCAR_PRESETS,
+            format_incar_content,
+            generate_all_inputs,
+            generate_kpoints_automatic,
+            generate_potcar,
+        )
 
         run_dir = self.run_dir(run_id)
-        contents = generate_all_inputs(
-            model,
-            incar_preset=preset,
-            incar_overrides=incar_overrides,
-            kpoints_mode=kpoints_mode,
-            kpoints_params=kpoints_params,
-            potcar_library=potcar_library,
-            functional=functional,
-            poscar_direct=poscar_direct,
-        )
+        if run_type == "neb":
+            tags = dict(INCAR_PRESETS.get(preset, INCAR_PRESETS["neb"]))
+            tags.pop("_description", None)
+            # the frames on disk decide IMAGES — never the preset blank
+            existing = run_dir / "INCAR"
+            if existing.exists():
+                for line in existing.read_text("utf-8").splitlines():
+                    if line.strip().upper().startswith("IMAGES"):
+                        tags["IMAGES"] = line.split("=", 1)[1].strip()
+                        break
+            if str(tags.get("IMAGES", "")).strip() == "":
+                frames = sum(1 for child in run_dir.iterdir()
+                             if child.is_dir() and child.name.isdigit())
+                if frames > 2:
+                    tags["IMAGES"] = str(frames - 2)
+            tags.update(incar_overrides or {})
+            kp = {k: v for k, v in (kpoints_params or {}).items()
+                  if k in ("k_spacing", "gamma_centered")}
+            contents = {
+                "INCAR": format_incar_content(tags),
+                "KPOINTS": generate_kpoints_automatic(model.cell, **kp),
+                "POSCAR": "",  # NEB: frames are the structures
+                "POTCAR": "",
+            }
+            if potcar_library:
+                potcar_content, _paths = generate_potcar(
+                    model.unique_symbols, potcar_library, functional)
+                contents["POTCAR"] = potcar_content
+        else:
+            contents = generate_all_inputs(
+                model,
+                incar_preset=preset,
+                incar_overrides=incar_overrides,
+                kpoints_mode=kpoints_mode,
+                kpoints_params=kpoints_params,
+                potcar_library=potcar_library,
+                functional=functional,
+                poscar_direct=poscar_direct,
+            )
         files: dict[str, str] = {}
         for name, content in contents.items():
             if not content:

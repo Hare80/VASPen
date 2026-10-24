@@ -711,3 +711,30 @@ def test_read_run_file(tmp_path):
         mcp_server.read_run_file(run_id, "../../secrets.txt")
     with pytest.raises(ToolError, match="No file"):
         mcp_server.read_run_file(run_id, "CONTCAR")  # not run yet
+
+
+def test_update_run_neb_aware(tmp_path):
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    mcp_server.add_structure_to_project()
+    run = mcp_server.create_run("nebish", preset="neb",
+                                incar_overrides={"IMAGES": "2"})
+    run_id = run["run"]["id"]
+    run_dir = Path(run["dir"])
+    for i in range(4):  # 2 images + endpoints
+        frame = run_dir / f"{i:02d}"
+        frame.mkdir()
+        (frame / "POSCAR").write_text("frame", encoding="utf-8")
+
+    r = mcp_server.update_run(run_id,
+                              kpoints_params={"k_spacing": 0.03})
+    assert r["ok"] is True
+    assert "POSCAR" not in r["files"]
+    incar = (run_dir / "INCAR").read_text("utf-8")
+    assert "IMAGES" in incar and "2" in incar.split("IMAGES")[1][:8]
+    for i in range(4):
+        assert (run_dir / f"{i:02d}" / "POSCAR").read_text("utf-8") == \
+            "frame"

@@ -279,3 +279,38 @@ def test_run_files_recursive_and_sorted(project: Project, tmp_path):
     assert rels == ["00/POSCAR", "04/POSCAR", "INCAR", "run.json"]
     with pytest.raises(ValueError, match="Unknown run"):
         project.run_files("nope")
+
+
+def test_write_run_inputs_neb_preserves_frames_and_images(project: Project,
+                                                           tmp_path):
+    from vaspen.core.structure import StructureModel
+
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    s_entry = project.add_structure(src)
+    r_entry = project.add_run("neb", "neb", {}, s_entry["id"],
+                              "sha256:x", "gui")
+    run_dir = project.run_dir(r_entry["id"])
+    # existing NEB state: INCAR with IMAGES + frame dirs
+    (run_dir / "INCAR").write_text("SYSTEM = x\nIMAGES = 3\n",
+                                   encoding="utf-8")
+    for i in range(5):
+        frame = run_dir / f"{i:02d}"
+        frame.mkdir()
+        (frame / "POSCAR").write_text("frame", encoding="utf-8")
+
+    model = StructureModel()
+    model.load(project.structure_path(s_entry["id"]))
+    files = project.write_run_inputs(
+        r_entry["id"], model, preset="neb",
+        kpoints_params={"k_spacing": 0.03}, run_type="neb")
+
+    assert "POSCAR" not in files          # no root POSCAR for NEB
+    assert set(files) == {"INCAR", "KPOINTS"}
+    incar = (run_dir / "INCAR").read_text("utf-8")
+    assert "IMAGES" in incar and "3" in incar.split("IMAGES")[1][:8]
+    assert "0.0300" in (run_dir / "KPOINTS").read_text("utf-8")
+    # frames untouched
+    for i in range(5):
+        assert (run_dir / f"{i:02d}" / "POSCAR").read_text("utf-8") == \
+            "frame"
