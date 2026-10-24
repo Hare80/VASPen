@@ -2574,101 +2574,15 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <translation>Add Current Structure</translation>
     </message>
     <message>
-      <source>Parameters…</source>
-      <translation>Parameters…</translation>
+      <source>Edit Inputs…</source>
+      <translation>Edit Inputs…</translation>
     </message>
     <message>
       <source>Show in Explorer</source>
       <translation>Show in Explorer</translation>
     </message>
   </context>
-  <context>
-    <name>RunDialog</name>
-    <message>
-      <source>Run Parameters</source>
-      <translation>Run Parameters</translation>
-    </message>
-    <message>
-      <source>Provenance</source>
-      <translation>Provenance</translation>
-    </message>
-    <message>
-      <source>Run:</source>
-      <translation>Run:</translation>
-    </message>
-    <message>
-      <source>Type:</source>
-      <translation>Type:</translation>
-    </message>
-    <message>
-      <source>Structure:</source>
-      <translation>Structure:</translation>
-    </message>
-    <message>
-      <source>Created:</source>
-      <translation>Created:</translation>
-    </message>
-    <message>
-      <source>Structure digest:</source>
-      <translation>Structure digest:</translation>
-    </message>
-    <message>
-      <source>Status</source>
-      <translation>Status</translation>
-    </message>
-    <message>
-      <source>Status:</source>
-      <translation>Status:</translation>
-    </message>
-    <message>
-      <source>Generation Parameters</source>
-      <translation>Generation Parameters</translation>
-    </message>
-    <message>
-      <source>INCAR preset:</source>
-      <translation>INCAR preset:</translation>
-    </message>
-    <message>
-      <source>Functional:</source>
-      <translation>Functional:</translation>
-    </message>
-    <message>
-      <source>KPOINTS mode:</source>
-      <translation>KPOINTS mode:</translation>
-    </message>
-    <message>
-      <source>KSPACING (2π/Å):</source>
-      <translation>KSPACING (2π/Å):</translation>
-    </message>
-    <message>
-      <source>Mesh (k1 k2 k3):</source>
-      <translation>Mesh (k1 k2 k3):</translation>
-    </message>
-    <message>
-      <source>INCAR overrides:</source>
-      <translation>INCAR overrides:</translation>
-    </message>
-    <message>
-      <source>KEY = VALUE (one per line), e.g.
-  IVDW = 11
-  MAGMOM = 0.6*56</source>
-      <translation>KEY = VALUE (one per line), e.g.
-  IVDW = 11
-  MAGMOM = 0.6*56</translation>
-    </message>
-    <message>
-      <source>&amp;Regenerate Inputs</source>
-      <translation>&amp;Regenerate Inputs</translation>
-    </message>
-    <message>
-      <source>INCAR overrides: {}</source>
-      <translation>INCAR overrides: {}</translation>
-    </message>
-    <message>
-      <source>This run directory already contains calculation outputs — regenerating will overwrite the input files. Continue?</source>
-      <translation>This run directory already contains calculation outputs — regenerating will overwrite the input files. Continue?</translation>
-    </message>
-  </context>
+  
   <context>
     <name>TextViewerDialog</name>
     <message>
@@ -2682,6 +2596,89 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
     <message>
       <source>Show in Explorer</source>
       <translation>Show in Explorer</translation>
+    </message>
+  </context>
+  <context>
+    <name>RunEditorDialog</name>
+    <message>
+      <source>Run: {}</source>
+      <translation>Run: {}</translation>
+    </message>
+    <message>
+      <source>Run</source>
+      <translation>Run</translation>
+    </message>
+    <message>
+      <source>Type:</source>
+      <translation>Type:</translation>
+    </message>
+    <message>
+      <source>Structure:</source>
+      <translation>Structure:</translation>
+    </message>
+    <message>
+      <source>Status:</source>
+      <translation>Status:</translation>
+    </message>
+    <message>
+      <source>INCAR</source>
+      <translation>INCAR</translation>
+    </message>
+    <message>
+      <source>KPOINTS</source>
+      <translation>KPOINTS</translation>
+    </message>
+    <message>
+      <source>POTCAR</source>
+      <translation>POTCAR</translation>
+    </message>
+    <message>
+      <source>POSCAR</source>
+      <translation>POSCAR</translation>
+    </message>
+    <message>
+      <source>POSCAR is generated from the registered structure — to change it, edit the structure (structures/) and regenerate here.</source>
+      <translation>POSCAR is generated from the registered structure — to change it, edit the structure (structures/) and regenerate here.</translation>
+    </message>
+    <message>
+      <source>Regenerate POSCAR</source>
+      <translation>Regenerate POSCAR</translation>
+    </message>
+    <message>
+      <source>Regenerate POTCAR (current library)</source>
+      <translation>Regenerate POTCAR (current library)</translation>
+    </message>
+    <message>
+      <source>Functional: {}</source>
+      <translation>Functional: {}</translation>
+    </message>
+    <message>
+      <source>POTCAR present ({} KB)</source>
+      <translation>POTCAR present ({} KB)</translation>
+    </message>
+    <message>
+      <source>No POTCAR — configure the library in Settings and regenerate.</source>
+      <translation>No POTCAR — configure the library in Settings and regenerate.</translation>
+    </message>
+    <message>
+      <source>&amp;Apply</source>
+      <translation>&amp;Apply</translation>
+    </message>
+    <message>
+      <source>Close</source>
+      <translation>Close</translation>
+    </message>
+    <message>
+      <source>This run directory already contains calculation outputs — applying will overwrite input files. Continue?</source>
+      <translation>This run directory already contains calculation outputs — applying will overwrite input files. Continue?</translation>
+    </message>
+    <message>
+      <source>No pseudopotential library configured — set it in Edit → Preferences.</source>
+      <translation>No pseudopotential library configured — set it in Edit → Preferences.</translation>
+    </message>
+    <message>
+      <source>Registered structure not found.</source>
+      <translation>Registered structure not found.</translation>
     </message>
   </context>
 </TS>

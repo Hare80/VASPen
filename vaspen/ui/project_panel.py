@@ -138,9 +138,9 @@ class ProjectPanel(QWidget):
             except ValueError:
                 pass  # missing file — status message via main window
         elif kind == "run":
-            poscar = self._project.run_dir(ident) / "POSCAR"
-            if poscar.exists():
-                self.run_open_requested.emit(str(poscar))
+            # the run ROW is the calculation object — its editor opens
+            # here (MS convention); files open via the file children
+            self.run_parameters_requested.emit(ident)
         elif kind == "run-file":
             rel = item.data(1, Qt.ItemDataRole.UserRole)
             run_id = item.parent().data(1, Qt.ItemDataRole.UserRole)
@@ -176,7 +176,7 @@ class ProjectPanel(QWidget):
                 lambda: QDesktopServices.openUrl(
                     QUrl.fromLocalFile(str(path.parent))))
         elif kind == "run":
-            act_params = menu.addAction(self.tr("Parameters…"))
+            act_params = menu.addAction(self.tr("Edit Inputs…"))
             act_params.triggered.connect(
                 lambda: self.run_parameters_requested.emit(ident))
             menu.addSeparator()

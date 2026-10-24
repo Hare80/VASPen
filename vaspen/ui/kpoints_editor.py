@@ -169,6 +169,49 @@ class KpointsEditorPanel(QWidget):
         """Set the line-mode k-path text (e.g. "G-X|X-M|M-G")."""
         self._band_path_edit.setText(text)
 
+    def load_content(self, text: str) -> tuple[str, str]:
+        """Load an existing KPOINTS file into the controls.
+
+        Returns ``(mode, note)`` — ``note`` is "" on a complete
+        restoration, or a short explanation of what could not be
+        recovered (the run editor shows it above the panel). Automatic
+        (KSPACING) files load as the equivalent manual mesh: a mesh
+        does not invert to a unique spacing, and editing the mesh is
+        what "edit this file" means anyway.
+        """
+        lines = [ln.strip() for ln in text.splitlines()
+                 if ln.strip() and not ln.strip().startswith("#")]
+        note = ""
+        if len(lines) < 3:
+            self.set_mode("automatic")
+            return "automatic", "unrecognized KPOINTS — loaded defaults"
+        header, _count, mode_line = lines[0], lines[1], lines[2]
+        low = mode_line.lower()
+        if "line" in low:
+            path = header.split(":", 1)[1].strip() if ":" in header \
+                else "G-X|X-M|M-G"
+            self._band_npoints.setValue(max(5, min(100, int(
+                abs(float(_count)) / max(1, path.count("|") + 1)))))
+            self.set_band_path_text(path)
+            self.set_mode("line")
+            return "line", note
+        # mesh forms (Gamma / Monkhorst-Pack, explicit or KSPACING)
+        try:
+            mesh = [max(1, min(50, int(v)))
+                    for v in lines[3].split()[:3]]
+        except (ValueError, IndexError):
+            mesh = [1, 1, 1]
+        for spin, value in zip((self._k1_spin, self._k2_spin,
+                                self._k3_spin), mesh):
+            spin.setValue(value)
+        gamma_index = 0 if "gamma" in low else 1
+        self._gamma_manual.setCurrentIndex(gamma_index)
+        self.set_mode("manual")
+        if "kspacing" in header.lower():
+            note = ("file was KSPACING-automatic — loaded as the "
+                    "equivalent mesh")
+        return "manual", note
+
     def content(self) -> str:
         """Validated KPOINTS text.
 

@@ -95,7 +95,7 @@ def test_run_parameters_menu_signal(window, project, monkeypatch):
     (fake the modal — a real exec() would block the test)."""
     opened = []
 
-    class _FakeRunDialog:
+    class _FakeRunEditor:
         DialogCode = 1  # Accepted
 
         def __init__(self, project, run_id, parent=None):
@@ -105,7 +105,7 @@ def test_run_parameters_menu_signal(window, project, monkeypatch):
             return self.DialogCode
 
     monkeypatch.setattr(
-        "vaspen.ui.run_dialog.RunDialog", _FakeRunDialog)
+        "vaspen.ui.run_editor.RunEditorDialog", _FakeRunEditor)
     window._adopt_project(project)
     panel = window._project_panel
     panel.run_parameters_requested.emit("001-scf")

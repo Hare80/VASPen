@@ -1286,7 +1286,7 @@ def get_run(run_id: str) -> dict:
     project = _require_project()
     entry = dict(project.run_entry(run_id))
     run_dir = project.run_dir(run_id)
-    files = sorted(f.name for f in run_dir.iterdir() if f.is_file())
+    files = [str(rel) for rel in project.run_files(run_id)]
     return {"ok": True,
             "run": entry,
             "parameters": project.run_parameters(run_id),
@@ -1326,6 +1326,27 @@ def update_run(run_id: str, preset: str | None = None,
         project = _require_project()
         entry = project.run_entry(run_id)
         params = project.run_parameters(run_id)
+        run_type = entry.get("type", "")
+        if run_type == "neb":
+            # NEB runs have no single-structure POSCAR semantics —
+            # frames are authoritative. INCAR/KPOINTS/POTCAR only,
+            # IMAGES preserved from the frames on disk.
+            model = StructureModel()
+            model.load(project.structure_path(
+                entry.get("structure", "")))
+            files = project.write_run_inputs(
+                run_id, model, preset=preset or "neb",
+                incar_overrides=incar_overrides,
+                potcar_library=potcar_library
+                or AppConfig().potcar_library_path,
+                functional=functional or params.get("functional",
+                                                     "PBE"),
+                run_type="neb")
+            return {"ok": True, "run": dict(project.run_entry(run_id)),
+                    "parameters": project.run_parameters(run_id),
+                    "files": files,
+                    "note": ("NEB run — frames untouched; IMAGES "
+                             "preserved from disk")}
         model = StructureModel()
         model.load(project.structure_path(entry.get("structure", "")))
         files = project.write_run_inputs(
@@ -1345,3 +1366,44 @@ def update_run(run_id: str, preset: str | None = None,
         return {"ok": True, "run": dict(project.run_entry(run_id)),
                 "parameters": project.run_parameters(run_id),
                 "files": files}
+
+
+@tool
+def read_run_file(run_id: str, filename: str,
+                  max_bytes: int = 200000) -> dict:
+    """Return the RAW text content of a file inside a run directory
+    (INCAR, KPOINTS, OSZICAR, OUTCAR, run.json, CONTCAR, …) so you can
+    read it yourself. No interpretation is applied — you analyze the
+    text. Large files are truncated at max_bytes with a note.
+
+    Args:
+        run_id: Run id from the project.
+        filename: Path RELATIVE to the run directory (NEB frames use
+            "00/POSCAR" style paths). Absolute paths and ".." are
+            rejected.
+        max_bytes: Maximum bytes returned (truncated with a note).
+    """
+    project = _require_project()
+    run_dir = project.run_dir(run_id)
+    target = (run_dir / filename).resolve()
+    if not str(target).startswith(str(run_dir.resolve())):
+        raise ValueError(
+            f"filename must be a path inside the run directory "
+            f"(got {filename!r}).")
+    if not target.is_file():
+        raise FileNotFoundError(
+            f"No file {filename!r} in run {run_id}.")
+    size = target.stat().st_size
+    with open(target, "rb") as handle:
+        data = handle.read(max(1, int(max_bytes)))
+    text = data.decode("utf-8", errors="replace")
+    response: dict[str, Any] = {
+        "ok": True,
+        "file": str(target),
+        "size_bytes": size,
+        "content": text,
+    }
+    if size > len(data):
+        response["note"] = (f"truncated at {len(data)} of {size} bytes — "
+                            "raise max_bytes for more")
+    return response

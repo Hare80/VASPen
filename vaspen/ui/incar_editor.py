@@ -220,6 +220,23 @@ class IncarEditorPanel(QWidget):
         if key != "custom":
             self._load_preset(key)
 
+    def set_tags(self, tags: dict[str, str]) -> None:
+        """Load an explicit tag dict as a Custom preset.
+
+        The run editor's load path: an existing INCAR file becomes the
+        editable table (the preset combo shows Custom — the file IS the
+        source of truth, not a preset).
+        """
+        preset_keys = ["scf", "opt", "band", "dos", "optical", "neb",
+                       "custom"]
+        self._preset_combo.blockSignals(True)
+        self._preset_combo.setCurrentIndex(preset_keys.index("custom"))
+        self._preset_combo.blockSignals(False)
+        self._preset_key = "custom"
+        self._tags = {str(k): str(v) for k, v in tags.items()}
+        self._custom_tags = set(self._tags)
+        self._refresh_table()
+
     def apply_tag(self, tag: str, value: str) -> None:
         """Set a tag value in the table (adds the row when absent).
 

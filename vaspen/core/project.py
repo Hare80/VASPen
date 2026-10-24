@@ -315,6 +315,21 @@ class Project:
             json.dumps(card, indent=2) + "\n", encoding="utf-8")
         return dict(merged)
 
+    def add_edition(self, run_id: str, via: str) -> None:
+        """Append an edit-history entry to the run's provenance card
+        (the run editor writes files directly; the card records WHAT
+        happened, not a reverse-engineered parameter dict)."""
+        self.run_entry(run_id)  # validate
+        card_path = self.run_dir(run_id) / "run.json"
+        try:
+            card = json.loads(card_path.read_text("utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        card.setdefault("edits", []).append({"via": via,
+                                             "time": _now()})
+        card_path.write_text(
+            json.dumps(card, indent=2) + "\n", encoding="utf-8")
+
     def write_run_inputs(self, run_id: str, model, preset: str = "scf",
                          incar_overrides: dict | None = None,
                          kpoints_mode: str = "automatic",

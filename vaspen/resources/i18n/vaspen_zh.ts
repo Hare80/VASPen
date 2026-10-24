@@ -2456,8 +2456,8 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
             <translation>添加当前结构</translation>
         </message>
         <message>
-            <source>Parameters…</source>
-            <translation>参数…</translation>
+            <source>Edit Inputs…</source>
+            <translation>编辑输入文件…</translation>
         </message>
         <message>
             <source>Show in Explorer</source>
@@ -2465,93 +2465,6 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         </message>
     </context>
 
-    <context>
-        <name>RunDialog</name>
-        <message>
-            <source>Run Parameters</source>
-            <translation>计算参数</translation>
-        </message>
-        <message>
-            <source>Provenance</source>
-            <translation>溯源信息</translation>
-        </message>
-        <message>
-            <source>Run:</source>
-            <translation>计算：</translation>
-        </message>
-        <message>
-            <source>Type:</source>
-            <translation>类型：</translation>
-        </message>
-        <message>
-            <source>Structure:</source>
-            <translation>结构：</translation>
-        </message>
-        <message>
-            <source>Created:</source>
-            <translation>创建时间：</translation>
-        </message>
-        <message>
-            <source>Structure digest:</source>
-            <translation>结构指纹：</translation>
-        </message>
-        <message>
-            <source>Status</source>
-            <translation>状态</translation>
-        </message>
-        <message>
-            <source>Status:</source>
-            <translation>状态：</translation>
-        </message>
-        <message>
-            <source>Generation Parameters</source>
-            <translation>生成参数</translation>
-        </message>
-        <message>
-            <source>INCAR preset:</source>
-            <translation>INCAR 预设：</translation>
-        </message>
-        <message>
-            <source>Functional:</source>
-            <translation>交换关联泛函：</translation>
-        </message>
-        <message>
-            <source>KPOINTS mode:</source>
-            <translation>KPOINTS 模式：</translation>
-        </message>
-        <message>
-            <source>KSPACING (2π/Å):</source>
-            <translation>KSPACING（2π/Å）：</translation>
-        </message>
-        <message>
-            <source>Mesh (k1 k2 k3):</source>
-            <translation>网格（k1 k2 k3）：</translation>
-        </message>
-        <message>
-            <source>INCAR overrides:</source>
-            <translation>INCAR 覆盖项：</translation>
-        </message>
-        <message>
-            <source>KEY = VALUE (one per line), e.g.
-  IVDW = 11
-  MAGMOM = 0.6*56</source>
-            <translation>KEY = VALUE（每行一条），例如
-  IVDW = 11
-  MAGMOM = 0.6*56</translation>
-        </message>
-        <message>
-            <source>&amp;Regenerate Inputs</source>
-            <translation>重新生成输入文件(&amp;R)</translation>
-        </message>
-        <message>
-            <source>INCAR overrides: {}</source>
-            <translation>INCAR 覆盖项：{}</translation>
-        </message>
-        <message>
-            <source>This run directory already contains calculation outputs — regenerating will overwrite the input files. Continue?</source>
-            <translation>该计算目录已包含 VASP 输出文件——重新生成将覆盖输入文件。继续吗？</translation>
-        </message>
-    </context>
 
     <context>
         <name>TextViewerDialog</name>
@@ -2566,6 +2479,89 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         <message>
             <source>Show in Explorer</source>
             <translation>在资源管理器中显示</translation>
+        </message>
+    </context>
+    <context>
+        <name>RunEditorDialog</name>
+        <message>
+            <source>Run: {}</source>
+            <translation>计算：{}</translation>
+        </message>
+        <message>
+            <source>Run</source>
+            <translation>计算</translation>
+        </message>
+        <message>
+            <source>Type:</source>
+            <translation>类型：</translation>
+        </message>
+        <message>
+            <source>Structure:</source>
+            <translation>结构：</translation>
+        </message>
+        <message>
+            <source>Status:</source>
+            <translation>状态：</translation>
+        </message>
+        <message>
+            <source>INCAR</source>
+            <translation>INCAR</translation>
+        </message>
+        <message>
+            <source>KPOINTS</source>
+            <translation>KPOINTS</translation>
+        </message>
+        <message>
+            <source>POTCAR</source>
+            <translation>POTCAR</translation>
+        </message>
+        <message>
+            <source>POSCAR</source>
+            <translation>POSCAR</translation>
+        </message>
+        <message>
+            <source>POSCAR is generated from the registered structure — to change it, edit the structure (structures/) and regenerate here.</source>
+            <translation>POSCAR 由登记的结构生成——想改结构请编辑 structures/ 中的文件,然后在此重新生成。</translation>
+        </message>
+        <message>
+            <source>Regenerate POSCAR</source>
+            <translation>重新生成 POSCAR</translation>
+        </message>
+        <message>
+            <source>Regenerate POTCAR (current library)</source>
+            <translation>重新生成 POTCAR（用当前赝势库）</translation>
+        </message>
+        <message>
+            <source>Functional: {}</source>
+            <translation>交换关联泛函：{}</translation>
+        </message>
+        <message>
+            <source>POTCAR present ({} KB)</source>
+            <translation>POTCAR 已存在（{} KB）</translation>
+        </message>
+        <message>
+            <source>No POTCAR — configure the library in Settings and regenerate.</source>
+            <translation>无 POTCAR——请在设置中配置赝势库后重新生成。</translation>
+        </message>
+        <message>
+            <source>&amp;Apply</source>
+            <translation>应用(&amp;A)</translation>
+        </message>
+        <message>
+            <source>Close</source>
+            <translation>关闭</translation>
+        </message>
+        <message>
+            <source>This run directory already contains calculation outputs — applying will overwrite input files. Continue?</source>
+            <translation>该计算目录已包含 VASP 输出文件——应用将覆盖输入文件。继续吗？</translation>
+        </message>
+        <message>
+            <source>No pseudopotential library configured — set it in Edit → Preferences.</source>
+            <translation>未配置赝势库——请在 编辑 → 偏好设置 中配置。</translation>
+        </message>
+        <message>
+            <source>Registered structure not found.</source>
+            <translation>找不到登记的结构。</translation>
         </message>
     </context>
 </TS>

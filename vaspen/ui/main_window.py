@@ -964,8 +964,8 @@ class MainWindow(QMainWindow):
     def _on_run_parameters(self, run_id: str) -> None:
         if self._project is None:
             return
-        from vaspen.ui.run_dialog import RunDialog
-        dlg = RunDialog(self._project, run_id, self)
+        from vaspen.ui.run_editor import RunEditorDialog
+        dlg = RunEditorDialog(self._project, run_id, self)
         if dlg.exec() and self._project is not None:
             self._project_panel.refresh()
             self._sync_project_tools()
