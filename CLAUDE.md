@@ -1158,6 +1158,18 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   Regeneration source = the REGISTERED structure file
   (structures/<id>), not the run's POSCAR; the card's structure
   digest pins the structure and is untouched.
+- **P1.6 (2026-10-24) — run file tree + viewer**: `run_files(run_id)`
+  lists the run directory recursively (NEB frames included). The
+  panel's run rows expand to their FILES; double-click routing:
+  text first (run.json/INCAR/KPOINTS/OSZICAR/OUTCAR/… — run.json's
+  .json suffix must NOT classify as a structure, or _open_file feeds
+  a non-ASE file to ASE and hangs), then structure (POSCAR/CONTCAR →
+  3D), else reveal in Explorer. `TextViewerDialog` previews text
+  read-only, head-truncated at 512 KB (WAVECAR/CHGCAR are never
+  loaded wholesale) with a Show-in-Explorer button. MCP:
+  `read_run_file(run_id, filename, max_bytes)` returns RAW file text
+  (traversal-guarded, truncated) — reading raw text is not parsing;
+  the AI interprets. `get_run` lists files recursively.
 
 ---
 
@@ -1436,6 +1448,7 @@ English (`en`). Chinese (`zh`) available via View → Language menu.
 - [x] GUI live bridge — MCP tools act on the window's live structure (§7.13)
 - [x] Single-instance startup — second launch focuses the window and hands over its file (§7.14)
 - [x] Calculation projects — folder-as-project + manifest, GUI panel, MCP project tools (§7.15)
+- [x] Run file tree + text viewer + read_run_file (§7.15 P1.6)
 
 ### v1.0+ — Future
 - [ ] Materials Project integration (structure search by formula / mp-id, download & open, property lookup) — security policy in §7.6

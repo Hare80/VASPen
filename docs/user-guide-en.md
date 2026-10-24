@@ -482,6 +482,7 @@ my-project/
   labels — VASPen never parses VASP output files.
 - Each run carries a `run.json` provenance card: which structure and
   parameters generated it, and by which VASPen version.
+- Double-click a **file** under a run: structure files open in the 3D view, text files (INCAR, OSZICAR, OUTCAR, …) open in a built-in read-only viewer, binaries reveal in Explorer. AI clients can read run files too (`read_run_file`).
 - **With AI:** ask your MCP client *"open my project and create an SCF
   run for the current structure"* — new runs appear in the panel in
   real time (see §19).
