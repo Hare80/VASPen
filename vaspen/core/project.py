@@ -220,6 +220,36 @@ class Project:
         self._write_manifest()
         return entry
 
+    def register_structure_file(self, src_path: str | Path,
+                                formula: str | None = None,
+                                ) -> tuple[str, str]:
+        """Match a structure file against the registered ones and
+        register it only when genuinely new. Returns
+        ``(structure_id, digest)``.
+
+        Matching is by resolved path first, then by content digest
+        (the caller may still point at the original file a structure
+        was copied from — same bytes, same material). Run creation
+        from the GUI and MCP both route through here so an already
+        registered file never registers a duplicate."""
+        src = Path(src_path).resolve()
+        if not src.exists():
+            raise ValueError(f"File not found: {src}")
+        for entry in self._manifest["structures"]:
+            try:
+                registered = self.structure_path(entry["id"]).resolve()
+            except ValueError:
+                continue  # registered file deleted — skip, don't crash
+            if registered == src:
+                return entry["id"], entry["digest"]
+        digest = sha256_file(src)
+        for entry in self._manifest["structures"]:
+            if entry.get("digest") == digest:
+                return entry["id"], entry["digest"]
+        metadata = {"formula": formula} if formula else None
+        entry = self.add_structure(src, metadata=metadata)
+        return entry["id"], entry["digest"]
+
     def add_run(self, slug: str, rtype: str, params: dict,
                 structure_id: str, structure_digest: str,
                 via: str) -> dict:
@@ -259,6 +289,30 @@ class Project:
         self._manifest["runs"].append(entry)
         self._write_manifest()
         return {**entry, "card": card}
+
+    def remove_run(self, run_id: str, force: bool = False) -> None:
+        """Delete a run — manifest entry AND the whole runs/<id>/
+        directory (inputs, frames and calculation outputs alike; not
+        undoable). A run marked submitted/running is refused unless
+        ``force``: deleting the directory of a job that may still be
+        executing is almost always a mistake.
+
+        Numbers are never reused while a higher-numbered run exists;
+        deleting the highest-numbered run lets the next add_run take
+        its number (same as hand-managed project folders)."""
+        entry = self.run_entry(run_id)
+        if entry["status"] in ("submitted", "running") and not force:
+            raise ValueError(
+                f"Run {run_id} is {entry['status']} — refusing to "
+                "delete it. Pass force=True to delete anyway.")
+        run_dir = self.run_dir(run_id)
+        # disk first: a locked/partial delete leaves the run
+        # registered (retryable) instead of a manifest entry pointing
+        # at a vanished directory
+        if run_dir.exists():
+            shutil.rmtree(run_dir)
+        self._manifest["runs"].remove(entry)
+        self._write_manifest()
 
     def set_run_status(self, run_id: str, status: str) -> dict:
         if status not in RUN_STATUSES:

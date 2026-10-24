@@ -149,6 +149,85 @@ def test_add_run_writes_provenance_card(project: Project):
     assert entry["card"]["id"] == "001-scf"
 
 
+# ----------------------------------------------------------------------
+# structure match-or-register + run removal (§7.15 P2)
+# ----------------------------------------------------------------------
+
+
+def test_register_structure_file_matches_by_path(project: Project, tmp_path):
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    entry = project.add_structure(src)
+    sid, digest = project.register_structure_file(src)
+    assert sid == entry["id"]
+    assert digest == entry["digest"]
+    assert len(project.structures) == 1  # no duplicate registered
+
+
+def test_register_structure_file_matches_by_digest(project: Project,
+                                                    tmp_path):
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    entry = project.add_structure(src)
+    copy = tmp_path / "same-bytes.vasp"
+    copy.write_bytes(src.read_bytes())
+    sid, digest = project.register_structure_file(copy)
+    assert sid == entry["id"]
+    assert digest == entry["digest"]
+    assert len(project.structures) == 1
+
+
+def test_register_structure_file_registers_new(project: Project, tmp_path):
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    other = tmp_path / "fe.vasp"
+    bulk("Fe", "bcc", a=2.87).write(other, format="vasp")
+    project.add_structure(src)
+    sid, digest = project.register_structure_file(other, formula="Fe")
+    assert len(project.structures) == 2
+    assert sid in {e["id"] for e in project.structures}
+    assert digest == sha256_file(other)
+    entry = next(e for e in project.structures if e["id"] == sid)
+    assert entry["formula"] == "Fe"
+
+
+def test_register_structure_file_missing_file(project: Project, tmp_path):
+    with pytest.raises(ValueError, match="File not found"):
+        project.register_structure_file(tmp_path / "ghost.vasp")
+
+
+def test_remove_run_deletes_entry_and_directory(project: Project):
+    project.add_run("r", "scf", {}, "s", "sha256:x", "gui")
+    run_dir = project.run_dir("001-r")
+    (run_dir / "INCAR").write_text("x", encoding="utf-8")
+    project.remove_run("001-r")
+    assert project.runs == []
+    assert not run_dir.exists()
+
+
+def test_remove_run_unknown_id(project: Project):
+    with pytest.raises(ValueError, match="Unknown run"):
+        project.remove_run("999-ghost")
+
+
+def test_remove_run_refuses_active_unless_forced(project: Project):
+    project.add_run("r", "scf", {}, "s", "sha256:x", "gui")
+    project.set_run_status("001-r", "running")
+    with pytest.raises(ValueError, match="refusing"):
+        project.remove_run("001-r")
+    assert project.runs  # untouched
+    project.remove_run("001-r", force=True)
+    assert project.runs == []
+
+
+def test_remove_run_highest_number_reusable(project: Project):
+    project.add_run("a", "scf", {}, "s", "sha256:x", "gui")
+    project.add_run("b", "scf", {}, "s", "sha256:x", "gui")
+    project.remove_run("002-b")
+    nxt = project.add_run("c", "scf", {}, "s", "sha256:x", "gui")
+    assert nxt["id"] == "002-c"  # number reused, same as hand-managed
+
+
 def test_set_run_status_whitelist_and_sync(project: Project):
     project.add_run("r", "scf", {}, "s", "sha256:x", "gui")
     entry = project.set_run_status("001-r", "submitted")
