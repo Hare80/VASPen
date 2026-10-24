@@ -1133,7 +1133,7 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   FILE (save first — prompted, not silent). Run CREATION from the GUI
   is P2 (Generate-All "write into project"); in P1 the MCP
   `create_run` fills the tree live.
-- **MCP** (31 tools total): `open_project` (bridge: adopts the project
+- **MCP** (34 tools total): `open_project` (bridge: adopts the project
   INTO the window via `_adopt_project`), `get_project`,
   `add_structure_to_project`, `create_run` (writes the standard four
   inputs via the shared `_write_input_set`, provenance card with
