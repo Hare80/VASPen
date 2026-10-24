@@ -1130,10 +1130,11 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   identifiers). File menu: New/Open/Close Project + Recent Projects
   (max 8). Double-click opens through `_open_file` (standard open
   semantics). `add_structure` requires the model to have a source
-  FILE (save first — prompted, not silent). Run CREATION from the GUI
-  is P2 (Generate-All "write into project"); in P1 the MCP
-  `create_run` fills the tree live.
-- **MCP** (34 tools total): `open_project` (bridge: adopts the project
+  FILE (save first — prompted, not silent). Run CREATION from the
+  GUI: the Generate All dialog's "Current project (new run)"
+  destination (P2 below); the panel's run context menu also deletes
+  runs (P2 below).
+- **MCP** (35 tools total): `open_project` (bridge: adopts the project
   INTO the window via `_adopt_project`), `get_project`,
   `add_structure_to_project`, `create_run` (writes the standard four
   inputs via the shared `_write_input_set`, provenance card with
@@ -1142,8 +1143,8 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   headless holds the opened Project; the bridge installs a
   `LiveProjectRef` resolving `window._project` PER CALL (open/close
   needs no rebind; `set` adopts into the window). Bridge success path
-  refreshes the project panel. NEB runs are P2 (endpoint management
-  in project context).
+  refreshes the project panel. NEB runs: endpoint management landed in
+  P2 (neb_setup `run_name`; From-Project endpoint pickers).
 - **SSH submission (roadmap) lands HERE**: submit = a runs/<id>/
   directory; status write-back = set_run_status. P3 connects them.
 - **P1.5 (2026-10-24) — run parameters visible & adjustable**: MCP
@@ -1170,6 +1171,46 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   `read_run_file(run_id, filename, max_bytes)` returns RAW file text
   (traversal-guarded, truncated) — reading raw text is not parsing;
   the AI interprets. `get_run` lists files recursively.
+- **P1.7 (2026-10-24) — run editor replaces the parameter dialog**: the
+  bespoke preset/overrides dialog is gone. `RunEditorDialog` embeds the
+  §7.7 panels (one implementation per file type): the run's
+  INCAR/KPOINTS load via `IncarEditorPanel.set_tags` /
+  `KpointsEditorPanel.load_content`; Apply writes the panel content
+  back WYSIWYG and appends `edits:[{via:"gui"}]` (confirm when the run
+  dir has CONTCAR/OSZICAR). NEB runs show INCAR/KPOINTS/POTCAR only and
+  never touch frame directories. Editing source of truth = the FILES,
+  not a parameters dict — the card degrades to generation-time params +
+  edit history. The text viewer stays read-only by policy (raw edits
+  bypass validation and provenance). Regenerate POSCAR = rewrite the
+  run's POSCAR from the registered structure via `generate_poscar`
+  (never modifies the structure). Window: one-line info bar, default
+  1100x800, geometry remembered (QSettings).
+- **P2 (2026-10-24) — GUI run creation, NEB endpoints, run deletion**:
+  `GenerateAllDialog` takes `project_provider`; destination radios
+  "Current project (new run)" (editable run name) vs "Folder" appear
+  only when wired — the main window passes `lambda: self._project`,
+  refreshes the panel on the dialog's `run_created(run_id)`, and closes
+  the dialog on project close. Project mode registers the structure
+  (or BOTH NEB endpoints) via `Project.register_structure_file(path,
+  formula)` — match by resolved path, then content digest, register
+  only when new (MCP `create_run` uses the same helper) — then
+  `add_run(via="gui")` and fills runs/<id>/ with the same files/frames
+  as folder mode (the NEB `NN/POSCAR` layout is identical). Card
+  params: preset/functional/kpoints_mode (+ method/n_images/
+  final_structure for NEB). NEB endpoints: PoscarPanel "From
+  Project..." opens `StructurePickerDialog` (modal list of registered
+  structures); endpoint source paths tracked (`initial_source_path` /
+  `final_source_path`); unsaved structures are refused with a
+  save-first hint. MCP `neb_setup` gained `run_name` — exactly one of
+  `out_dir`/`run_name`; run_name registers both endpoints and creates
+  the project run end-to-end. Deletion: `Project.remove_run(run_id,
+  force=False)` removes the manifest entry AND the runs/<id>/ tree,
+  refuses submitted/running unless forced, and deletes the DISK first
+  (a locked delete stays retryable instead of leaving a manifest entry
+  pointing at a vanished directory). GUI: run context menu
+  "Delete Run..." (confirm; warns when outputs exist); MCP:
+  `delete_run` tool. Run numbers may be reused after deleting the
+  highest-numbered run (hand-managed-folder semantics).
 
 ---
 

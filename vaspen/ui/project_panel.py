@@ -2,10 +2,10 @@
 
 Left dock showing the open project (§7.15): a Structures group and a
 Runs group with status labels. Double-click opens things into the main
-window; a context menu on a run changes its status. Run CREATION from
-the GUI lands in P2 (Generate All "write into project") — this panel
-manages and consumes; the MCP ``create_run`` tool fills the tree in
-the meantime.
+window; a context menu on a run changes its status or deletes the run
+(manifest entry + directory). Runs are CREATED by the Generate All
+dialog ("Current project (new run)" destination) and by the MCP
+``create_run``/``neb_setup`` tools — this panel manages and consumes.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QMenu,
+    QMessageBox,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -38,6 +39,7 @@ class ProjectPanel(QWidget):
     run_open_requested = Signal(str)         # run POSCAR path
     run_status_change_requested = Signal(str, str)  # run id, status
     run_parameters_requested = Signal(str)           # run id
+    run_deleted = Signal(str)                        # run id
     file_open_requested = Signal(str)                # text file path
     add_current_structure_requested = Signal()
 
@@ -190,6 +192,9 @@ class ProjectPanel(QWidget):
                 act.triggered.connect(
                     lambda checked=False, s=status, i=ident:
                     self.run_status_change_requested.emit(i, s))
+            act_del = menu.addAction(self.tr("Delete Run..."))
+            act_del.triggered.connect(
+                lambda checked=False, i=ident: self._on_delete_run(i))
         elif kind == "structure":
             act_open = menu.addAction(self.tr("Open"))
             act_open.triggered.connect(
@@ -208,6 +213,37 @@ class ProjectPanel(QWidget):
                     self.add_current_structure_requested.emit)
         if not menu.isEmpty():
             menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    def _on_delete_run(self, run_id: str) -> None:
+        """Confirm, then remove the run (manifest entry + directory)."""
+        if self._project is None:
+            return
+        entry = self._project.run_entry(run_id)
+        run_dir = self._project.run_dir(run_id)
+        if entry.get("status") in ("submitted", "running"):
+            QMessageBox.warning(
+                self, self.tr("Delete Run"),
+                self.tr("Run {} is {} — refusing to delete it. Set its "
+                        "status to inputs-ready/done/failed first.")
+                .format(run_id, entry["status"]))
+            return
+        message = self.tr("Delete run {} and its whole directory?\n\n{}"
+                          ).format(run_id, run_dir)
+        if ((run_dir / "CONTCAR").exists()
+                or (run_dir / "OSZICAR").exists()):
+            message += "\n\n" + self.tr(
+                "The run already contains calculation outputs — they "
+                "will be deleted with it.")
+        reply = QMessageBox.question(self, self.tr("Delete Run"), message)
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            self._project.remove_run(run_id)
+        except (OSError, ValueError) as e:
+            QMessageBox.critical(self, self.tr("Delete Run"), str(e))
+            return
+        self.refresh()
+        self.run_deleted.emit(run_id)
 
     def _run_tooltip(self, run_id: str) -> str:
         """One-line parameter summary from the run's provenance card."""

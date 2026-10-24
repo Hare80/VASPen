@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from ase.build import bulk
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox
 
 from vaspen.core.project import Project
 from vaspen.ui.main_window import MainWindow
@@ -149,3 +150,42 @@ def test_run_file_double_click_routes_by_kind(window, project, qtbot):
     panel.file_open_requested.connect(seen.append)
     panel._on_double_clicked(json_child, 0)  # run.json → text viewer
     assert seen and seen[0].endswith("run.json")
+
+
+def test_delete_run_menu_flow(window, project, monkeypatch):
+    window._adopt_project(project)
+    panel = window._project_panel
+    run_dir = project.run_dir("001-scf")
+    asked = []
+    monkeypatch.setattr(
+        "vaspen.ui.project_panel.QMessageBox.question",
+        staticmethod(lambda *a, **k: asked.append(True) or QMessageBox.Yes))
+    deleted = []
+    panel.run_deleted.connect(deleted.append)
+    panel._on_delete_run("001-scf")
+    assert asked
+    assert project.runs == []
+    assert not run_dir.exists()
+    assert deleted == ["001-scf"]
+
+
+def test_delete_run_declined_keeps_run(window, project, monkeypatch):
+    window._adopt_project(project)
+    panel = window._project_panel
+    monkeypatch.setattr(
+        "vaspen.ui.project_panel.QMessageBox.question",
+        staticmethod(lambda *a, **k: QMessageBox.No))
+    panel._on_delete_run("001-scf")
+    assert project.runs  # still registered
+
+
+def test_delete_active_run_refused(window, project, monkeypatch):
+    window._adopt_project(project)
+    project.set_run_status("001-scf", "submitted")
+    warned = []
+    monkeypatch.setattr(
+        "vaspen.ui.project_panel.QMessageBox.warning",
+        staticmethod(lambda *a, **k: warned.append(True) or QMessageBox.Ok))
+    window._project_panel._on_delete_run("001-scf")
+    assert warned
+    assert project.runs  # untouched

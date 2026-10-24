@@ -483,6 +483,18 @@ my-project/
   validated panels. Right-click a run to change its status
   (inputs-ready → submitted → running → done / failed). Statuses are
   labels — VASPen never parses VASP output files.
+- **Create runs straight from the Generate All dialog**: pick
+  "Current project (new run)" at the bottom (an editable run name is
+  provided) and click Generate — the structure (for NEB: both
+  endpoints) is registered into the project automatically and the run
+  with all its input files appears in the panel. The NEB page's two
+  endpoints can also be loaded via "From Project...", picking one of
+  the registered structures. "Folder" keeps the old behavior (write
+  to any directory).
+- **Right-click → Delete Run...** removes the run together with its
+  whole directory (inputs, frames and outputs — not undoable; you are
+  asked to confirm first). Runs marked submitted / running are
+  refused — change their status first.
 - Each run carries a `run.json` provenance card: which structure and
   parameters generated it, and by which VASPen version.
 - Double-click a **file** under a run: structure files open in the 3D view, text files (INCAR, OSZICAR, OUTCAR, …) open in a built-in read-only viewer, binaries reveal in Explorer. AI clients can read run files too (`read_run_file`).

@@ -748,6 +748,10 @@ Initialize a new project here?</source>
             <source>Run created: {}</source>
             <translation>已创建计算：{}</translation>
         </message>
+        <message>
+            <source>Run deleted: {}</source>
+            <translation>已删除计算：{}</translation>
+        </message>
     <message><source>&amp;Re-box Slab...</source><translation>重新装盒(&amp;R)...</translation></message><message><source>Re-apply the vacuum of a structure that already carries it (e.g. a cut surface)</source><translation>重新施加已有结构的真空层(例如切面)</translation></message><message><source>Re-box Slab</source><translation>重新装盒</translation></message><message><source>Re-boxing requires a periodic structure (a full-rank cell with periodic boundary conditions).</source><translation>重新装盒需要周期结构（满秩晶胞且具有周期性边界条件）。</translation></message><message><source>Slab re-boxed (vacuum along c).</source><translation>已重新装盒切面（真空沿 c 方向）。</translation></message><message><source>Creating a supercell</source><translation>创建超胞</translation></message><message><source>Load a bulk structure before cleaving a surface.</source><translation>解理表面前请先加载一个体相结构。</translation></message><message><source>No Structure</source><translation>没有结构</translation></message><message><source>Partial Occupancy</source><translation>部分占据</translation></message><message><source>Symmetry</source><translation>对称性</translation></message><message><source>This structure has partial occupancy (disorder).
 The VASP POSCAR format does not support fractional occupancy — the saved file will contain only the dominant species per site and the composition information will be lost.
 
@@ -2542,6 +2546,30 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         <message>
             <source>Show in Explorer</source>
             <translation>在资源管理器中显示</translation>
+        </message>
+        <message>
+            <source>Delete Run...</source>
+            <translation>删除计算...</translation>
+        </message>
+        <message>
+            <source>Delete Run</source>
+            <translation>删除计算</translation>
+        </message>
+        <message>
+            <source>Run {} is {} — refusing to delete it. Set its status to inputs-ready/done/failed first.</source>
+            <translation>计算 {} 状态为 {}——拒绝删除。请先把状态改为 inputs-ready/done/failed。</translation>
+        </message>
+        <message>
+            <source>Delete run {} and its whole directory?
+
+{}</source>
+            <translation>删除计算 {} 及其整个目录？
+
+{}</translation>
+        </message>
+        <message>
+            <source>The run already contains calculation outputs — they will be deleted with it.</source>
+            <translation>该计算已包含 VASP 输出文件——将一并删除。</translation>
         </message>
     </context>
 

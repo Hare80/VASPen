@@ -812,6 +812,9 @@ class MainWindow(QMainWindow):
             self._on_run_status_change)
         self._project_panel.run_parameters_requested.connect(
             self._on_run_parameters)
+        self._project_panel.run_deleted.connect(
+            lambda run_id: self._set_status(
+                self.tr("Run deleted: {}").format(run_id)))
         self._project_panel.file_open_requested.connect(
             self._on_open_text_file)
         self._project_panel.add_current_structure_requested.connect(

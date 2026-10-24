@@ -43,15 +43,17 @@ class _FakeGenerateAllDialog(QObject):
     """
 
     finished = Signal(int)
+    run_created = Signal(str)
     constructed: list = []
 
     def __init__(self, structure, parent=None, preview_callback=None,
-                 default_task="scf"):
+                 default_task="scf", project_provider=None):
         super().__init__()
         type(self).constructed.append({
             "structure": structure,
             "preview_callback": preview_callback,
             "default_task": default_task,
+            "project_provider": project_provider,
         })
 
     def show(self):
@@ -622,6 +624,9 @@ def test_generate_all_wraps_molecule_before_dialog(window, monkeypatch, water_mo
     # bound-method identity: same underlying function on the same window
     assert call["preview_callback"] == window._preview_image_atoms
     assert call["default_task"] == window._config.default_calc_type
+    # project wiring: a callable resolving the window's (absent) project
+    assert callable(call["project_provider"])
+    assert call["project_provider"]() is None
 
 
 def test_generate_all_wrap_cancel_blocks_dialog(window, monkeypatch, water_molecule):

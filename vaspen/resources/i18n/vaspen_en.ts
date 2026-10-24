@@ -738,6 +738,10 @@ Initialize a new project here?</translation>
       <translation>Run created: {}</translation>
     </message>
     <message>
+      <source>Run deleted: {}</source>
+      <translation>Run deleted: {}</translation>
+    </message>
+    <message>
       <source>&amp;Re-box Slab...</source>
       <translation>&amp;Re-box Slab...</translation>
     </message>
@@ -2660,6 +2664,30 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
     <message>
       <source>Show in Explorer</source>
       <translation>Show in Explorer</translation>
+    </message>
+    <message>
+      <source>Delete Run...</source>
+      <translation>Delete Run...</translation>
+    </message>
+    <message>
+      <source>Delete Run</source>
+      <translation>Delete Run</translation>
+    </message>
+    <message>
+      <source>Run {} is {} — refusing to delete it. Set its status to inputs-ready/done/failed first.</source>
+      <translation>Run {} is {} — refusing to delete it. Set its status to inputs-ready/done/failed first.</translation>
+    </message>
+    <message>
+      <source>Delete run {} and its whole directory?
+
+{}</source>
+      <translation>Delete run {} and its whole directory?
+
+{}</translation>
+    </message>
+    <message>
+      <source>The run already contains calculation outputs — they will be deleted with it.</source>
+      <translation>The run already contains calculation outputs — they will be deleted with it.</translation>
     </message>
   </context>
   
