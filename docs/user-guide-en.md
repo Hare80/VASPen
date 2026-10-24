@@ -474,10 +474,11 @@ my-project/
 
 - **File → New Project / Open Project** creates or opens a project;
   the **Project dock** shows a Structures group and a Runs group.
-- Double-click a structure (or a run) to open it in the 3D view;
-  right-click a run to open its **Parameters dialog** (full
-  provenance card, editable preset / functional / KPOINTS / INCAR
-  overrides, and a Regenerate button) or to change its status
+- **Double-click a run** to open its **input editor** — the same
+  INCAR / KPOINTS panels as the Generate dialog, loaded from the
+  run's actual files; Apply writes them back (what you see is what
+  is written). Raw file text stays read-only; changes go through the
+  validated panels. Right-click a run to change its status
   (inputs-ready → submitted → running → done / failed). Statuses are
   labels — VASPen never parses VASP output files.
 - Each run carries a `run.json` provenance card: which structure and

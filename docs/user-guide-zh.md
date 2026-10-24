@@ -398,11 +398,11 @@ my-project/
 
 - **文件 → 新建项目 / 打开项目** 创建或打开项目;**项目面板**显示
   "结构"和"计算"两组。
-- 双击结构(或计算)即在三维视图中打开;右键点击计算可打开**参数
-  对话框**(完整溯源卡,可编辑 preset / 泛函 / KPOINTS / INCAR 覆盖项,
-  并一键重新生成输入文件),也可修改状态(inputs-ready → submitted →
-  running → done / failed)。状态只是标签——VASPen 绝不解析 VASP
-  输出文件。
+- **双击计算**打开其**输入文件编辑器**——与生成对话框完全相同的
+  INCAR / KPOINTS 面板,从计算的实际文件装载;点"应用"即写回(所见即
+  所写)。文件原文保持只读;修改一律走带校验的面板。右键点击计算可
+  修改状态(inputs-ready → submitted → running → done / failed)。状态
+  只是标签——VASPen 绝不解析 VASP 输出文件。
 - 每个计算带有一张 `run.json` 溯源卡:由哪个结构、什么参数、哪个
   VASPen 版本生成。
 - 双击计算下的**文件**:结构文件在三维视图中打开,文本文件(INCAR、OSZICAR、OUTCAR 等)在内置只读查看器中打开,二进制文件在资源管理器中显示。AI 客户端同样可以读取 run 文件(read_run_file)。
