@@ -109,11 +109,13 @@ Any closed dock can be re-opened from the View menu.
 
 ### Welcome page
 
-When no structure is loaded, a welcome page shows recent files and
-buttons for New Structure / Open / Browse. **Click selects a recent
-file; double-click (or Enter) opens it**; Open opens the selected
-file; Browse opens the standard file dialog. You can also drag & drop
-a file onto the window at any time.
+When no structure is loaded, a welcome page shows a **projects
+section** (recent projects — click selects, double-click or Enter
+opens — plus New Project... / Open Project... buttons) above the
+recent files. **Click selects a recent file; double-click (or Enter)
+opens it**; Open opens the selected file; Browse opens the standard
+file dialog. You can also drag & drop a file onto the window at any
+time.
 
 ## 6. 3D Viewport
 
