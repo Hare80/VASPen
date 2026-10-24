@@ -1,10 +1,12 @@
 """Welcome page widget tests (v0.2 2026-08-15).
 
-The page is the empty-state landing panel in the central stack:
+The page is the empty-state landing panel in the central stack: a
+recent-projects section (New/Open Project actions + list), a
 recent-files list (click selects, double-click/Enter opens), New
 Structure / Open (opens the SELECTED file) / Browse (file dialog)
-quick actions, and a drag-and-drop hint. No hardcoded colors, no own
-stylesheet — it must compose purely from the theme palette/QSS.
+quick actions, and a drag-and-drop hint. Both lists share the same
+interaction rules. No hardcoded colors, no own stylesheet — it must
+compose purely from the theme palette/QSS.
 """
 
 from __future__ import annotations
@@ -107,3 +109,65 @@ def test_language_change_retranslates_without_crashing(qtbot):
     assert page._title.text() == "VASPen"
     assert page._dbl_hint.text() == "Double-click to open a file"
     assert page._browse_btn.text() == "Browse..."
+    assert page._recent_projects_label.text() == "Recent Projects"
+    assert page._new_project_btn.text() == "New Project..."
+
+
+# ----------------------------------------------------------------------
+# Recent projects
+# ----------------------------------------------------------------------
+
+
+def test_empty_projects_show_hint_instead_of_list(qtbot):
+    page = WelcomePage()
+    qtbot.addWidget(page)
+    page.set_recent_projects([])
+    assert page._project_list.isHidden()
+    assert not page._no_projects_label.isHidden()
+
+
+def test_projects_fill_list_with_tooltips_and_data(qtbot):
+    page = WelcomePage()
+    qtbot.addWidget(page)
+    page.set_recent_projects(["D:/calc/demo-a"])
+    assert not page._project_list.isHidden()
+    assert page._no_projects_label.isHidden()
+    assert page._project_list.count() == 1
+    item = page._project_list.item(0)
+    assert item.text() == "demo-a"
+    assert item.toolTip() == "D:/calc/demo-a"
+    assert (item.data(Qt.ItemDataRole.UserRole)
+            == "D:/calc/demo-a")
+
+
+def test_project_activated_emits_open_project_requested(qtbot):
+    """itemActivated = double-click OR Enter."""
+    page = WelcomePage()
+    qtbot.addWidget(page)
+    page.set_recent_projects(["D:/calc/demo-a"])
+    opened = []
+    page.open_project_requested.connect(opened.append)
+    page._on_project_activated(page._project_list.item(0))
+    assert opened == ["D:/calc/demo-a"]
+
+
+def test_project_refresh_preserves_selection(qtbot):
+    page = WelcomePage()
+    qtbot.addWidget(page)
+    page.set_recent_projects(["D:/p/alpha", "D:/p/beta"])
+    page._project_list.setCurrentRow(1)
+    page.set_recent_projects(["D:/p/beta", "D:/p/gamma"])
+    assert (page._project_list.currentItem().data(
+        Qt.ItemDataRole.UserRole) == "D:/p/beta")
+
+
+def test_project_buttons_emit_requests(qtbot):
+    page = WelcomePage()
+    qtbot.addWidget(page)
+    new_calls = []
+    browse_calls = []
+    page.new_project_requested.connect(lambda: new_calls.append(1))
+    page.browse_project_requested.connect(lambda: browse_calls.append(1))
+    page._new_project_btn.click()
+    page._browse_project_btn.click()
+    assert new_calls and browse_calls

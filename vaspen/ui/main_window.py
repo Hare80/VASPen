@@ -709,6 +709,7 @@ class MainWindow(QMainWindow):
         # The recent menu was built before the welcome page existed —
         # seed the list here.
         self._welcome_page.set_recent_files(self._config.recent_files)
+        self._welcome_page.set_recent_projects(self._config.recent_projects)
 
     def _update_welcome_visibility(self) -> None:
         """Show the welcome page while the model is empty, the viewport
@@ -798,6 +799,11 @@ class MainWindow(QMainWindow):
         self._welcome_page.new_requested.connect(self._on_new)
         self._welcome_page.open_requested.connect(self._on_welcome_open)
         self._welcome_page.browse_requested.connect(self._on_open)
+        self._welcome_page.new_project_requested.connect(self._on_new_project)
+        self._welcome_page.browse_project_requested.connect(
+            self._on_open_project)
+        self._welcome_page.open_project_requested.connect(
+            self._open_project_path)
         # Project panel (§7.15)
         self._project_panel.structure_open_requested.connect(
             self._open_file)
@@ -945,6 +951,7 @@ class MainWindow(QMainWindow):
         self._config.add_recent_project(str(project.root))
         self._config.last_directory = str(project.root)
         self._update_recent_projects_menu()
+        self._welcome_page.set_recent_projects(self._config.recent_projects)
         self._sync_project_tools()
         logger.info("Project adopted: %s", project.root)
 

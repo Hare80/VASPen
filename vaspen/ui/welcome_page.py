@@ -1,11 +1,13 @@
 """Welcome page — shown in the central stack when no structure is loaded.
 
-Standard layout: title, tagline, a recent-files list (click selects,
+Standard layout: title, tagline, a recent-projects section (New/Open
+Project quick actions + list), a recent-files list (click selects,
 double-click/Enter opens), New Structure / Open / Browse buttons, and
-a drag-and-drop hint. All strings live in the "WelcomePage" i18n
-context (enforced by tests/test_i18n.py); the widget is persistent
-(never destroyed), so it implements changeEvent/_retranslate per
-CLAUDE.md §11.2.
+a drag-and-drop hint. Both recent lists share the same interaction
+rules (click selects, double-click/Enter opens). All strings live in
+the "WelcomePage" i18n context (enforced by tests/test_i18n.py); the
+widget is persistent (never destroyed), so it implements
+changeEvent/_retranslate per CLAUDE.md §11.2.
 
 No stylesheet, no hardcoded colors — the theme's palette + QSS rules
 style every widget here (CLAUDE.md §7.9); the title uses a code-level
@@ -32,14 +34,22 @@ from PySide6.QtWidgets import (
 #: to spare; the page stretches the rest as empty space).
 _LIST_MAX_HEIGHT = 260
 
+#: Maximum height of the recent-projects list (the projects section
+#: sits above the files one, so it stays more compact — 5 entries).
+_PROJECT_LIST_MAX_HEIGHT = 140
+
 
 class WelcomePage(QWidget):
-    """Empty-state landing page with recent files and quick actions."""
+    """Empty-state landing page with recent projects/files and quick
+    actions."""
 
     open_file_requested = Signal(str)   # full path (double-click / Enter)
     new_requested = Signal()
     open_requested = Signal()           # open the SELECTED recent file
     browse_requested = Signal()         # file dialog
+    new_project_requested = Signal()
+    browse_project_requested = Signal()  # project directory dialog
+    open_project_requested = Signal(str)  # project root (recent list)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -64,6 +74,44 @@ class WelcomePage(QWidget):
         layout.addWidget(tagline)
 
         layout.addSpacing(18)
+
+        recent_projects_label = QLabel(self.tr("Recent Projects"), self)
+        recent_projects_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(recent_projects_label)
+        self._recent_projects_label = recent_projects_label
+
+        self._project_list = QListWidget(self)
+        self._project_list.setMaximumHeight(_PROJECT_LIST_MAX_HEIGHT)
+        self._project_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Same interaction as the files list: click selects only,
+        # double-click / Enter open (itemActivated).
+        self._project_list.itemActivated.connect(self._on_project_activated)
+        layout.addWidget(self._project_list)
+
+        self._no_projects_label = QLabel(
+            self.tr("(No recent projects)"), self)
+        self._no_projects_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self._no_projects_label)
+        self._no_projects_label.hide()  # default: list visible
+
+        project_btn_row = QHBoxLayout()
+        project_btn_row.addStretch()
+        self._new_project_btn = QPushButton(self.tr("New Project..."), self)
+        self._new_project_btn.clicked.connect(
+            lambda checked=False: self.new_project_requested.emit())
+        project_btn_row.addWidget(self._new_project_btn)
+        self._browse_project_btn = QPushButton(
+            self.tr("Open Project..."), self)
+        self._browse_project_btn.setToolTip(
+            self.tr("Choose a project folder"))
+        self._browse_project_btn.clicked.connect(
+            lambda checked=False: self.browse_project_requested.emit())
+        project_btn_row.addWidget(self._browse_project_btn)
+        project_btn_row.addStretch()
+        layout.addLayout(project_btn_row)
+
+        layout.addSpacing(14)
 
         recent_label = QLabel(self.tr("Recent Files"), self)
         recent_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -165,6 +213,36 @@ class WelcomePage(QWidget):
             item.data(Qt.ItemDataRole.UserRole))
 
     # ------------------------------------------------------------------
+    # Recent projects
+    # ------------------------------------------------------------------
+
+    def set_recent_projects(self, projects: list[str]) -> None:
+        """Fill the recent-projects list (folder name + full-path
+        tooltip). Same interaction and refresh rules as the
+        recent-files list: a prior selection is preserved by path
+        (live refreshes — language switch, opening a project — must
+        not silently drop the user's selection)."""
+        current = self._project_list.currentItem()
+        selected = (current.data(Qt.ItemDataRole.UserRole)
+                    if current is not None else None)
+        self._project_list.clear()
+        for fp in projects:
+            item = QListWidgetItem(Path(fp).name)
+            item.setToolTip(fp)
+            item.setData(Qt.ItemDataRole.UserRole, fp)
+            self._project_list.addItem(item)
+            if selected is not None and fp == selected:
+                self._project_list.setCurrentItem(item)
+        has_projects = bool(projects)
+        self._project_list.setVisible(has_projects)
+        self._no_projects_label.setVisible(not has_projects)
+
+    def _on_project_activated(self, item: QListWidgetItem) -> None:
+        # itemActivated = double-click OR Enter.
+        self.open_project_requested.emit(
+            item.data(Qt.ItemDataRole.UserRole))
+
+    # ------------------------------------------------------------------
     # i18n (persistent widget — re-applied on live language switch)
     # ------------------------------------------------------------------
 
@@ -176,6 +254,12 @@ class WelcomePage(QWidget):
     def _retranslate(self) -> None:
         self._title.setText(self.tr("VASPen"))
         self._tagline.setText(self.tr("Visual structure modeling for VASP"))
+        self._recent_projects_label.setText(self.tr("Recent Projects"))
+        self._no_projects_label.setText(self.tr("(No recent projects)"))
+        self._new_project_btn.setText(self.tr("New Project..."))
+        self._browse_project_btn.setText(self.tr("Open Project..."))
+        self._browse_project_btn.setToolTip(
+            self.tr("Choose a project folder"))
         self._recent_label.setText(self.tr("Recent Files"))
         self._dbl_hint.setText(self.tr("Double-click to open a file"))
         self._no_recent_label.setText(self.tr("(No recent files)"))

@@ -2381,6 +2381,26 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         <translation>面向 VASP 的可视化结构建模</translation>
     </message>
     <message>
+        <source>Recent Projects</source>
+        <translation>最近项目</translation>
+    </message>
+    <message>
+        <source>(No recent projects)</source>
+        <translation>（暂无最近项目）</translation>
+    </message>
+    <message>
+        <source>New Project...</source>
+        <translation>新建项目...</translation>
+    </message>
+    <message>
+        <source>Open Project...</source>
+        <translation>打开项目...</translation>
+    </message>
+    <message>
+        <source>Choose a project folder</source>
+        <translation>选择项目文件夹</translation>
+    </message>
+    <message>
         <source>Recent Files</source>
         <translation>最近文件</translation>
     </message>

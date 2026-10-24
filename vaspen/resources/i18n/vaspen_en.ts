@@ -2499,6 +2499,26 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <translation>Visual structure modeling for VASP</translation>
     </message>
     <message>
+      <source>Recent Projects</source>
+      <translation>Recent Projects</translation>
+    </message>
+    <message>
+      <source>(No recent projects)</source>
+      <translation>(No recent projects)</translation>
+    </message>
+    <message>
+      <source>New Project...</source>
+      <translation>New Project...</translation>
+    </message>
+    <message>
+      <source>Open Project...</source>
+      <translation>Open Project...</translation>
+    </message>
+    <message>
+      <source>Choose a project folder</source>
+      <translation>Choose a project folder</translation>
+    </message>
+    <message>
       <source>Recent Files</source>
       <translation>Recent Files</translation>
     </message>
