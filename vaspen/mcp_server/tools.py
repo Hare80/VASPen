@@ -1016,6 +1016,7 @@ def _run_namespace() -> dict:
     ns = dict(_RUN_NAMESPACE)
     ns["session"] = SESSION
     ns["model"] = SESSION.model
+    ns["PROJECT_REF"] = PROJECT_REF  # per-call: bridge swaps this
     return ns
 
 
@@ -1027,9 +1028,11 @@ def run_python(code: str) -> dict:
 
     Predefined names: session (the ServerSession), model (the current
     StructureModel — refreshed on every call; mutate it through its
-    methods and every other tool sees the change), np/numpy, ase, Atoms,
-    FileIO, StructureBuilder, SurfaceCutter, rebox_slab, symmetry,
-    transform, neb, measure, vasp_input. print() output is captured;
+    methods and every other tool sees the change), PROJECT_REF (the
+    current project holder — PROJECT_REF.get() returns the open
+    Project), np/numpy, ase, Atoms, FileIO, StructureBuilder,
+    SurfaceCutter, rebox_slab, symmetry, transform, neb, measure,
+    vasp_input. print() output is captured;
     the value of the LAST expression is returned as "result" (e.g. end
     with `model.n_atoms` to read a value).
 

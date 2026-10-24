@@ -494,7 +494,8 @@ def test_run_python_can_be_disabled(tmp_path, si_bulk):
 
 def test_stdio_subprocess_protocol():
     repo_root = str(Path(__file__).resolve().parent.parent)
-    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen",
+           "VASPEN_HEADLESS": "1"}
     proc = subprocess.Popen(
         [sys.executable, "-m", "vaspen.mcp_server"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -561,7 +562,8 @@ def test_stdio_subprocess_image_content(tmp_path):
     """Over the wire, render_preview must deliver native image content
     (not base64-in-text) after open_structure."""
     repo_root = str(Path(__file__).resolve().parent.parent)
-    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen",
+           "VASPEN_HEADLESS": "1"}
     si = tmp_path / "si.vasp"
     _si_diamond_cubic().write(si, format="vasp")
     proc = subprocess.Popen(

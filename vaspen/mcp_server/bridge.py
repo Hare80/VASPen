@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import socket
 
 from mcp.server.mcpserver import Image
@@ -55,6 +56,8 @@ def forward(tool: str, args: dict):
     tool result (dict, or Image for renders). Raises ``ToolError`` with
     the GUI-side message when the tool fails there.
     """
+    if os.environ.get("VASPEN_HEADLESS"):
+        return UNAVAILABLE  # per-client opt-out from live forwarding
     config = AppConfig()
     port = config.bridge_port
     token = config.bridge_token
