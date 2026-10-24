@@ -844,10 +844,12 @@ def neb_check(initial_path: str, final_path: str) -> dict:
 
 
 @tool
-def neb_setup(initial_path: str, final_path: str, out_dir: str,
+def neb_setup(initial_path: str, final_path: str,
+              out_dir: str | None = None,
               n_images: int | None = None, method: str = "linear",
               force: bool = False, potcar_library: str | None = None,
-              functional: str = "PBE") -> dict:
+              functional: str = "PBE",
+              run_name: str | None = None) -> dict:
     """Prepare a complete standard-layout NEB run directory:
     00/POSCAR ... 0N/POSCAR (endpoints included, Selective dynamics
     carried) plus INCAR (neb preset, IMAGES filled), KPOINTS (automatic
@@ -857,6 +859,11 @@ def neb_setup(initial_path: str, final_path: str, out_dir: str,
     in every frame; a frozen atom at different positions in the two
     files blocks interpolation. A detected atom-order mismatch refuses
     to write unless force=true.
+
+    Pass exactly ONE destination: out_dir (a bare directory, not
+    tracked by any project) or run_name (creates a run in the open
+    project — both endpoints are registered as project structures and
+    the provenance card records method/n_images/final_structure).
 
     Args:
         initial_path, final_path: Endpoint structure files.
@@ -869,10 +876,16 @@ def neb_setup(initial_path: str, final_path: str, out_dir: str,
         potcar_library: Pseudopotential library root; defaults to the
             GUI-configured path.
         functional: XC functional for POTCAR.
+        run_name: Create the NEB run in the open project under this
+            name (mutually exclusive with out_dir).
     """
     with SESSION.lock:
         if method not in ("linear", "idpp"):
             raise ValueError('method must be "linear" or "idpp".')
+        if (out_dir is None) == (run_name is None):
+            raise ValueError(
+                "Pass exactly one of out_dir (bare directory) or "
+                "run_name (creates a run in the open project).")
         init, final = _load_neb_pair(initial_path, final_path)
         distance = neb.neb_distance(init, final)
         images = (int(n_images) if n_images is not None
@@ -895,8 +908,30 @@ def neb_setup(initial_path: str, final_path: str, out_dir: str,
             frames = neb.interpolate_neb(init, final, images,
                                          frozen_mask=frozen)
 
-
-        out = Path(out_dir)
+        entry = None
+        if run_name is not None:
+            project = _require_project()
+            # both endpoints become registered project structures so
+            # the run's provenance points at real registered files
+            init_id, init_digest = project.register_structure_file(
+                initial_path, formula=init.get_chemical_formula())
+            final_id, _fdigest = project.register_structure_file(
+                final_path, formula=final.get_chemical_formula())
+            params = {
+                "preset": "neb",
+                "kpoints_mode": "automatic",
+                "functional": functional,
+                "method": method,
+                "n_images": images,
+                "final_structure": final_id,
+            }
+            entry = project.add_run(run_name, "neb", params,
+                                    structure_id=init_id,
+                                    structure_digest=init_digest,
+                                    via="mcp")
+            out = project.run_dir(entry["id"])
+        else:
+            out = Path(out_dir)
         written: list[str] = []
         for idx, frame in enumerate(frames):
             target = out / f"{idx:02d}" / "POSCAR"
@@ -941,6 +976,9 @@ def neb_setup(initial_path: str, final_path: str, out_dir: str,
             "files_written": written,
             "incar": str(out / "INCAR"),
         }
+        if entry is not None:
+            response["run"] = {
+                k: v for k, v in entry.items() if k != "card"}
         if potcar_note:
             response["potcar_note"] = potcar_note
         return response
@@ -1229,6 +1267,22 @@ def set_run_status(run_id: str, status: str) -> dict:
     project = _require_project()
     entry = project.set_run_status(run_id, status)
     return {"ok": True, "run": entry}
+
+
+@tool
+def delete_run(run_id: str, force: bool = False) -> dict:
+    """Delete a run from the open project — removes the manifest entry
+    AND the whole runs/<id>/ directory (inputs, NEB frames and
+    calculation outputs alike; NOT undoable). A run marked
+    submitted/running is refused unless force=true.
+
+    Args:
+        run_id: Run id from the project (see get_project).
+        force: Delete even when the run is submitted/running.
+    """
+    project = _require_project()
+    project.remove_run(run_id, force=force)
+    return {"ok": True, "deleted": run_id}
 
 
 @tool

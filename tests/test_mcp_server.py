@@ -420,6 +420,65 @@ def test_neb_setup_method_guard(tmp_path, vacancy_hop_pair):
                              method="spiral")
 
 
+def test_neb_setup_run_name_creates_project_run(tmp_path,
+                                                vacancy_hop_pair):
+    pi, pf = vacancy_hop_pair
+    init_p, final_p = _write_pair(tmp_path, pi, pf)
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    result = mcp_server.neb_setup(init_p, final_p, n_images=2,
+                                  run_name="o diffusion")
+    run_id = result["run"]["id"]
+    assert run_id == "001-o-diffusion"
+    entry = project.run_entry(run_id)
+    assert entry["type"] == "neb"
+    run_dir = project.run_dir(run_id)
+    for idx in range(4):
+        assert (run_dir / f"{idx:02d}" / "POSCAR").exists()
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["generated_by"]["via"] == "mcp"
+    assert card["parameters"]["n_images"] == 2
+    assert card["parameters"]["method"] == "linear"
+    assert card["parameters"]["final_structure"]
+    assert len(project.structures) == 2  # both endpoints registered
+    assert "IMAGES" in (run_dir / "INCAR").read_text()
+
+
+def test_neb_setup_destination_exclusive(tmp_path, vacancy_hop_pair):
+    pi, pf = vacancy_hop_pair
+    init_p, final_p = _write_pair(tmp_path, pi, pf)
+    with pytest.raises(ToolError, match="exactly one"):
+        mcp_server.neb_setup(init_p, final_p)  # neither destination
+    with pytest.raises(ToolError, match="exactly one"):
+        mcp_server.neb_setup(init_p, final_p, str(tmp_path / "neb"),
+                             run_name="x")  # both destinations
+
+
+def test_neb_setup_run_name_requires_project(tmp_path, vacancy_hop_pair):
+    pi, pf = vacancy_hop_pair
+    init_p, final_p = _write_pair(tmp_path, pi, pf)
+    with pytest.raises(ToolError, match="[Nn]o project"):
+        mcp_server.neb_setup(init_p, final_p, run_name="x")
+
+
+def test_delete_run_and_active_guard(tmp_path):
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    project.add_run("r", "scf", {}, "s", "sha256:x", "gui")
+    result = mcp_server.delete_run("001-r")
+    assert result == {"ok": True, "deleted": "001-r"}
+    assert project.runs == []
+    assert not (tmp_path / "proj" / "runs" / "001-r").exists()
+
+    project.add_run("active", "scf", {}, "s", "sha256:x", "gui")
+    project.set_run_status("001-active", "submitted")
+    with pytest.raises(ToolError, match="refusing"):
+        mcp_server.delete_run("001-active")
+    assert project.runs  # untouched
+    mcp_server.delete_run("001-active", force=True)
+    assert project.runs == []
+
+
 # ----------------------------------------------------------------------
 # Visualization / escape hatch
 # ----------------------------------------------------------------------
