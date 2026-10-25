@@ -247,6 +247,24 @@ def build_nuitka() -> None:
     print("Build complete → dist/main.dist/")
 
 
+def _tracked_examples() -> list[Path]:
+    """Git-TRACKED files under examples/ (release == repository).
+
+    Personal/untracked demo files that happen to sit in the working
+    tree (gitignored local structures) must never ship in the release
+    zip. Falls back to "everything under examples/" only outside a git
+    repository (e.g. building from an exported tarball).
+    """
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "examples"], cwd=str(ROOT),
+            capture_output=True, text=True, check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return sorted((ROOT / "examples").rglob("*"))
+    return [ROOT / rel for rel in listing.splitlines() if rel.strip()]
+
+
 def _bundle_release_files() -> None:
     """Copy LICENSE/docs/examples into dist/VASPen/.
 
@@ -258,8 +276,13 @@ def _bundle_release_files() -> None:
         dst = DIST_APP / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-    shutil.copytree(ROOT / "examples", DIST_APP / "examples",
-                    dirs_exist_ok=True)
+    (DIST_APP / "examples").mkdir(parents=True, exist_ok=True)
+    for src in _tracked_examples():
+        if not src.is_file():
+            continue  # git ls-files lists directories too
+        dst = DIST_APP / "examples" / src.relative_to(ROOT / "examples")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
 
 def _make_zip(version: str, with_mcp: bool = False) -> Path:

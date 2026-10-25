@@ -19,3 +19,10 @@ htmlcov/
 
 # ZCode local data
 .zcode/
+
+# Personal local demo files — never commit, never ship in releases
+# (build.py bundles only git-TRACKED examples/)
+examples/Fe3O4_100_slab.vasp
+examples/Fe3O4_magnetite.vasp
+examples/Fe3O4_magnetite.xyz
+examples/h2o.xyz
