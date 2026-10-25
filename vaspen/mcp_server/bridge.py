@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import socket
+import time
 
 from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
@@ -31,6 +32,9 @@ logger = logging.getLogger("vaspen.mcp.bridge")
 #: Loopback connect must be instant when the GUI is up; anything else
 #: reads as "no bridge" and falls back to headless execution.
 _CONNECT_TIMEOUT_S = 0.5
+#: Pause before the single connect retry (the GUI-startup race: the
+#: window exists but its bridge socket is not accepting yet).
+_RETRY_DELAY_S = 0.5
 
 #: Tool calls can be genuinely slow (slab cutting, IDPP); the GUI side
 #: enforces the same ceiling, so this only guards a dead connection.
@@ -55,6 +59,11 @@ def forward(tool: str, args: dict):
     Returns ``UNAVAILABLE`` when no bridge is reachable; otherwise the
     tool result (dict, or Image for renders). Raises ``ToolError`` with
     the GUI-side message when the tool fails there.
+
+    A refused connection is retried ONCE after a short pause: right
+    after the GUI starts, its bridge socket may not accept yet, and a
+    silent headless fallback here makes an AI believe it opened a
+    structure while the window shows nothing.
     """
     if os.environ.get("VASPEN_HEADLESS"):
         return UNAVAILABLE  # per-client opt-out from live forwarding
@@ -63,25 +72,35 @@ def forward(tool: str, args: dict):
     token = config.bridge_token
     if not port or not token:
         return UNAVAILABLE
-    try:
-        with socket.create_connection(("127.0.0.1", int(port)),
-                                      timeout=_CONNECT_TIMEOUT_S) as sock:
-            sock.settimeout(_READ_TIMEOUT_S)
-            request = json.dumps({"token": token, "tool": tool,
-                                  "args": args}) + "\n"
-            sock.sendall(request.encode("utf-8"))
-            buf = bytearray()
-            while not buf.endswith(b"\n"):
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                buf.extend(chunk)
-                if len(buf) > _MAX_RESPONSE_BYTES:
-                    raise ToolError("bridge response too large")
-    except (OSError, ValueError):
-        # Refused / stale port / GUI died mid-connect: no bridge here.
-        return UNAVAILABLE
-    if not buf:
+    response = None
+    for attempt in range(2):
+        buf: bytearray | None = None
+        try:
+            with socket.create_connection(
+                    ("127.0.0.1", int(port)),
+                    timeout=_CONNECT_TIMEOUT_S) as sock:
+                sock.settimeout(_READ_TIMEOUT_S)
+                request = json.dumps({"token": token, "tool": tool,
+                                      "args": args}) + "\n"
+                sock.sendall(request.encode("utf-8"))
+                buf = bytearray()
+                while not buf.endswith(b"\n"):
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        break
+                    buf.extend(chunk)
+                    if len(buf) > _MAX_RESPONSE_BYTES:
+                        raise ToolError("bridge response too large")
+        except (OSError, ValueError):
+            # Refused / stale port / GUI died mid-connect: no bridge
+            # here — retry once (GUI-startup race), then give up.
+            buf = None
+        if buf:
+            response = buf
+            break
+        if attempt == 0:
+            time.sleep(_RETRY_DELAY_S)
+    if response is None:
         return UNAVAILABLE
     # The request was already delivered — from here on a failure must
     # NOT fall back (the GUI may have executed a mutating tool already).

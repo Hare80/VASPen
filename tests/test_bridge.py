@@ -15,6 +15,7 @@ import base64
 import json
 import socket
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -306,3 +307,47 @@ def test_bridge_create_run_shows_in_panel(bridge_window, qtbot, tmp_path):
     from vaspen.core.project import Project as _Project
     on_disk = _Project.load(project.root)
     assert on_disk.run_entry(run_id)["status"] == "submitted"
+
+
+def test_forward_retries_once_when_bridge_not_accepting_yet(
+    monkeypatch,
+):
+    """GUI-startup race: the first connect is refused, the retry (one
+    pause later) reaches the bridge — forward must NOT silently fall
+    back to headless (the AI would believe it opened a structure while
+    the window shows nothing).
+
+    Pure-socket fake server (no Qt): bound but not listening at first —
+    connects are refused until the thread calls listen() after 0.3 s,
+    i.e. inside the 0.5 s retry window.
+    """
+    from vaspen.utils.config import AppConfig
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    # deliberately NOT listening yet — connect is refused for now
+
+    def _accept_later():
+        time.sleep(0.3)
+        srv.listen(1)
+        conn, _ = srv.accept()
+        with conn:
+            payload = json.loads(conn.recv(65536).decode("utf-8"))
+            response = json.dumps({
+                "ok": True,
+                "result": {"formula": "H2O", "echo": payload["tool"]},
+            }) + "\n"
+            conn.sendall(response.encode("utf-8"))
+
+    thread = threading.Thread(target=_accept_later, daemon=True)
+    thread.start()
+    monkeypatch.setattr(
+        AppConfig, "bridge_port", property(lambda self: port))
+    monkeypatch.setattr(
+        AppConfig, "bridge_token", property(lambda self: "tok"))
+
+    result = forward("open_structure", {"path": "x"})
+    assert result == {"formula": "H2O", "echo": "open_structure"}
+    thread.join(5)
+    srv.close()
