@@ -1971,3 +1971,17 @@ def test_symmetry_resets_filepath(window, monkeypatch, si_bulk):
     window._structure.load_atoms(si_bulk, "bulk.vasp")
     window._on_symmetry()
     assert window._structure.filepath is None
+
+
+def test_main_window_shrinkable_vertically(window, qtbot):
+    """Regression: the edit toolbar's wrapped heightForWidth pinned the
+    window's minimum height at ~871px — above short screens' usable
+    height, so dragging the window edges vertically did nothing."""
+    window.show()
+    qtbot.wait(50)
+    # pre-fix minimum was ~871 (theme-dependent ~670+ after the fix);
+    # the bound keeps >100px of shrink room below the old floor
+    assert window.minimumSizeHint().height() < 750
+    window.resize(1100, 700)
+    qtbot.wait(50)
+    assert window.size().height() == 700

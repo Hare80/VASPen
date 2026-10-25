@@ -508,7 +508,12 @@ class MainWindow(QMainWindow):
         # Id selector for the theme QSS: keeps these buttons flat
         # (overrides the popupMode="1" bordered-chooser rule).
         container.setObjectName("edit_toolbar")
-        flow = FlowLayout(container, margin=0, h_spacing=2, v_spacing=2)
+        # max_rows=2: without the cap the toolbar's heightForWidth at
+        # the window's minimum width wrapped ~20 buttons into a
+        # ~330px block and pinned the window's minimum height above
+        # what short screens offer — vertical resize was stuck.
+        flow = FlowLayout(container, margin=0, h_spacing=2, v_spacing=2,
+                          max_rows=2)
         self._edit_buttons: list[QToolButton] = []
 
         def add_action(act: QAction) -> None:

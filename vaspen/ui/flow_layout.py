@@ -21,11 +21,19 @@ class FlowLayout(QLayout):
         margin: int = 0,
         h_spacing: int = 4,
         v_spacing: int = 4,
+        max_rows: int | None = None,
     ) -> None:
         super().__init__(parent)
         self._items: list = []
         self._h_spacing = h_spacing
         self._v_spacing = v_spacing
+        # Height cap for heightForWidth: rows beyond the cap clip
+        # instead of pushing the parent window taller. A 20+-button
+        # toolbar wrapped at the main window's MINIMUM width once
+        # reported a ~330px required height, which pinned the whole
+        # window's minimum height above short screens' usable height —
+        # the window then could not be resized vertically at all.
+        self._max_rows = max_rows
         self.setContentsMargins(margin, margin, margin, margin)
 
     # ------------------------------------------------------------------
@@ -55,7 +63,20 @@ class FlowLayout(QLayout):
         return True
 
     def heightForWidth(self, width: int) -> int:
-        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+        height = self._do_layout(QRect(0, 0, width, 0), test_only=True)
+        if self._max_rows is not None:
+            height = min(height, self._capped_height())
+        return height
+
+    def _capped_height(self) -> int:
+        """Height of ``max_rows`` rows of the tallest item."""
+        margins = self.contentsMargins()
+        row = 0
+        for item in self._items:
+            row = max(row, item.sizeHint().height())
+        return (margins.top() + margins.bottom()
+                + self._max_rows * row
+                + (self._max_rows - 1) * self._v_spacing)
 
     def setGeometry(self, rect: QRect) -> None:
         super().setGeometry(rect)
