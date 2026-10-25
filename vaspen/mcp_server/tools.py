@@ -1247,6 +1247,15 @@ def create_run(name: str, preset: str = "scf",
             "files": files,
             "INCAR": contents["INCAR"],
         }
+        if preset == "neb" and "POSCAR" in files:
+            # NEB runs have no root POSCAR — the NN/ frame directories
+            # are the structures (same convention as neb_setup and
+            # write_run_inputs' neb branch). Build frames with neb_setup.
+            Path(files.pop("POSCAR")).unlink(missing_ok=True)
+            response["poscar_note"] = (
+                "NEB preset — no root POSCAR written; the frame "
+                "directories (00/…/0N) are the structures. Use neb_setup "
+                "to create them.")
         if "POTCAR" not in files and not library:
             response["potcar_note"] = (
                 "POTCAR not written — no pseudopotential library "

@@ -798,3 +798,22 @@ def test_update_run_neb_aware(tmp_path):
     for i in range(4):
         assert (run_dir / f"{i:02d}" / "POSCAR").read_text("utf-8") == \
             "frame"
+
+
+def test_create_run_neb_writes_no_root_poscar(tmp_path):
+    """NEB runs have no root POSCAR — frames (00/…/0N) are the
+    structures; create_run skips it and says so."""
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    mcp_server.add_structure_to_project()
+    run = mcp_server.create_run("nebish", preset="neb",
+                                incar_overrides={"IMAGES": "2"})
+    run_dir = Path(run["dir"])
+    assert not (run_dir / "POSCAR").exists()
+    assert "POSCAR" not in run["files"]
+    assert "neb_setup" in run["poscar_note"]
+    assert (run_dir / "INCAR").exists()
+    assert (run_dir / "KPOINTS").exists()
