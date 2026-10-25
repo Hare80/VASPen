@@ -483,6 +483,11 @@ my-project/
   validated panels. Right-click a run to change its status
   (inputs-ready → submitted → running → done / failed). Statuses are
   labels — VASPen never parses VASP output files.
+  The POTCAR tab lists one row per element — which pseudopotential
+  variant it uses, valence count and recommended cutoff; the
+  pseudo-hydrogen embedded in `*_h` transition-metal potentials is
+  flagged explicitly (pseudo-H) — it is not a real hydrogen of your
+  structure. NEB runs show Initial/Final structures in the info bar.
 - **Create runs straight from the Generate All dialog**: pick
   "Current project (new run)" at the bottom (an editable run name is
   provided) and click Generate — the structure (for NEB: both

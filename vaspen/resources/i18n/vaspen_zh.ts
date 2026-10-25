@@ -2667,6 +2667,42 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
             <source>Registered structure not found.</source>
             <translation>找不到登记的结构。</translation>
         </message>
+        <message>
+            <source>Initial: {}</source>
+            <translation>起点结构：{}</translation>
+        </message>
+        <message>
+            <source>Final: {}</source>
+            <translation>终点结构：{}</translation>
+        </message>
+        <message>
+            <source>Element</source>
+            <translation>元素</translation>
+        </message>
+        <message>
+            <source>Potential</source>
+            <translation>赝势</translation>
+        </message>
+        <message>
+            <source>Z(e)</source>
+            <translation>Z(e)</translation>
+        </message>
+        <message>
+            <source>ENMAX (eV)</source>
+            <translation>ENMAX (eV)</translation>
+        </message>
+        <message>
+            <source> + pseudo-H</source>
+            <translation> + 赝氢</translation>
+        </message>
+        <message>
+            <source>This potential embeds a pseudo-hydrogen (it fills the empty d-band) — not a real hydrogen in the structure.</source>
+            <translation>该赝势内嵌了赝氢（用于填充空 d 带）——不是结构中的真实氢。</translation>
+        </message>
+        <message>
+            <source>pseudo-H marks a pseudo-hydrogen embedded in an *_h potential (it fills the empty d-band) — it is not a real hydrogen in the structure.</source>
+            <translation>pseudo-H 表示 *_h 类赝势内嵌的赝氢（用于填充空 d 带）——不是结构中的真实氢。</translation>
+        </message>
     </context>
     <context>
         <name>StructurePickerDialog</name>

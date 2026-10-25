@@ -2784,6 +2784,42 @@ For BULK structures, use Calculate → Cleave Surface.</translation>
       <source>Registered structure not found.</source>
       <translation>Registered structure not found.</translation>
     </message>
+    <message>
+      <source>Initial: {}</source>
+      <translation>Initial: {}</translation>
+    </message>
+    <message>
+      <source>Final: {}</source>
+      <translation>Final: {}</translation>
+    </message>
+    <message>
+      <source>Element</source>
+      <translation>Element</translation>
+    </message>
+    <message>
+      <source>Potential</source>
+      <translation>Potential</translation>
+    </message>
+    <message>
+      <source>Z(e)</source>
+      <translation>Z(e)</translation>
+    </message>
+    <message>
+      <source>ENMAX (eV)</source>
+      <translation>ENMAX (eV)</translation>
+    </message>
+    <message>
+      <source> + pseudo-H</source>
+      <translation> + pseudo-H</translation>
+    </message>
+    <message>
+      <source>This potential embeds a pseudo-hydrogen (it fills the empty d-band) — not a real hydrogen in the structure.</source>
+      <translation>This potential embeds a pseudo-hydrogen (it fills the empty d-band) — not a real hydrogen in the structure.</translation>
+    </message>
+    <message>
+      <source>pseudo-H marks a pseudo-hydrogen embedded in an *_h potential (it fills the empty d-band) — it is not a real hydrogen in the structure.</source>
+      <translation>pseudo-H marks a pseudo-hydrogen embedded in an *_h potential (it fills the empty d-band) — it is not a real hydrogen in the structure.</translation>
+    </message>
   </context>
   <context>
     <name>StructurePickerDialog</name>

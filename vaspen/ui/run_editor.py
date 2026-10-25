@@ -18,6 +18,7 @@ import json
 from pathlib import Path
 
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -25,10 +26,13 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from vaspen.core.potcar_info import parse_potcar_sections
 from vaspen.core.project import Project, RUN_STATUSES
 from vaspen.core.vasp_input import parse_incar_content
 from vaspen.ui.incar_editor import IncarEditorPanel
@@ -47,6 +51,10 @@ class RunEditorDialog(QDialog):
         self._run_id = run_id
         self._entry = dict(project.run_entry(run_id))
         self._is_neb = self._entry.get("type") == "neb"
+        # for NEB runs the manifest's structure is the INITIAL endpoint;
+        # the final one is recorded on the card's parameters
+        self._final_structure = str(
+            project.run_parameters(run_id).get("final_structure") or "")
         # the registered structure powers panel estimates (k-mesh etc.)
         self._structure_model = None
         try:
@@ -69,15 +77,26 @@ class RunEditorDialog(QDialog):
 
         # one compact line — every pixel goes to the editor panels
         info_bar = QHBoxLayout()
-        self._type_label = QLabel(self.tr("Type: {}").format(
-            self._entry.get("type", "")))
-        self._structure_label = QLabel(self.tr("Structure: {}").format(
-            self._entry.get("structure", "")))
+        info_bar.addWidget(QLabel(self.tr("Type: {}").format(
+            self._entry.get("type", ""))))
+        if self._is_neb:
+            # a NEB run has TWO structures — naming one "the structure"
+            # would be misleading; the manifest entry is the initial
+            # endpoint, the final one lives on the provenance card
+            self._structure_label = QLabel(self.tr("Initial: {}").format(
+                self._entry.get("structure", "")))
+            self._final_label = QLabel(self.tr("Final: {}").format(
+                self._final_structure or "—"))
+            info_bar.addWidget(self._structure_label)
+            info_bar.addWidget(self._final_label)
+        else:
+            self._structure_label = QLabel(self.tr("Structure: {}").format(
+                self._entry.get("structure", "")))
+            self._final_label = None
+            info_bar.addWidget(self._structure_label)
         self._status_combo = QComboBox()
         for status in RUN_STATUSES:
             self._status_combo.addItem(status)  # canonical manifest values
-        info_bar.addWidget(self._type_label)
-        info_bar.addWidget(self._structure_label)
         info_bar.addStretch(1)
         info_bar.addWidget(QLabel(self.tr("Status:")))
         info_bar.addWidget(self._status_combo)
@@ -119,11 +138,56 @@ class RunEditorDialog(QDialog):
         self._potcar_info = QLabel("")
         self._potcar_info.setWordWrap(True)
         layout.addWidget(self._potcar_info)
+        # one row per POTCAR dataset section: which element uses which
+        # pseudopotential, its valence count and recommended cutoff
+        self._potcar_table = QTableWidget(0, 4)
+        self._potcar_table.setHorizontalHeaderLabels([
+            self.tr("Element"), self.tr("Potential"),
+            self.tr("Z(e)"), self.tr("ENMAX (eV)")])
+        self._potcar_table.verticalHeader().setVisible(False)
+        self._potcar_table.horizontalHeader().setStretchLastSection(True)
+        self._potcar_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        layout.addWidget(self._potcar_table, 1)
+        self._pseudo_note = QLabel("")
+        self._pseudo_note.setWordWrap(True)
+        self._pseudo_note.hide()
+        layout.addWidget(self._pseudo_note)
         regen = QPushButton(self.tr("Regenerate POTCAR (current library)"))
         regen.clicked.connect(self._on_regen_potcar)
         layout.addWidget(regen)
-        layout.addStretch(1)
         return page
+
+    def _fill_potcar_table(self, sections: list[dict]) -> None:
+        self._potcar_table.setRowCount(len(sections))
+        has_pseudo = False
+        for row, section in enumerate(sections):
+            element = section["elements"][0] if section["elements"] else "?"
+            if section["pseudo_h"]:
+                has_pseudo = True
+                item = QTableWidgetItem(element + self.tr(" + pseudo-H"))
+                item.setToolTip(self.tr(
+                    "This potential embeds a pseudo-hydrogen (it fills "
+                    "the empty d-band) — not a real hydrogen in the "
+                    "structure."))
+            else:
+                item = QTableWidgetItem(element)
+            self._potcar_table.setItem(row, 0, item)
+            self._potcar_table.setItem(
+                row, 1, QTableWidgetItem(section["variant"]))
+            self._potcar_table.setItem(row, 2, QTableWidgetItem(
+                f"{section['zval']:g}"
+                if section["zval"] is not None else "—"))
+            self._potcar_table.setItem(row, 3, QTableWidgetItem(
+                f"{section['enmax']:g}"
+                if section["enmax"] is not None else "—"))
+        self._potcar_table.setVisible(bool(sections))
+        self._pseudo_note.setVisible(has_pseudo)
+        if has_pseudo:
+            self._pseudo_note.setText(self.tr(
+                "pseudo-H marks a pseudo-hydrogen embedded in an *_h "
+                "potential (it fills the empty d-band) — it is not a "
+                "real hydrogen in the structure."))
 
     def _build_poscar_page(self) -> QWidget:
         page = QWidget()
@@ -200,10 +264,14 @@ class RunEditorDialog(QDialog):
             potcar_info += "\n" + self.tr(
                 "POTCAR present ({} KB)").format(
                 potcar.stat().st_size // 1024)
+            sections = parse_potcar_sections(
+                potcar.read_text("utf-8", errors="replace"))
+            self._fill_potcar_table(sections)
         else:
             potcar_info += "\n" + self.tr(
                 "No POTCAR — configure the library in Settings and "
                 "regenerate.")
+            self._potcar_table.hide()
         self._potcar_info.setText(potcar_info)
 
     # -- actions -----------------------------------------------------------

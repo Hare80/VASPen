@@ -1211,6 +1211,17 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   "Delete Run..." (confirm; warns when outputs exist); MCP:
   `delete_run` tool. Run numbers may be reused after deleting the
   highest-numbered run (hand-managed-folder semantics).
+- **POTCAR display (2026-10-25)**: the run editor's POTCAR tab lists
+  one row per dataset section — element, TITEL variant, ZVAL, ENMAX —
+  parsed by `core/potcar_info.parse_potcar_sections` (read-only).
+  Pseudo-hydrogen trap: `*_h` 3d potentials (Ti_h…Ni_h) embed an H
+  dataset INSIDE the element's section (two VRHFIN lines, two ZVAL
+  numbers) — the parser flags it (`pseudo_h` = H following another
+  element) and the UI renders " + pseudo-H"; it is never structure
+  hydrogen. NEB runs' info bar shows "Initial: X / Final: Y"
+  (Y = card `parameters.final_structure`) instead of one misleading
+  "Structure" — the manifest structure of a NEB run is the initial
+  endpoint.
 
 ---
 

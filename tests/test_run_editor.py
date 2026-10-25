@@ -140,3 +140,83 @@ def test_editor_neb_tabs_and_no_poscar_page(qtbot, project_with_runs):
     # the run's real NEB tags load (IMAGES from the file)
     content = dlg._incar_panel.content()
     assert "IMAGES" in content and "SPRING" in content
+
+
+# ----------------------------------------------------------------------
+# POTCAR page (per-element pseudopotentials, pseudo-H flagging)
+# ----------------------------------------------------------------------
+
+_FAKE_POTCAR = """\
+    TITEL  = PAW_PBE Fe_pv 06Sep2007
+    ZVAL   =  8.000
+    ENMAX  = 267.983 eV; the recommended cutoff
+    VRHFIN =Fe: 3d64s2
+    End of Dataset
+    TITEL  = PAW_PBE O 08Apr2002
+    ZVAL   =  6.000
+    ENMAX  = 400.000 eV
+    VRHFIN =O: 2s2 2p4
+    End of Dataset
+    TITEL  = PAW_PBE V_h 08Apr2002
+    ZVAL   =  9.019   1.000
+    ENMAX  = 177.443 eV
+    VRHFIN =V: 3d34s2
+    VRHFIN =H: 1s1
+    End of Dataset
+"""
+
+
+def test_potcar_page_lists_sections_and_flags_pseudo_h(
+        qtbot, project_with_runs):
+    run_dir = project_with_runs.run_dir("001-scf")
+    (run_dir / "POTCAR").write_text(_FAKE_POTCAR, encoding="utf-8")
+    dlg = RunEditorDialog(project_with_runs, "001-scf")
+    qtbot.addWidget(dlg)
+    table = dlg._potcar_table
+    assert table.rowCount() == 3
+    assert table.item(0, 0).text() == "Fe"
+    assert table.item(0, 1).text() == "Fe_pv"
+    assert table.item(0, 2).text() == "8"
+    assert table.item(0, 3).text() == "267.983"
+    assert table.item(1, 0).text() == "O"
+    # the V_h section embeds a pseudo-hydrogen — flagged, not read as
+    # structure hydrogen
+    assert table.item(2, 0).text() == "V + pseudo-H"
+    assert table.item(2, 1).text() == "V_h"
+    assert not dlg._pseudo_note.isHidden()
+
+
+def test_potcar_table_hidden_without_file(qtbot, project_with_runs):
+    dlg = RunEditorDialog(project_with_runs, "001-scf")
+    qtbot.addWidget(dlg)
+    assert dlg._potcar_table.isHidden()
+    assert dlg._pseudo_note.isHidden()
+
+
+# ----------------------------------------------------------------------
+# Info bar: NEB runs show Initial/Final, not one "structure"
+# ----------------------------------------------------------------------
+
+
+def test_neb_info_bar_shows_initial_and_final(qtbot, project_with_runs):
+    project = project_with_runs
+    s_id = project.structures[0]["id"]
+    project.update_run_parameters("002-neb", {"final_structure": s_id})
+    dlg = RunEditorDialog(project, "002-neb")
+    qtbot.addWidget(dlg)
+    assert dlg._structure_label.text() == f"Initial: {s_id}"
+    assert dlg._final_label.text() == f"Final: {s_id}"
+
+
+def test_neb_info_bar_final_missing_shows_placeholder(
+        qtbot, project_with_runs):
+    dlg = RunEditorDialog(project_with_runs, "002-neb")
+    qtbot.addWidget(dlg)
+    assert dlg._final_label.text() == "Final: —"
+
+
+def test_scf_info_bar_keeps_structure_label(qtbot, project_with_runs):
+    dlg = RunEditorDialog(project_with_runs, "001-scf")
+    qtbot.addWidget(dlg)
+    assert dlg._structure_label.text() == "Structure: si"
+    assert dlg._final_label is None
