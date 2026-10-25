@@ -204,6 +204,14 @@ pyside6-lrelease vaspen/resources/i18n/*.ts
 python scripts/build.py
 ```
 
+### Release hygiene
+
+Releases must contain **no personal data**: the build bundles only
+git-TRACKED files (local/untracked demo structures can never ship),
+and personal example files are gitignored. Before publishing, audit
+the zip and the pending git history for personal filenames, paths or
+project names — see CLAUDE.md §7.16 for the full policy.
+
 ## Roadmap
 
 - [x] Project skeleton & CLAUDE.md

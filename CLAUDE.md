@@ -1234,6 +1234,53 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   with the real directory name mapped beside the display label
   (MenuButton has no item data).
 
+### 7.16 Publish isolation — no personal data in pushes or releases
+(settled 2026-10-25 — do not re-litigate)
+
+**What is published (git push, GitHub release zips) must contain
+nothing of the owner's personal data: no calculation projects, no
+personal structure files, no user configuration, no real machine
+paths or project names.** Origin: the 2026-10-25 audit — an over-broad
+`git add` had swept three personal `examples/Fe3O4*` files into an
+unpushed commit (against an explicit "don't commit" instruction), and
+the PUBLISHED v0.3.0 zip had shipped them because the build copied
+the whole on-disk `examples/` directory. Both were scrubbed that day.
+
+Rules:
+
+- **Release ≡ repository.** `build.py` bundles only git-TRACKED
+  files (`_tracked_examples` via `git ls-files`; full-tree fallback
+  only outside a git repo). Anything gitignored or untracked in the
+  working tree can never reach a zip. Do not loosen this.
+- **Personal demo structures stay untracked + gitignored**
+  (`examples/Fe3O4_*.vasp`, `examples/Fe3O4_*.xyz`, `examples/h2o.xyz`
+  and any future personal file). Never `git add -A` over a worktree
+  that contains them — stage explicitly.
+- **User configuration never becomes a file in app/repo folders**:
+  QSettings (§7.4) resolves to the OS registry/INI store outside the
+  tree, so a running copy never writes user data (recent files,
+  projects, geometry) into `dist/` or the repo. Keep it that way.
+- **Code, tests and docs use neutral fabricated paths and names**
+  (`D:/calc/demo-a`), never real user paths or real project names
+  (the welcome-page tests once mirrored the owner's projects dir —
+  rewritten out of history).
+- **Pre-publish audit (every release; before any push that touched
+  `examples/` or docs):** (1) audit the zip for personal filenames;
+  (2) `git grep` the tracked tree for personal patterns (user name,
+  real paths, project names); (3) pickaxe the unpushed range
+  (`git log origin/main..HEAD -S"<pattern>"`) — if anything leaked
+  into unpushed history, REWRITE that range before pushing
+  (established: `git filter-branch --tree-filter` over
+  `origin/main..HEAD`; also delete `refs/original/*` backups).
+  Pushed history is never rewritten without the owner's explicit
+  decision.
+- **A published release asset that leaks is the owner's call to
+  replace** — prepare the scrubbed local zip first (surgical
+  entry-removal keeps everything else byte-identical), then the owner
+  re-uploads on GitHub.
+- **Commit author identity is the owner's metadata** — agents never
+  scrub or alter it silently.
+
 ---
 
 ## 8. Default-Value Reference (community standards)
