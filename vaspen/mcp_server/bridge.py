@@ -75,6 +75,7 @@ def forward(tool: str, args: dict):
     response = None
     for attempt in range(2):
         buf: bytearray | None = None
+        sent = False
         try:
             with socket.create_connection(
                     ("127.0.0.1", int(port)),
@@ -83,6 +84,7 @@ def forward(tool: str, args: dict):
                 request = json.dumps({"token": token, "tool": tool,
                                       "args": args}) + "\n"
                 sock.sendall(request.encode("utf-8"))
+                sent = True
                 buf = bytearray()
                 while not buf.endswith(b"\n"):
                     chunk = sock.recv(65536)
@@ -91,10 +93,25 @@ def forward(tool: str, args: dict):
                     buf.extend(chunk)
                     if len(buf) > _MAX_RESPONSE_BYTES:
                         raise ToolError("bridge response too large")
-        except (OSError, ValueError):
-            # Refused / stale port / GUI died mid-connect: no bridge
-            # here — retry once (GUI-startup race), then give up.
+        except ToolError:
+            raise  # size cap: the request was delivered — never retry
+        except (OSError, ValueError) as exc:
+            if sent:
+                # The request was DELIVERED — a retry could re-execute
+                # a mutating tool and a headless fallback could apply
+                # it a second time. Surface the loss instead.
+                raise ToolError(
+                    f"bridge delivered {tool!r} but no response "
+                    f"arrived (GUI died or timed out): {exc}") from exc
+            # Refused / stale port / GUI died mid-connect: the request
+            # never went out — retry once (GUI-startup race).
             buf = None
+        if sent and not buf:
+            # Connection closed after delivery without a response —
+            # same never-retry rule as above.
+            raise ToolError(
+                f"bridge delivered {tool!r} but closed without a "
+                "response (the GUI may have executed it).")
         if buf:
             response = buf
             break

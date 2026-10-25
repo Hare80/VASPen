@@ -209,18 +209,15 @@ class RunEditorDialog(QDialog):
     # -- geometry ------------------------------------------------------------
 
     def _restore_geometry(self) -> None:
-        """Default 1100x800; remember the user's size across opens."""
-        from PySide6.QtCore import QSettings
-
-        geo = QSettings("VASPen", "VASPen").value("run_editor_geometry")
+        """Default 1100x800; remember the user's size across opens
+        (via AppConfig — the test suite isolates its QSettings)."""
+        geo = AppConfig().qt_settings().value("run_editor_geometry")
         if geo and self.restoreGeometry(geo):
             return
         self.resize(1100, 800)
 
     def closeEvent(self, event) -> None:
-        from PySide6.QtCore import QSettings
-
-        QSettings("VASPen", "VASPen").setValue(
+        AppConfig().qt_settings().setValue(
             "run_editor_geometry", self.saveGeometry())
         super().closeEvent(event)
 
@@ -299,10 +296,17 @@ class RunEditorDialog(QDialog):
             QMessageBox.warning(self, self.tr("Run: {}").format(
                 self._run_id), str(exc))
             return
-        (run_dir / "INCAR").write_text(incar + "\n", encoding="utf-8",
-                                       newline="\n")
-        (run_dir / "KPOINTS").write_text(kpoints + "\n", encoding="utf-8",
-                                         newline="\n")
+        try:
+            (run_dir / "INCAR").write_text(incar + "\n", encoding="utf-8",
+                                           newline="\n")
+            (run_dir / "KPOINTS").write_text(
+                kpoints + "\n", encoding="utf-8", newline="\n")
+        except OSError as exc:
+            # e.g. the run was deleted from the project panel while
+            # this editor stayed open
+            QMessageBox.critical(self, self.tr("Run: {}").format(
+                self._run_id), str(exc))
+            return
         self._project.set_run_status(
             self._run_id, self._status_combo.currentText())
         self._project.add_edition(self._run_id, "gui")
@@ -330,7 +334,7 @@ class RunEditorDialog(QDialog):
         if potcar.exists():
             for section in parse_potcar_sections(
                     potcar.read_text("utf-8", errors="replace")):
-                if section["elements"]:
+                if section["elements"] and section["variant"]:
                     variants[section["elements"][0]] = section["variant"]
         if not variants:
             variants = dict(self._project.run_parameters(
@@ -344,8 +348,12 @@ class RunEditorDialog(QDialog):
         except Exception as exc:
             QMessageBox.critical(self, self.tr("POTCAR"), str(exc))
             return
-        (self._project.run_dir(self._run_id) / "POTCAR").write_text(
-            content, encoding="utf-8", newline="\n")
+        try:
+            (run_dir / "POTCAR").write_text(
+                content, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            QMessageBox.critical(self, self.tr("POTCAR"), str(exc))
+            return
         if variants:
             self._project.update_run_parameters(
                 self._run_id, {"potcar_variants": variants})
@@ -363,7 +371,11 @@ class RunEditorDialog(QDialog):
         from vaspen.core.vasp_input import generate_poscar
 
         poscar = generate_poscar(self._structure_model)
-        (self._project.run_dir(self._run_id) / "POSCAR").write_text(
-            poscar, encoding="utf-8", newline="\n")
+        try:
+            (self._project.run_dir(self._run_id) / "POSCAR").write_text(
+                poscar, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            QMessageBox.critical(self, self.tr("POSCAR"), str(exc))
+            return
         self._project.add_edition(self._run_id, "gui")
         logger.info("POSCAR regenerated for run %s", self._run_id)

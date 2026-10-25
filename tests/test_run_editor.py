@@ -248,3 +248,41 @@ def test_regen_potcar_preserves_variants(qtbot, project_with_runs,
     assert "# Si_d_variant" in content
     card = json.loads((run_dir / "run.json").read_text("utf-8"))
     assert card["parameters"]["potcar_variants"] == {"Si": "Si_d"}
+
+
+def test_regen_poscar_rewrites_from_registered_structure(
+        qtbot, project_with_runs, monkeypatch):
+    project = project_with_runs
+    run_dir = project.run_dir("001-scf")
+    dlg = RunEditorDialog(project, "001-scf")
+    qtbot.addWidget(dlg)
+    before = len(project.run_entry("001-scf").get("edits", [])
+                 if "edits" in project.run_entry("001-scf") else [])
+    dlg._on_regen_poscar()
+    from vaspen.core.vasp_input import generate_poscar
+    expected = generate_poscar(dlg._structure_model)
+    assert (run_dir / "POSCAR").read_text("utf-8") == expected
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["edits"][-1]["via"] == "gui"
+
+
+def test_regen_poscar_missing_structure_errors(qtbot, tmp_path,
+                                               monkeypatch):
+    import shutil
+
+    criticals = []
+    monkeypatch.setattr(
+        "vaspen.ui.run_editor.QMessageBox.critical",
+        staticmethod(lambda *a, **k: criticals.append(a) or 1))
+    project = Project.create(tmp_path / "proj", "T")
+    f = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(f, format="vasp")
+    s_entry = project.add_structure(f)
+    project.add_run("scf", "scf", {}, s_entry["id"], "sha256:x", "gui")
+    project.structure_path(s_entry["id"]).unlink()
+    # the registered COPY inside structures/ is gone from disk
+    dlg = RunEditorDialog(project, "001-scf")
+    qtbot.addWidget(dlg)
+    dlg._on_regen_poscar()
+    assert criticals
+    assert not (project.run_dir("001-scf") / "POSCAR").exists()

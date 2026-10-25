@@ -34,8 +34,10 @@ def parse_potcar_sections(text: str) -> list[dict]:
         if line.startswith("TITEL"):
             if current is not None:
                 sections.append(current)
-            # "TITEL  = PAW_PBE Fe_pv 06Sep2007"
-            after = line.split("=", 1)[1].split()
+            # "TITEL  = PAW_PBE Fe_pv 06Sep2007"; tolerate malformed
+            # lines without '=' rather than crashing the caller
+            after = (line.split("=", 1)[1] if "=" in line
+                     else line[len("TITEL"):]).split()
             current = {
                 "functional": after[0] if after else "",
                 "variant": after[1] if len(after) > 1 else "",

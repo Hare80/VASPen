@@ -1176,3 +1176,33 @@ def test_endpoint_from_project_empty_project_infos(
     qtbot.addWidget(dlg)
     dlg._poscar_panel._fin_project_btn.click()
     assert infos
+
+
+def test_project_mode_neb_unsaved_initial_refused(qtbot, tmp_path,
+                                                  monkeypatch,
+                                                  vacancy_hop_pair):
+    """NEB project mode with an initial endpoint that has no source
+    FILE (unsaved viewport structure): refused before registering
+    anything."""
+    from vaspen.core.project import Project
+
+    infos = _record(monkeypatch, "information")
+    project = Project.create(tmp_path / "proj", "T")
+    model = StructureModel()
+    model.load_atoms(vacancy_hop_pair[0].copy())  # no filepath
+    fin = _write_poscar(vacancy_hop_pair[1].copy(),
+                        tmp_path / "final" / "POSCAR") \
+        if (tmp_path / "final").mkdir(exist_ok=True) is None else None
+    monkeypatch.setattr(
+        "vaspen.ui.generate_all_dialog.QFileDialog.getOpenFileName",
+        lambda *a, **k: (str(fin), ""),
+    )
+    dlg = GenerateAllDialog(model, default_task="neb",
+                            project_provider=lambda: project)
+    qtbot.addWidget(dlg)
+    dlg._poscar_panel._on_browse_fin()
+    dlg._poscar_panel._on_interpolate()
+    dlg._on_generate()
+    assert infos and infos[0][1] == "Structure Not Saved"
+    assert project.runs == []
+    assert project.structures == []

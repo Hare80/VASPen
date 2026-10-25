@@ -2665,7 +2665,7 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         </message>
         <message>
             <source>No pseudopotential library configured — set it in Edit → Preferences.</source>
-            <translation>未配置赝势库——请在 编辑 → 偏好设置 中配置。</translation>
+            <translation>未配置赝势库——请在 编辑 → 首选项 中配置。</translation>
         </message>
         <message>
             <source>Registered structure not found.</source>
@@ -2673,11 +2673,11 @@ For BULK structures, use Calculate → Cleave Surface.</source><translation>适�
         </message>
         <message>
             <source>Initial: {}</source>
-            <translation>起点结构：{}</translation>
+            <translation>初始结构：{}</translation>
         </message>
         <message>
             <source>Final: {}</source>
-            <translation>终点结构：{}</translation>
+            <translation>末态结构：{}</translation>
         </message>
         <message>
             <source>Element</source>

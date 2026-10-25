@@ -1985,3 +1985,16 @@ def test_main_window_shrinkable_vertically(window, qtbot):
     window.resize(1100, 700)
     qtbot.wait(50)
     assert window.size().height() == 700
+
+
+def test_welcome_project_activated_opens_project(window, qtbot, tmp_path):
+    """The welcome page's project list is wired into the same open
+    path as the File menu (adopt → panel + recents + MCP tools)."""
+    from vaspen.core.project import Project
+
+    project = Project.create(tmp_path / "proj", "Welcome Demo")
+    window._welcome_page.open_project_requested.emit(str(project.root))
+    qtbot.wait(100)
+    assert window._project is not None
+    assert window._project_panel._header.text() == "Welcome Demo"
+    assert window._config.recent_projects == [str(project.root)]

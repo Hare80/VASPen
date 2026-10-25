@@ -849,3 +849,98 @@ def test_update_run_preserves_potcar_variants(tmp_path):
     assert "# Si_d_variant" in (run_dir / "POTCAR").read_text("utf-8")
     card = json.loads((run_dir / "run.json").read_text("utf-8"))
     assert card["parameters"]["potcar_variants"] == {"Si": "Si_d"}
+
+
+# ----------------------------------------------------------------------
+# Review 2026-10-25 regression pins
+# ----------------------------------------------------------------------
+
+
+def test_create_run_neb_without_images_clean_error(tmp_path):
+    """The neb preset ships IMAGES blank — create_run must refuse UP
+    FRONT (no phantom run registered, no number consumed)."""
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    with pytest.raises(ToolError, match="neb_setup"):
+        mcp_server.create_run("hop", preset="neb")
+    assert project.runs == []  # no phantom entry
+    # numbers were not consumed: the next run is still 001-
+    run = mcp_server.create_run("ok", incar_overrides={})
+    assert run["run"]["id"] == "001-ok"
+
+
+def test_create_run_generation_failure_rolls_back(tmp_path):
+    """Any failure AFTER registration rolls the run back completely —
+    no half-created entries burning run numbers."""
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    with pytest.raises(ToolError, match="[Pp]OTCAR"):
+        mcp_server.create_run(
+            "bad", potcar_library=str(tmp_path / "missing-lib"))
+    assert project.runs == []
+    assert not (tmp_path / "proj" / "runs" / "001-bad").exists()
+    run = mcp_server.create_run("good")
+    assert run["run"]["id"] == "001-good"
+
+
+def test_read_run_file_prefix_sibling_blocked(tmp_path):
+    """String-prefix startswith once let a SIBLING run whose id extends
+    this one (001-scf-old) pass the traversal guard."""
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    run = mcp_server.create_run("scf")
+    sibling = tmp_path / "proj" / "runs" / "001-scf-old"
+    sibling.mkdir()
+    (sibling / "secret.txt").write_text("secret", encoding="utf-8")
+    with pytest.raises(ToolError, match="inside the run directory"):
+        mcp_server.read_run_file("001-scf", "../001-scf-old/secret.txt")
+
+
+def test_neb_setup_run_name_rolls_back_on_failure(tmp_path,
+                                                  vacancy_hop_pair):
+    pi, pf = vacancy_hop_pair
+    init_p, final_p = _write_pair(tmp_path, pi, pf)
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    with pytest.raises(ToolError, match="[Pp]OTCAR"):
+        mcp_server.neb_setup(init_p, final_p, n_images=1,
+                             run_name="hop",
+                             potcar_library=str(tmp_path / "missing-lib"))
+    assert project.runs == []
+
+
+def test_get_run_has_outputs_recursive_for_neb(tmp_path,
+                                                vacancy_hop_pair):
+    pi, pf = vacancy_hop_pair
+    init_p, final_p = _write_pair(tmp_path, pi, pf)
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    result = mcp_server.neb_setup(init_p, final_p, n_images=1,
+                                  run_name="hop")
+    run_id = result["run"]["id"]
+    (project.run_dir(run_id) / "01" / "OSZICAR").write_text(
+        "out", encoding="utf-8")
+    detail = mcp_server.get_run(run_id)
+    assert detail["has_outputs"] is True  # frame output counts now
+
+
+def test_update_run_preserves_poscar_direct(tmp_path):
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    run = mcp_server.create_run("scf", poscar_direct=True)
+    run_id = run["run"]["id"]
+    assert "Direct" in (Path(run["dir"]) / "POSCAR").read_text("utf-8")
+    mcp_server.update_run(run_id)  # no poscar_direct → card value
+    assert "Direct" in (Path(run["dir"]) / "POSCAR").read_text("utf-8")

@@ -247,22 +247,29 @@ def build_nuitka() -> None:
     print("Build complete → dist/main.dist/")
 
 
-def _tracked_examples() -> list[Path]:
-    """Git-TRACKED files under examples/ (release == repository).
+def _tracked_examples(root: Path | None = None) -> list[Path]:
+    """Committed files under examples/ (release == repository).
 
     Personal/untracked demo files that happen to sit in the working
     tree (gitignored local structures) must never ship in the release
-    zip. Falls back to "everything under examples/" only outside a git
-    repository (e.g. building from an exported tarball).
+    zip — and neither may a merely STAGED file (the 2026-10-25
+    incident was exactly an over-broad `git add`), so the listing is
+    taken from HEAD's tree, not the index. Fallbacks: the index (repo
+    without commits yet), then everything under examples/ (no git at
+    all, e.g. building from an exported tarball).
     """
-    try:
-        listing = subprocess.run(
-            ["git", "ls-files", "examples"], cwd=str(ROOT),
-            capture_output=True, text=True, check=True,
-        ).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return sorted((ROOT / "examples").rglob("*"))
-    return [ROOT / rel for rel in listing.splitlines() if rel.strip()]
+    root = root or ROOT
+    for cmd in (["git", "ls-tree", "-r", "HEAD", "--name-only",
+                 "--", "examples"],
+                ["git", "ls-files", "--", "examples"]):
+        try:
+            listing = subprocess.run(
+                cmd, cwd=str(root), capture_output=True, text=True,
+                check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        return [root / rel for rel in listing.splitlines() if rel.strip()]
+    return sorted((root / "examples").rglob("*"))
 
 
 def _bundle_release_files() -> None:

@@ -235,14 +235,20 @@ class Project:
         src = Path(src_path).resolve()
         if not src.exists():
             raise ValueError(f"File not found: {src}")
+        digest = sha256_file(src)
         for entry in self._manifest["structures"]:
             try:
                 registered = self.structure_path(entry["id"]).resolve()
             except ValueError:
                 continue  # registered file deleted — skip, don't crash
             if registered == src:
-                return entry["id"], entry["digest"]
-        digest = sha256_file(src)
+                if entry.get("digest") == digest:
+                    return entry["id"], entry["digest"]
+                # same path, CHANGED content — the registered entry
+                # describes the old material; fall through and register
+                # the new one (a stale digest must never be stamped onto
+                # a run card)
+                break
         for entry in self._manifest["structures"]:
             if entry.get("digest") == digest:
                 return entry["id"], entry["digest"]
@@ -469,6 +475,7 @@ class Project:
             "kpoints_params": kpoints_params or {},
             "functional": functional,
             "potcar_variants": potcar_variants or {},
+            "poscar_direct": bool(poscar_direct),
             **(incar_overrides or {}),
         }, replace=True)
         return files

@@ -351,3 +351,44 @@ def test_forward_retries_once_when_bridge_not_accepting_yet(
     assert result == {"formula": "H2O", "echo": "open_structure"}
     thread.join(5)
     srv.close()
+
+
+def test_forward_never_retries_after_delivery(monkeypatch):
+    """A delivered request must never be retried or fall back to
+    headless — a fake bridge accepts, reads the request, then closes
+    WITHOUT responding: exactly ONE delivery, forward raises ToolError
+    (not UNAVAILABLE)."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from vaspen.utils.config import AppConfig
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    deliveries: list[str] = []
+
+    def _accept_and_vanish():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            with conn:
+                data = conn.recv(65536)
+                if data:
+                    deliveries.append(data.decode("utf-8"))
+                # close without any response
+
+    thread = threading.Thread(target=_accept_and_vanish, daemon=True)
+    thread.start()
+    monkeypatch.setattr(
+        AppConfig, "bridge_port", property(lambda self: port))
+    monkeypatch.setattr(
+        AppConfig, "bridge_token", property(lambda self: "tok"))
+
+    with pytest.raises(ToolError, match="delivered"):
+        forward("make_supercell", {"na": 2, "nb": 1, "nc": 1})
+    time.sleep(0.3)  # let a (wrong) second delivery arrive if retried
+    assert len(deliveries) == 1  # exactly one delivery
+    srv.close()

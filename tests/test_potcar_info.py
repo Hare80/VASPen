@@ -68,3 +68,10 @@ def test_pseudo_hydrogen_inside_h_variant_is_flagged():
 def test_empty_and_garbage_input():
     assert parse_potcar_sections("") == []
     assert parse_potcar_sections("not a potcar at all") == []
+
+
+def test_malformed_titel_without_equals_does_not_crash():
+    text = "    TITEL  PAW_PBE Fe no equals here\n    End of Dataset\n"
+    (section,) = parse_potcar_sections(text)
+    assert section["functional"] == "PAW_PBE"
+    assert section["variant"] == "Fe"

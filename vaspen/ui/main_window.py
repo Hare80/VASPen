@@ -604,6 +604,17 @@ class MainWindow(QMainWindow):
         # its own row). Expanding policy makes it span the full width.
         container.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # The flow caps at 2 rows (resize fix); rows beyond the cap
+        # would CLIP buttons out of view, so the container must never
+        # be narrower than the best two-row split of the buttons.
+        widths = sorted(
+            (btn.sizeHint().width() for btn in self._edit_buttons),
+            reverse=True)
+        rows = [0, 0]
+        for w in widths:
+            i = 1 if rows[1] < rows[0] else 0
+            rows[i] += w + 2  # +h_spacing
+        container.setMinimumWidth(max(rows) + 8)
         self._edit_toolbar = container
         self._central_layout.insertWidget(0, container)
 

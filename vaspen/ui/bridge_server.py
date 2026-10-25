@@ -289,6 +289,13 @@ class BridgeServer(QObject):
         except _REQUEST_EXC as exc:
             logger.warning("bridge tool %s failed: %s", name, exc)
             payload["response"] = {"ok": False, "error": str(exc)}
+        except Exception as exc:
+            # an unmapped exception must still release the worker's
+            # done event — otherwise _dispatch blocks the full
+            # EXEC_TIMEOUT_S and reports a misleading "GUI busy"
+            logger.exception("bridge tool %s crashed", name)
+            payload["response"] = {"ok": False,
+                                   "error": f"{type(exc).__name__}: {exc}"}
         else:
             if isinstance(result, bytes):  # PNG (see tools.py docstring)
                 payload["response"] = {
@@ -308,4 +315,5 @@ class BridgeServer(QObject):
             # without this the GUI would treat its own bridge save as an
             # external change and prompt. Idempotent for all other tools.
             self._window._sync_file_watcher()
-        payload["done"].set()
+        finally:
+            payload["done"].set()

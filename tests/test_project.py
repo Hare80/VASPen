@@ -420,3 +420,17 @@ def test_write_run_inputs_potcar_variants(tmp_path):
     assert "# Si_d_variant" in (run_dir / "POTCAR").read_text("utf-8")
     card = json.loads((run_dir / "run.json").read_text("utf-8"))
     assert card["parameters"]["potcar_variants"] == {"Si": "Si_d"}
+
+
+def test_register_structure_file_changed_content_registers_new(
+        project: Project, tmp_path):
+    """Path match with CHANGED content must NOT return the old entry's
+    stale digest — the file is a different material now."""
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    project.add_structure(src)
+    bulk("Si", "diamond", a=6.0, cubic=True).write(src, format="vasp")
+    sid, digest = project.register_structure_file(src)
+    assert len(project.structures) == 2  # changed file = new material
+    assert digest == sha256_file(src)
+    assert digest != project.structures[0]["digest"]

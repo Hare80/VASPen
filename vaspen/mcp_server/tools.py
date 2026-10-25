@@ -934,38 +934,46 @@ def neb_setup(initial_path: str, final_path: str,
         else:
             out = Path(out_dir)
         written: list[str] = []
-        for idx, frame in enumerate(frames):
-            target = out / f"{idx:02d}" / "POSCAR"
-            target.parent.mkdir(parents=True, exist_ok=True)
-            FileIO.write(str(target), frame,
-                         fixed_flags=neb.constraints_to_fixed_flags(frame))
-            written.append(str(target))
+        try:
+            for idx, frame in enumerate(frames):
+                target = out / f"{idx:02d}" / "POSCAR"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                FileIO.write(str(target), frame,
+                             fixed_flags=neb.constraints_to_fixed_flags(
+                                 frame))
+                written.append(str(target))
 
-        preset = dict(INCAR_PRESETS["neb"])
-        preset.pop("_description", None)
-        preset["IMAGES"] = str(images)
-        _write_text(out / "INCAR",
-                    format_incar_content(
-                        preset, suggestions=INCAR_SUGGESTIONS.get("neb")))
-        written.append(str(out / "INCAR"))
+            preset = dict(INCAR_PRESETS["neb"])
+            preset.pop("_description", None)
+            preset["IMAGES"] = str(images)
+            _write_text(out / "INCAR",
+                        format_incar_content(
+                            preset, suggestions=INCAR_SUGGESTIONS.get("neb")))
+            written.append(str(out / "INCAR"))
 
-        _write_text(out / "KPOINTS",
-                    generate_kpoints_automatic(init.get_cell().array))
-        written.append(str(out / "KPOINTS"))
+            _write_text(out / "KPOINTS",
+                        generate_kpoints_automatic(init.get_cell().array))
+            written.append(str(out / "KPOINTS"))
 
-        library = potcar_library or AppConfig().potcar_library_path
-        potcar_note = None
-        if library:
-            elements = list(dict.fromkeys(init.get_chemical_symbols()))
-            potcar_content, _paths = generate_potcar(elements, library,
-                                                     functional)
-            _write_text(out / "POTCAR", potcar_content)
-            written.append(str(out / "POTCAR"))
-        else:
-            potcar_note = (
-                "POTCAR not written — no pseudopotential library "
-                "configured (pass potcar_library or set it in the VASPen "
-                "GUI preferences).")
+            library = potcar_library or AppConfig().potcar_library_path
+            potcar_note = None
+            if library:
+                elements = list(dict.fromkeys(init.get_chemical_symbols()))
+                potcar_content, _paths = generate_potcar(elements, library,
+                                                         functional)
+                _write_text(out / "POTCAR", potcar_content)
+                written.append(str(out / "POTCAR"))
+            else:
+                potcar_note = (
+                    "POTCAR not written — no pseudopotential library "
+                    "configured (pass potcar_library or set it in the "
+                    "VASPen GUI preferences).")
+        except Exception:
+            if entry is not None:
+                # registered run + half-written inputs is worse than no
+                # run — roll the registration back completely
+                project.remove_run(entry["id"], force=True)
+            raise
 
         response: dict[str, Any] = {
             "ok": True,
@@ -1154,18 +1162,20 @@ def open_project(dir: str) -> dict:
     Args:
         dir: Path to the project folder.
     """
-    if not Path(dir).is_dir():
-        raise FileNotFoundError(f"Folder not found: {dir}")
-    project = _Project.load(dir)
-    PROJECT_REF.set(project)
-    return {"ok": True, **_project_payload(project)}
+    with SESSION.lock:
+        if not Path(dir).is_dir():
+            raise FileNotFoundError(f"Folder not found: {dir}")
+        project = _Project.load(dir)
+        PROJECT_REF.set(project)
+        return {"ok": True, **_project_payload(project)}
 
 
 @tool
 def get_project() -> dict:
     """Summary of the current project: name, structures and runs with
     statuses."""
-    return {"ok": True, **_project_payload(_require_project())}
+    with SESSION.lock:
+        return {"ok": True, **_project_payload(_require_project())}
 
 
 @tool
@@ -1223,6 +1233,16 @@ def create_run(name: str, preset: str = "scf",
             raise ValueError(
                 "The current structure has no source file — save it "
                 "(save_structure) or add_structure_to_project first.")
+        if preset == "neb" and not (incar_overrides or {}).get("IMAGES"):
+            # the neb preset ships IMAGES blank; generate_all_inputs
+            # refuses blank tags — without this check the run would be
+            # registered and THEN fail, leaving a phantom entry
+            raise ValueError(
+                "The neb preset leaves IMAGES blank. Build NEB runs "
+                "with neb_setup(run_name=...), which interpolates the "
+                "frames and fills IMAGES — or pass "
+                "incar_overrides={'IMAGES': '<n>'} if you only want "
+                "the INCAR/KPOINTS/POTCAR skeleton.")
         project = _require_project()
         library = potcar_library or AppConfig().potcar_library_path
         # ensure the current structure is registered in the project —
@@ -1233,14 +1253,21 @@ def create_run(name: str, preset: str = "scf",
         params = {"preset": preset, "kpoints_mode": kpoints_mode,
                   "kpoints_params": kpoints_params or {},
                   "functional": functional,
+                  "poscar_direct": bool(poscar_direct),
                   **(incar_overrides or {})}
         entry = project.add_run(name, preset, params,
                                 structure_id=structure_id,
                                 structure_digest=digest, via="mcp")
-        files, contents = _write_input_set(
-            project.run_dir(entry["id"]), model, preset, incar_overrides,
-            kpoints_mode, kpoints_params, library, functional,
-            poscar_direct)
+        try:
+            files, contents = _write_input_set(
+                project.run_dir(entry["id"]), model, preset, incar_overrides,
+                kpoints_mode, kpoints_params, library, functional,
+                poscar_direct)
+        except Exception:
+            # a half-created run (registered, inputs failed) is worse
+            # than no run — roll the registration back completely
+            project.remove_run(entry["id"], force=True)
+            raise
         response: dict[str, Any] = {
             "ok": True,
             "run": {k: v for k, v in entry.items() if k != "card"},
@@ -1274,9 +1301,10 @@ def set_run_status(run_id: str, status: str) -> dict:
         run_id: Run id from the project (e.g. "001-scf-fe3o4").
         status: One of the whitelisted statuses.
     """
-    project = _require_project()
-    entry = project.set_run_status(run_id, status)
-    return {"ok": True, "run": entry}
+    with SESSION.lock:
+        project = _require_project()
+        entry = project.set_run_status(run_id, status)
+        return {"ok": True, "run": entry}
 
 
 @tool
@@ -1290,9 +1318,10 @@ def delete_run(run_id: str, force: bool = False) -> dict:
         run_id: Run id from the project (see get_project).
         force: Delete even when the run is submitted/running.
     """
-    project = _require_project()
-    project.remove_run(run_id, force=force)
-    return {"ok": True, "deleted": run_id}
+    with SESSION.lock:
+        project = _require_project()
+        project.remove_run(run_id, force=force)
+        return {"ok": True, "deleted": run_id}
 
 
 @tool
@@ -1325,17 +1354,22 @@ def get_run(run_id: str) -> dict:
     Args:
         run_id: Run id from the project (e.g. "001-scf-fe3o4").
     """
-    project = _require_project()
-    entry = dict(project.run_entry(run_id))
-    run_dir = project.run_dir(run_id)
-    files = [str(rel) for rel in project.run_files(run_id)]
-    return {"ok": True,
-            "run": entry,
-            "parameters": project.run_parameters(run_id),
-            "dir": str(run_dir),
-            "files": files,
-            "has_outputs": (run_dir / "CONTCAR").exists()
-                           or (run_dir / "OSZICAR").exists()}
+    with SESSION.lock:
+        project = _require_project()
+        entry = dict(project.run_entry(run_id))
+        run_dir = project.run_dir(run_id)
+        rel_files = project.run_files(run_id)
+        files = [str(rel) for rel in rel_files]
+        # recursive: NEB runs carry their outputs inside the NN/ frame
+        # directories, not at the run root
+        has_outputs = any(f.name in ("CONTCAR", "OSZICAR")
+                          for f in rel_files)
+        return {"ok": True,
+                "run": entry,
+                "parameters": project.run_parameters(run_id),
+                "dir": str(run_dir),
+                "files": files,
+                "has_outputs": has_outputs}
 
 
 @tool
@@ -1351,7 +1385,11 @@ def update_run(run_id: str, preset: str | None = None,
     Only the parameters you pass change; the rest keep their values.
     The run's provenance card records the new parameters. If the run
     directory already contains calculation outputs, they are
-    overwritten — confirm with the user first.
+    overwritten — confirm with the user first. NEB runs always
+    regenerate with the automatic k-mesh (kpoints_mode manual/line
+    apply to single-structure runs) and never touch the frame
+    directories; POTCAR variants parsed from the run's existing POTCAR
+    are preserved.
 
     Args:
         run_id: Run id from the project.
@@ -1378,7 +1416,10 @@ def update_run(run_id: str, preset: str | None = None,
             for section in parse_potcar_sections(
                     existing_potcar.read_text("utf-8",
                                               errors="replace")):
-                if section["elements"]:
+                # skip sections without a parseable variant — an empty
+                # name would later hard-fail generate_potcar instead of
+                # falling back to the recommended default
+                if section["elements"] and section["variant"]:
                     variants[section["elements"][0]] = section["variant"]
         if not variants:
             variants = dict(params.get("potcar_variants") or {})
@@ -1420,7 +1461,8 @@ def update_run(run_id: str, preset: str | None = None,
             or AppConfig().potcar_library_path,
             functional=functional or params.get("functional", "PBE"),
             poscar_direct=bool(poscar_direct)
-            if poscar_direct is not None else False,
+            if poscar_direct is not None else
+            bool(params.get("poscar_direct", False)),
             potcar_variants=variants or None,
         )
         return {"ok": True, "run": dict(project.run_entry(run_id)),
@@ -1444,18 +1486,22 @@ def read_run_file(run_id: str, filename: str,
         max_bytes: Maximum bytes returned (truncated with a note).
     """
     project = _require_project()
-    run_dir = project.run_dir(run_id)
-    target = (run_dir / filename).resolve()
-    if not str(target).startswith(str(run_dir.resolve())):
-        raise ValueError(
-            f"filename must be a path inside the run directory "
-            f"(got {filename!r}).")
-    if not target.is_file():
-        raise FileNotFoundError(
-            f"No file {filename!r} in run {run_id}.")
-    size = target.stat().st_size
-    with open(target, "rb") as handle:
-        data = handle.read(max(1, int(max_bytes)))
+    with SESSION.lock:
+        run_dir = project.run_dir(run_id)
+        run_root = run_dir.resolve()
+        target = (run_dir / filename).resolve()
+        # is_relative_to, NOT string startswith: a sibling run whose id
+        # extends this one (001-scf-old) must not pass the guard
+        if not target.is_relative_to(run_root):
+            raise ValueError(
+                f"filename must be a path inside the run directory "
+                f"(got {filename!r}).")
+        if not target.is_file():
+            raise FileNotFoundError(
+                f"No file {filename!r} in run {run_id}.")
+        size = target.stat().st_size
+        with open(target, "rb") as handle:
+            data = handle.read(max(1, int(max_bytes)))
     text = data.decode("utf-8", errors="replace")
     response: dict[str, Any] = {
         "ok": True,

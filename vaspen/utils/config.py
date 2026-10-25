@@ -29,6 +29,14 @@ class AppConfig:
             cls._instance._settings = QSettings("VASPen", "VASPen")
         return cls._instance
 
+    def qt_settings(self) -> QSettings:
+        """The underlying QSettings. Widgets persisting state (dialog
+        geometry etc.) MUST go through here instead of constructing
+        QSettings directly — the test suite rebinds this singleton to
+        an isolated org/app pair (conftest isolated_config), so direct
+        construction would write the developer's real registry."""
+        return self._settings
+
     # ------------------------------------------------------------------
     # Generic get / set
     # ------------------------------------------------------------------
