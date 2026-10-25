@@ -1209,6 +1209,10 @@ Files used:
 Files used:
 {}</translation>
     </message>
+    <message>
+      <source>pseudo-H</source>
+      <translation>pseudo-H</translation>
+    </message>
   </context>
   <context>
     <name>GenerateAllDialog</name>

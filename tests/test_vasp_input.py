@@ -722,3 +722,24 @@ def test_generate_all_inputs_non_periodic_raises():
         generate_all_inputs(model, kpoints_mode="automatic")
     with pytest.raises(ValueError, match="periodic"):
         generate_all_inputs(model, kpoints_mode="line")
+
+
+def test_generate_potcar_variants_override(tmp_path):
+    lib = _fake_library(tmp_path)
+    d = lib / "PBE.54" / "Fe_pv"
+    d.mkdir()
+    (d / "POTCAR").write_text("POTCAR-Fe_pv\n", encoding="utf-8")
+    content, _ = generate_potcar(["Fe"], lib, "PBE",
+                                 variants={"Fe": "Fe_pv"})
+    assert content == "POTCAR-Fe_pv\n"
+    # elements without an override keep the recommendation
+    content, _ = generate_potcar(["O", "Fe"], lib, "PBE",
+                                 variants={"Fe": "Fe_pv"})
+    assert content == "POTCAR-O\nPOTCAR-Fe_pv\n"
+
+
+def test_generate_potcar_explicit_variant_missing_raises(tmp_path):
+    """An explicit variant must not silently degrade to the default."""
+    lib = _fake_library(tmp_path)
+    with pytest.raises(FileNotFoundError, match="Fe_sv"):
+        generate_potcar(["Fe"], lib, "PBE", variants={"Fe": "Fe_sv"})

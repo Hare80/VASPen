@@ -1222,6 +1222,17 @@ atomate2-style openness — no binary database, git/AI-navigable)::
   (Y = card `parameters.final_structure`) instead of one misleading
   "Structure" — the manifest structure of a NEB run is the initial
   endpoint.
+- **POTCAR alignment (2026-10-25)**: `generate_potcar` accepts
+  `variants: dict[element, variant]` (explicit variant missing →
+  FileNotFoundError — no silent degradation to the recommendation);
+  threaded through `generate_all_inputs` and `write_run_inputs` and
+  recorded on the card as `parameters.potcar_variants`. REGENERATION
+  paths (run editor's Regenerate POTCAR, MCP `update_run`) parse the
+  run's existing POTCAR first, fall back to the card, then defaults —
+  a regenerate never swaps Fe_pv → Fe or drops an *_h pseudo-hydrogen.
+  Generate-side PotcarPanel labels `*_h` variants "V_h (pseudo-H)"
+  with the real directory name mapped beside the display label
+  (MenuButton has no item data).
 
 ---
 

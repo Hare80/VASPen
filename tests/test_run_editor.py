@@ -220,3 +220,31 @@ def test_scf_info_bar_keeps_structure_label(qtbot, project_with_runs):
     qtbot.addWidget(dlg)
     assert dlg._structure_label.text() == "Structure: si"
     assert dlg._final_label is None
+
+
+def test_regen_potcar_preserves_variants(qtbot, project_with_runs,
+                                         tmp_path, monkeypatch):
+    """Regenerating a run's POTCAR keeps its parsed variants (Si_d
+    stays Si_d) instead of degrading to the recommended default."""
+    project = project_with_runs
+    lib = tmp_path / "lib" / "potpaw_PBE.54"
+    for name, tag in (("Si", "Si_plain"), ("Si_d", "Si_d_variant")):
+        d = lib / name
+        d.mkdir(parents=True)
+        (d / "POTCAR").write_text(f"# {tag}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "vaspen.utils.config.AppConfig.potcar_library_path",
+        property(lambda self: str(tmp_path / "lib")))
+    run_dir = project.run_dir("001-scf")
+    (run_dir / "POTCAR").write_text(
+        "    TITEL  = PAW_PBE Si_d 05May2015\n"
+        "    ZVAL   =  4.000\n"
+        "    VRHFIN =Si: 3s2 3p2\n"
+        "    End of Dataset\n", encoding="utf-8")
+    dlg = RunEditorDialog(project, "001-scf")
+    qtbot.addWidget(dlg)
+    dlg._on_regen_potcar()
+    content = (run_dir / "POTCAR").read_text("utf-8")
+    assert "# Si_d_variant" in content
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["parameters"]["potcar_variants"] == {"Si": "Si_d"}

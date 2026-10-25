@@ -391,14 +391,18 @@ class Project:
                          potcar_library: str = "",
                          functional: str = "PBE",
                          poscar_direct: bool = False,
-                         run_type: str = "") -> dict:
+                         run_type: str = "",
+                         potcar_variants: dict | None = None) -> dict:
         """(Re)generate the VASP input files in the run directory from
         ``model`` and record the parameters on the provenance card.
 
         NEB runs (``run_type == "neb"``) only get INCAR/KPOINTS/POTCAR:
         no root POSCAR, frame directories are never touched, and an
         existing IMAGES value in the run's INCAR is preserved (the
-        frame count on disk is authoritative)."""
+        frame count on disk is authoritative). ``potcar_variants``
+        pins the pseudopotential per element (regenerations parse it
+        from the run's existing POTCAR — a regenerate must not
+        silently swap Fe_pv → Fe or drop an *_h pseudo-hydrogen)."""
         from vaspen.core.vasp_input import (
             INCAR_PRESETS,
             format_incar_content,
@@ -434,7 +438,8 @@ class Project:
             }
             if potcar_library:
                 potcar_content, _paths = generate_potcar(
-                    model.unique_symbols, potcar_library, functional)
+                    model.unique_symbols, potcar_library, functional,
+                    variants=potcar_variants)
                 contents["POTCAR"] = potcar_content
         else:
             contents = generate_all_inputs(
@@ -446,6 +451,7 @@ class Project:
                 potcar_library=potcar_library,
                 functional=functional,
                 poscar_direct=poscar_direct,
+                potcar_variants=potcar_variants,
             )
         files: dict[str, str] = {}
         for name, content in contents.items():
@@ -462,6 +468,7 @@ class Project:
             "kpoints_mode": kpoints_mode,
             "kpoints_params": kpoints_params or {},
             "functional": functional,
+            "potcar_variants": potcar_variants or {},
             **(incar_overrides or {}),
         }, replace=True)
         return files

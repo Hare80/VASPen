@@ -1160,6 +1160,10 @@ Files used:
 使用文件：
 {}</translation>
         </message>
+        <message>
+            <source>pseudo-H</source>
+            <translation>赝氢</translation>
+        </message>
     </context>
     <context>
         <name>GenerateAllDialog</name>

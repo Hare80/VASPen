@@ -735,6 +735,7 @@ def generate_potcar(
     elements: list[str],
     potcar_library_path: str | Path,
     functional: str = "PBE",
+    variants: dict[str, str] | None = None,
 ) -> tuple[str, list[str]]:
     """Generate POTCAR content by concatenating individual POTCAR files.
 
@@ -748,6 +749,12 @@ def generate_potcar(
         potcar_library_path: Root path to the pseudopotential library
             (standard VASP pseudopotential layout).
         functional: "LDA", "PBE", or "PW91".
+        variants: Per-element variant override (e.g. {"Fe": "Fe_pv"}).
+            Regeneration paths pass the variants parsed from the run's
+            existing POTCAR so a regenerate never silently swaps
+            Fe_pv → Fe or drops the pseudo-hydrogen of an *_h
+            potential. Elements without an entry use the recommended
+            default.
 
     Returns:
         Tuple of (concatenated POTCAR content, list of file paths used).
@@ -776,19 +783,29 @@ def generate_potcar(
     paths_used: list[str] = []
 
     for element in elements:
-        variant = get_potcar_recommendation(element, functional)
-        potcar_path = potcar_dir / variant / "POTCAR"
+        if variants and element in variants:
+            # an explicit choice must not silently degrade to the
+            # recommendation when the variant directory is missing
+            variant = variants[element]
+            potcar_path = potcar_dir / variant / "POTCAR"
+            if not potcar_path.exists():
+                raise FileNotFoundError(
+                    f"POTCAR variant '{variant}' for {element} not "
+                    f"found.\nTried: {potcar_path}")
+        else:
+            variant = get_potcar_recommendation(element, functional)
+            potcar_path = potcar_dir / variant / "POTCAR"
 
-        if not potcar_path.exists():
-            # Fallback: try without variant suffix
-            potcar_path = potcar_dir / element / "POTCAR"
+            if not potcar_path.exists():
+                # Fallback: try without variant suffix
+                potcar_path = potcar_dir / element / "POTCAR"
 
-        if not potcar_path.exists():
-            raise FileNotFoundError(
-                f"POTCAR for {element} not found.\n"
-                f"Tried: {potcar_dir / variant / 'POTCAR'}\n"
-                f"       {potcar_dir / element / 'POTCAR'}"
-            )
+            if not potcar_path.exists():
+                raise FileNotFoundError(
+                    f"POTCAR for {element} not found.\n"
+                    f"Tried: {potcar_dir / variant / 'POTCAR'}\n"
+                    f"       {potcar_dir / element / 'POTCAR'}"
+                )
 
         with open(potcar_path, "r") as f:
             contents.append(f.read())
@@ -843,6 +860,7 @@ def generate_all_inputs(
     potcar_library: str = "",
     functional: str = "PBE",
     poscar_direct: bool = False,
+    potcar_variants: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Generate all four VASP input files at once.
 
@@ -927,6 +945,7 @@ def generate_all_inputs(
             structure_model.unique_symbols,
             potcar_library,
             functional,
+            variants=potcar_variants,
         )
 
     return {

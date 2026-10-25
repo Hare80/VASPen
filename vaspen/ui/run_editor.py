@@ -321,16 +321,34 @@ class RunEditorDialog(QDialog):
             return
         if not self._confirm_overwrite():
             return
+        # preserve the run's POTCAR variants (Fe_pv stays Fe_pv; an
+        # *_h pseudo-hydrogen is not silently dropped): parse the
+        # existing file, fall back to the card, then defaults
+        run_dir = self._project.run_dir(self._run_id)
+        variants: dict = {}
+        potcar = run_dir / "POTCAR"
+        if potcar.exists():
+            for section in parse_potcar_sections(
+                    potcar.read_text("utf-8", errors="replace")):
+                if section["elements"]:
+                    variants[section["elements"][0]] = section["variant"]
+        if not variants:
+            variants = dict(self._project.run_parameters(
+                self._run_id).get("potcar_variants") or {})
         try:
             content, _paths = generate_potcar(
                 self._structure_model.unique_symbols, library,
                 self._project.run_parameters(self._run_id).get(
-                    "functional", "PBE"))
+                    "functional", "PBE"),
+                variants=variants or None)
         except Exception as exc:
             QMessageBox.critical(self, self.tr("POTCAR"), str(exc))
             return
         (self._project.run_dir(self._run_id) / "POTCAR").write_text(
             content, encoding="utf-8", newline="\n")
+        if variants:
+            self._project.update_run_parameters(
+                self._run_id, {"potcar_variants": variants})
         self._project.add_edition(self._run_id, "gui")
         self._load()
 

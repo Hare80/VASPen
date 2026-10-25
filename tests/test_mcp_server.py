@@ -817,3 +817,35 @@ def test_create_run_neb_writes_no_root_poscar(tmp_path):
     assert "neb_setup" in run["poscar_note"]
     assert (run_dir / "INCAR").exists()
     assert (run_dir / "KPOINTS").exists()
+
+
+def test_update_run_preserves_potcar_variants(tmp_path):
+    """update_run parses the run's existing POTCAR variants and pins
+    them — a regenerate never silently swaps Si_d → Si."""
+    project = Project.create(tmp_path / "proj", "T")
+    mcp_tools.PROJECT_REF.set(project)
+    lib = tmp_path / "lib" / "potpaw_PBE.54"
+    for name, tag in (("Si", "Si_plain"), ("Si_d", "Si_d_variant")):
+        d = lib / name
+        d.mkdir(parents=True)
+        (d / "POTCAR").write_text(f"# {tag}\n", encoding="utf-8")
+    f = tmp_path / "si.vasp"
+    _si_diamond_cubic().write(f, format="vasp")
+    mcp_server.open_structure(str(f))
+    run = mcp_server.create_run("scf", potcar_library=str(tmp_path / "lib"))
+    run_id = run["run"]["id"]
+    run_dir = Path(run["dir"])
+    assert "# Si_plain" in (run_dir / "POTCAR").read_text("utf-8")
+
+    # the run's POTCAR was made with Si_d (e.g. by hand or an older
+    # generation) — update_run must keep that variant
+    (run_dir / "POTCAR").write_text(
+        "    TITEL  = PAW_PBE Si_d 05May2015\n"
+        "    ZVAL   =  4.000\n"
+        "    VRHFIN =Si: 3s2 3p2\n"
+        "    End of Dataset\n", encoding="utf-8")
+    mcp_server.update_run(run_id,
+                      potcar_library=str(tmp_path / "lib"))
+    assert "# Si_d_variant" in (run_dir / "POTCAR").read_text("utf-8")
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["parameters"]["potcar_variants"] == {"Si": "Si_d"}

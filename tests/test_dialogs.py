@@ -1652,3 +1652,31 @@ def test_surface_dialog_destroyed_mid_compute_no_crash(qtbot, srtio3,
     qtbot.addWidget(dlg2)
     _wait_slabs(qtbot, dlg2, view2, 1)
     assert all(dlg2._slab_infos)
+
+
+def test_potcar_panel_flags_pseudo_h_variants(qtbot, tmp_path):
+    """*_h variants are labelled (they embed a pseudo-hydrogen); the
+    directory name rides in userData so the decoration never reaches
+    the filesystem path."""
+    from vaspen.ui.potcar_dialog import PotcarPanel
+
+    lib = tmp_path / "potlib" / "potpaw_PBE.54"
+    for name, tag in (("V", "V_plain"), ("V_h", "V_with_pseudo_h")):
+        d = lib / name
+        d.mkdir(parents=True)
+        (d / "POTCAR").write_text(f"# {tag}\n", encoding="utf-8")
+    m = StructureModel()
+    m.load_atoms(Atoms("V", positions=[[2.0, 2.0, 2.0]],
+                       cell=[4.0, 4.0, 4.0], pbc=True))
+    panel = PotcarPanel(m)
+    qtbot.addWidget(panel)
+    panel._path_edit.setText(str(lib))
+    panel._refresh_elements()
+
+    panel._path_edit.setText(str(tmp_path / "potlib"))
+    panel._refresh_elements()
+    combo = panel._element_combos["V"]
+    assert combo.currentText() == "V"  # first (no V_sv in this lib)
+    assert combo.findText("V_h (pseudo-H)") >= 0
+    combo.setCurrentIndex(combo.findText("V_h (pseudo-H)"))
+    assert "# V_with_pseudo_h" in panel.generate_content()

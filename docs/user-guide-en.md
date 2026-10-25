@@ -488,6 +488,10 @@ my-project/
   pseudo-hydrogen embedded in `*_h` transition-metal potentials is
   flagged explicitly (pseudo-H) — it is not a real hydrogen of your
   structure. NEB runs show Initial/Final structures in the info bar.
+  Regenerate POTCAR keeps the run's current per-element variants
+  (Fe_pv stays Fe_pv; an *_h pseudo-hydrogen is never dropped), and
+  the Generate dialog's variant dropdowns label *_h entries as
+  "pseudo-H".
 - **Create runs straight from the Generate All dialog**: pick
   "Current project (new run)" at the bottom (an editable run name is
   provided) and click Generate — the structure (for NEB: both

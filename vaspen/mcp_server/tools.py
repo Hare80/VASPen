@@ -42,6 +42,7 @@ from vaspen.core.file_io import (
     resolve_format,
 )
 from vaspen.core.structure import StructureModel
+from vaspen.core.potcar_info import parse_potcar_sections
 from vaspen.core.surface import SurfaceCutter
 from vaspen.core.surface import rebox_slab as _rebox_slab
 from vaspen.core.vasp_input import (
@@ -1368,6 +1369,19 @@ def update_run(run_id: str, preset: str | None = None,
         entry = project.run_entry(run_id)
         params = project.run_parameters(run_id)
         run_type = entry.get("type", "")
+        # preserve the run's POTCAR variants (parse the existing file,
+        # fall back to the card) — a regenerate must not silently swap
+        # Fe_pv → Fe or drop an *_h pseudo-hydrogen
+        variants: dict[str, str] = {}
+        existing_potcar = project.run_dir(run_id) / "POTCAR"
+        if existing_potcar.exists():
+            for section in parse_potcar_sections(
+                    existing_potcar.read_text("utf-8",
+                                              errors="replace")):
+                if section["elements"]:
+                    variants[section["elements"][0]] = section["variant"]
+        if not variants:
+            variants = dict(params.get("potcar_variants") or {})
         if run_type == "neb":
             # NEB runs have no single-structure POSCAR semantics —
             # frames are authoritative. INCAR/KPOINTS/POTCAR only,
@@ -1385,7 +1399,8 @@ def update_run(run_id: str, preset: str | None = None,
                 or AppConfig().potcar_library_path,
                 functional=functional or params.get("functional",
                                                      "PBE"),
-                run_type="neb")
+                run_type="neb",
+                potcar_variants=variants or None)
             return {"ok": True, "run": dict(project.run_entry(run_id)),
                     "parameters": project.run_parameters(run_id),
                     "files": files,
@@ -1406,6 +1421,7 @@ def update_run(run_id: str, preset: str | None = None,
             functional=functional or params.get("functional", "PBE"),
             poscar_direct=bool(poscar_direct)
             if poscar_direct is not None else False,
+            potcar_variants=variants or None,
         )
         return {"ok": True, "run": dict(project.run_entry(run_id)),
                 "parameters": project.run_parameters(run_id),

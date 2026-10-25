@@ -159,7 +159,8 @@ class PotcarPanel(QWidget):
         self._paths_used = []
 
         for el, combo in self._element_combos.items():
-            variant = combo.currentText()
+            variant = getattr(combo, "_variant_by_label", {}).get(
+                combo.currentText(), combo.currentText())
             potcar_path = potcar_dir / variant / "POTCAR"
             if not potcar_path.exists():
                 # Fallback: try element name
@@ -255,9 +256,23 @@ class PotcarPanel(QWidget):
                     v = el + suffix
                     if v not in variants:
                         variants.append(v)
-            combo.addItems(variants)
+            # display text flags *_h variants (they embed a pseudo-
+            # hydrogen); MenuButton has no item data, so the label →
+            # variant mapping rides on the combo — the decorated label
+            # must never reach the filesystem path
+            labels: dict[str, str] = {}
+            for variant in variants:
+                label = (f"{variant} ({self.tr('pseudo-H')})"
+                         if variant.endswith("_h") else variant)
+                labels[label] = variant
+                combo.addItem(label)
+            combo._variant_by_label = labels
             # Pre-select the wiki-recommended default when available
-            idx = combo.findText(get_potcar_recommendation(el, functional))
+            recommendation = get_potcar_recommendation(el, functional)
+            recommendation_label = next(
+                (lab for lab, var in labels.items()
+                 if var == recommendation), recommendation)
+            idx = combo.findText(recommendation_label)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
             self._elements_layout.addRow(f"{el}:", combo)
@@ -280,7 +295,8 @@ class PotcarPanel(QWidget):
         lines.append("")
 
         for el, combo in self._element_combos.items():
-            variant = combo.currentText()
+            variant = getattr(combo, "_variant_by_label", {}).get(
+                combo.currentText(), combo.currentText())
             expected_path = version_dir / variant / "POTCAR"
             exists = "✓" if expected_path.exists() else "✗"
             lines.append(f"{exists} {el}: {variant}  →  {expected_path}")

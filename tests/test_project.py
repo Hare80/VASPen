@@ -393,3 +393,30 @@ def test_write_run_inputs_neb_preserves_frames_and_images(project: Project,
     for i in range(5):
         assert (run_dir / f"{i:02d}" / "POSCAR").read_text("utf-8") == \
             "frame"
+
+
+def test_write_run_inputs_potcar_variants(tmp_path):
+    """Regeneration honours per-element variants and records them on
+    the provenance card."""
+    from vaspen.core.structure import StructureModel
+
+    lib = tmp_path / "lib" / "potpaw_PBE.54"
+    for name, tag in (("Si", "Si_plain"), ("Si_d", "Si_d_variant")):
+        d = lib / name
+        d.mkdir(parents=True)
+        (d / "POTCAR").write_text(f"# {tag}\n", encoding="utf-8")
+    src = tmp_path / "si.vasp"
+    bulk("Si", "diamond", a=5.43, cubic=True).write(src, format="vasp")
+    project = Project.create(tmp_path / "proj", "T")
+    s_entry = project.add_structure(src)
+    r = project.add_run("scf", "scf", {}, s_entry["id"], "sha256:x", "gui")
+    model = StructureModel()
+    model.load(src)
+    project.write_run_inputs(
+        r["id"], model, preset="scf",
+        potcar_library=str(tmp_path / "lib"),
+        potcar_variants={"Si": "Si_d"})
+    run_dir = project.run_dir(r["id"])
+    assert "# Si_d_variant" in (run_dir / "POTCAR").read_text("utf-8")
+    card = json.loads((run_dir / "run.json").read_text("utf-8"))
+    assert card["parameters"]["potcar_variants"] == {"Si": "Si_d"}
